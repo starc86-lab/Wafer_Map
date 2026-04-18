@@ -15,7 +15,7 @@ from PySide6.QtCore import QMimeData, QPoint, QRectF, Qt
 from PySide6.QtGui import QImage, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QHeaderView, QLabel, QMenu,
-    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QStackedLayout, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from core import settings as settings_io
@@ -73,13 +73,29 @@ class WaferCell(QWidget):
         self._title.setStyleSheet("font-weight: bold;")
         lay.addWidget(self._title)
 
-        # 차트 컨테이너 — 2D PlotWidget 또는 3D GLViewWidget 으로 동적 교체
+        # 차트 컨테이너 — 2D/3D 위젯 둘 다 미리 생성, QStackedLayout으로 인덱스만 토글
+        # 효과: 토글 즉시 swap (위젯 파괴/생성 없음), 첫 3D 진입 시 깜빡임 제거
         self._chart_box = QWidget()
         self._chart_box.setMinimumSize(280, 280)
-        self._chart_box_layout = QVBoxLayout(self._chart_box)
+        self._chart_box_layout = QStackedLayout(self._chart_box)
         self._chart_box_layout.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(self._chart_box, stretch=1)
-        self._chart_widget: QWidget | None = None  # PlotWidget or GLViewWidget
+
+        self._plot_2d = pg.PlotWidget()
+        self._plot_2d.setBackground("w")
+        self._plot_2d.setAspectLocked(True)
+        self._plot_2d.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._plot_2d.customContextMenuRequested.connect(self._show_plot_menu)
+        self._chart_box_layout.addWidget(self._plot_2d)  # index 0
+
+        self._gl_3d = gl.GLViewWidget()
+        self._gl_3d.setBackgroundColor("w")
+        self._gl_3d.setCameraPosition(distance=480, elevation=28, azimuth=135)
+        self._gl_3d.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._gl_3d.customContextMenuRequested.connect(self._show_plot_menu)
+        self._chart_box_layout.addWidget(self._gl_3d)    # index 1
+
+        self._chart_widget: QWidget = self._plot_2d  # 활성 위젯 추적
 
         self._table = QTableWidget(4, 2)
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -97,7 +113,33 @@ class WaferCell(QWidget):
         self._x_in = np.array([])
         self._y_in = np.array([])
         self._v_in = np.array([])
+        # 캐시 — 한 번 그려진 모드는 재계산 없이 인덱스 토글만
+        self._rendered_2d = False
+        self._rendered_3d = False
         self._render()
+
+    # ── 외부 API ───────────────────────────────────
+    @property
+    def display(self) -> WaferDisplay:
+        return self._display
+
+    def set_view_mode(self, mode: str) -> None:
+        """View 토글 — 첫 진입이면 그리고 캐시, 캐시 있으면 인덱스만 토글(0ms)."""
+        if mode == self._view_mode:
+            return
+        self._view_mode = mode
+        self._activate_current_view()
+
+    def invalidate_3d(self) -> None:
+        """3D 캐시만 무효화 — z_range 변경 등 3D만 영향받을 때.
+
+        현재 view가 3D면 즉시 재렌더, 2D면 다음 3D 진입 시 그림.
+        2D 캐시는 그대로 유지.
+        """
+        self._rendered_3d = False
+        self._reset_3d_items()
+        if self._view_mode == "3D":
+            self._activate_current_view()
 
     # ── 렌더 ────────────────────────────────────────
     def _render(self) -> None:
@@ -113,51 +155,62 @@ class WaferCell(QWidget):
         x_in, y_in, v_in, _ = filter_in_wafer(x_mm, y_mm, v)
         self._x_in, self._y_in, self._v_in = x_in, y_in, v_in
 
-        self._clear_chart()
+        # 데이터/설정이 바뀌었으니 양쪽 캐시 무효화
+        self._rendered_2d = False
+        self._rendered_3d = False
+        self._reset_2d_items()
+        self._reset_3d_items()
+
         settings = settings_io.load_settings()
-        if v_in.size == 0:
-            self._update_table(v_in, settings.get("table", {}))
-            return
-
-        if self._view_mode == "3D":
-            self._render_3d(x_in, y_in, v_in, settings)
-        else:
-            self._render_2d(x_in, y_in, v_in, settings)
-
         self._update_table(v_in, settings.get("table", {}))
+        self._activate_current_view()
 
-    def _clear_chart(self) -> None:
-        while self._chart_box_layout.count():
-            it = self._chart_box_layout.takeAt(0)
-            w = it.widget()
-            if w is not None:
-                w.setParent(None)
-                w.deleteLater()
-        self._chart_widget = None
+    def _activate_current_view(self) -> None:
+        """현재 _view_mode 인덱스로 stack 토글, 캐시 없으면 그때 한 번 그림."""
+        settings = settings_io.load_settings()
+        if self._view_mode == "3D":
+            self._chart_box_layout.setCurrentIndex(1)
+            self._chart_widget = self._gl_3d
+            if not self._rendered_3d and self._v_in.size > 0:
+                self._render_3d(self._x_in, self._y_in, self._v_in, settings)
+                self._rendered_3d = True
+        else:
+            self._chart_box_layout.setCurrentIndex(0)
+            self._chart_widget = self._plot_2d
+            if not self._rendered_2d and self._v_in.size > 0:
+                self._render_2d(self._x_in, self._y_in, self._v_in, settings)
+                self._rendered_2d = True
 
-    def _interp_grid(self, x_in, y_in, v_in, chart2d):
+    def _reset_2d_items(self) -> None:
+        """plot 안의 모든 item 제거 (위젯 자체는 유지)."""
+        self._plot_2d.getPlotItem().clear()
+
+    def _reset_3d_items(self) -> None:
+        """GLViewWidget 안의 모든 item 제거 (위젯 자체는 유지)."""
+        for it in list(self._gl_3d.items):
+            self._gl_3d.removeItem(it)
+
+    def _interp_grid(self, x_in, y_in, v_in, common):
         """공통 보간: (XG, YG, ZG, inside, xg, yg) 반환."""
-        G = int(chart2d.get("grid_resolution", 200))
+        G = int(common.get("grid_resolution", 200))
         xg = np.linspace(-WAFER_RADIUS_MM, WAFER_RADIUS_MM, G)
         yg = np.linspace(-WAFER_RADIUS_MM, WAFER_RADIUS_MM, G)
         XG, YG = np.meshgrid(xg, yg, indexing="ij")
-        method = chart2d.get("interp_method", "rbf")
+        method = common.get("interp_method", "rbf")
         ZG = interpolate_wafer(x_in, y_in, v_in, XG, YG, method=method)
         inside = XG * XG + YG * YG <= WAFER_RADIUS_MM * WAFER_RADIUS_MM
         return XG, YG, ZG, inside, xg, yg
 
     def _render_2d(self, x_in, y_in, v_in, settings) -> None:
+        common = settings.get("chart_common", {})
         chart = settings.get("chart_2d", {})
-        XG, YG, ZG, inside, xg, yg = self._interp_grid(x_in, y_in, v_in, chart)
+        XG, YG, ZG, inside, xg, yg = self._interp_grid(x_in, y_in, v_in, common)
         ZG = np.where(inside, ZG, np.nan)
 
-        plot = pg.PlotWidget()
-        plot.setBackground("w")
-        plot.setAspectLocked(True)
-        plot.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        plot.customContextMenuRequested.connect(self._show_plot_menu)
+        plot = self._plot_2d
+        self._reset_2d_items()
 
-        cmap_name = chart.get("colormap", "CET-L17")
+        cmap_name = common.get("colormap", "CET-L17")
         img = pg.ImageItem(ZG)
         img.setRect(QRectF(
             -WAFER_RADIUS_MM, -WAFER_RADIUS_MM,
@@ -167,7 +220,7 @@ class WaferCell(QWidget):
         img.setLookupTable(cmap.getLookupTable())
         plot.addItem(img)
 
-        if chart.get("show_circle", True):
+        if common.get("show_circle", True):
             theta = np.linspace(0, 2 * np.pi, BOUNDARY_SEGMENTS)
             plot.plot(
                 WAFER_RADIUS_MM * np.cos(theta),
@@ -195,14 +248,11 @@ class WaferCell(QWidget):
                 txt.setPos(float(x), float(y))
                 plot.addItem(txt)
 
-        self._chart_box_layout.addWidget(plot)
-        self._chart_widget = plot
-
     def _render_3d(self, x_in, y_in, v_in, settings) -> None:
+        common = settings.get("chart_common", {})
         chart3d = settings.get("chart_3d", {})
-        chart2d = settings.get("chart_2d", {})  # 보간 / 격자 / 경계 원 옵션 공유
 
-        XG, YG, ZG, inside, xg, yg = self._interp_grid(x_in, y_in, v_in, chart2d)
+        XG, YG, ZG, inside, xg, yg = self._interp_grid(x_in, y_in, v_in, common)
 
         # Z 범위 (공통 스케일이면 display.z_range, 아니면 자체 데이터)
         if self._display.z_range is not None:
@@ -227,8 +277,8 @@ class WaferCell(QWidget):
         z_disp = (ZG - vmin) * factor
         z_disp = np.where(inside, z_disp, 0.0)
 
-        # 컬러: 정점마다 RGBA
-        cmap_name = chart3d.get("colormap", "CET-L17")
+        # 컬러: 정점마다 RGBA (공통 컬러맵)
+        cmap_name = common.get("colormap", "CET-L17")
         cmap = pg.colormap.get(cmap_name) or pg.colormap.get("viridis")
         lut = cmap.getLookupTable(0.0, 1.0, 256)  # (256, 4) ubyte
         norm = (ZG - vmin) / z_range
@@ -239,12 +289,8 @@ class WaferCell(QWidget):
         colors[..., 3] = 1.0
         colors[~inside] = (1.0, 1.0, 1.0, 0.0)
 
-        gview = gl.GLViewWidget()
-        gview.setBackgroundColor("w")
-        gview.setMinimumSize(280, 280)
-        gview.setCameraPosition(distance=480, elevation=28, azimuth=135)
-        gview.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        gview.customContextMenuRequested.connect(self._show_plot_menu)
+        gview = self._gl_3d
+        self._reset_3d_items()
 
         if chart3d.get("show_grid", True):
             grid = gl.GLGridItem()
@@ -252,11 +298,6 @@ class WaferCell(QWidget):
             grid.setSpacing(x=50, y=50)
             grid.setColor((140, 140, 140, 200))
             gview.addItem(grid)
-
-        if chart3d.get("show_axes", False):
-            axis = gl.GLAxisItem()
-            axis.setSize(x=150, y=150, z=80)
-            gview.addItem(axis)
 
         surf = gl.GLSurfacePlotItem(
             x=xg, y=yg, z=z_disp.astype(np.float32),
@@ -268,7 +309,7 @@ class WaferCell(QWidget):
         )
         gview.addItem(surf)
 
-        if chart2d.get("show_circle", True):
+        if common.get("show_circle", True):
             theta = np.linspace(0, 2 * np.pi, BOUNDARY_SEGMENTS)
             circ = np.column_stack([
                 WAFER_RADIUS_MM * np.cos(theta),
@@ -281,9 +322,6 @@ class WaferCell(QWidget):
                 antialias=True, glOptions="opaque",
             )
             gview.addItem(line)
-
-        self._chart_box_layout.addWidget(gview)
-        self._chart_widget = gview
 
     def _update_table(self, v: np.ndarray, tbl_cfg: dict) -> None:
         decimals = int(tbl_cfg.get("decimals", 3))

@@ -45,12 +45,35 @@ def load_settings() -> dict[str, Any]:
         try:
             with path.open("r", encoding="utf-8") as f:
                 loaded = json.load(f)
+            _migrate_chart_common(loaded)
             _cache = _merge_defaults(loaded, DEFAULT_SETTINGS)
             return _cache
         except Exception:
             pass
     _cache = copy.deepcopy(DEFAULT_SETTINGS)
     return _cache
+
+
+def _migrate_chart_common(loaded: dict[str, Any]) -> None:
+    """구 settings(chart_2d/chart_3d에 공통 키 보유) → chart_common 키로 이동.
+
+    호환성 1회 마이그레이션. 다음 Save 시 정리됨.
+    """
+    common_keys = ("colormap", "interp_method", "grid_resolution", "show_circle")
+    common = loaded.setdefault("chart_common", {})
+    for src in ("chart_2d", "chart_3d"):
+        block = loaded.get(src)
+        if not isinstance(block, dict):
+            continue
+        for k in common_keys:
+            if k in block and k not in common:
+                common[k] = block[k]
+            block.pop(k, None)
+    # 3D 전용에서 더 이상 안 쓰는 키 정리
+    c3d = loaded.get("chart_3d")
+    if isinstance(c3d, dict):
+        c3d.pop("z_scale_mode", None)
+        c3d.pop("show_axes", None)
 
 
 def save_settings(settings: dict[str, Any]) -> None:

@@ -177,22 +177,46 @@ class UiSettingsCard(QGroupBox):
             "window_save_enabled": self.chk_save_window.isChecked(),
         }
 
+    def reload(self, settings: dict[str, Any]) -> None:
+        """위젯 값을 settings로 갱신. 마지막에 changed 한 번만 emit."""
+        widgets = (self.cb_theme, self.cb_font, self.cb_scale, self.chk_save_window)
+        for w in widgets:
+            w.blockSignals(True)
+        try:
+            idx = self.cb_theme.findText(settings.get("theme", "Light"))
+            if idx >= 0:
+                self.cb_theme.setCurrentIndex(idx)
+            idx = self.cb_font.findText(settings.get("font", "Segoe UI"))
+            if idx >= 0:
+                self.cb_font.setCurrentIndex(idx)
+            target_scale = float(settings.get("font_scale", 1.0) or 1.0)
+            best_i, best_d = 0, float("inf")
+            for i in range(self.cb_scale.count()):
+                d = abs(target_scale - float(self.cb_scale.itemData(i)))
+                if d < best_d:
+                    best_d, best_i = d, i
+            self.cb_scale.setCurrentIndex(best_i)
+            self.chk_save_window.setChecked(bool(settings.get("window_save_enabled", True)))
+        finally:
+            for w in widgets:
+                w.blockSignals(False)
+        self.changed.emit()
+
 
 # ────────────────────────────────────────────────────────
 # Graph 설정 카드 — 2D / 3D 서브그룹
 # ────────────────────────────────────────────────────────
 INTERP_METHODS = ["rbf", "cubic", "cubic_nearest", "phantom_ring"]
 SHADING_MODES = ["shaded", "normalColor", "heightColor"]  # pyqtgraph.opengl 지원 셰이더
-Z_SCALE_MODES = ["common", "individual"]
 
 
-class Chart2DGroup(QGroupBox):
-    """2D MAP 옵션 — 변경 즉시 `changed` 시그널 emit."""
+class ChartCommonGroup(QGroupBox):
+    """MAP 공통 설정 — 2D/3D 양쪽에 적용. 변경 즉시 `changed` emit."""
 
     changed = Signal()
 
     def __init__(self, cfg: dict[str, Any], parent: QWidget | None = None) -> None:
-        super().__init__("2D MAP 설정", parent)
+        super().__init__("MAP 공통 설정", parent)
 
         self.cb_cmap = _limit_width(QComboBox())
         self.cb_cmap.addItems(HEATMAP_COLORMAPS)
@@ -206,11 +230,63 @@ class Chart2DGroup(QGroupBox):
         if idx >= 0:
             self.cb_interp.setCurrentIndex(idx)
 
+        self.cb_grid = _limit_width(QComboBox())
+        for v in (100, 150, 200, 250, 300, 400):
+            self.cb_grid.addItem(str(v), v)
+        idx = self.cb_grid.findData(int(cfg.get("grid_resolution", 200)))
+        self.cb_grid.setCurrentIndex(idx if idx >= 0 else 2)
+
+        self.chk_circle = _fix_width(QCheckBox())
+        self.chk_circle.setChecked(bool(cfg.get("show_circle", True)))
+
+        _populate_two_columns(self, [
+            ("컬러맵", self.cb_cmap),
+            ("보간 방법", self.cb_interp),
+            ("격자 해상도", self.cb_grid),
+            ("경계 원", self.chk_circle),
+        ])
+
+        self.cb_cmap.currentIndexChanged.connect(self.changed)
+        self.cb_interp.currentIndexChanged.connect(self.changed)
+        self.cb_grid.currentIndexChanged.connect(self.changed)
+        self.chk_circle.toggled.connect(self.changed)
+
+    def gather(self) -> dict[str, Any]:
+        return {
+            "colormap": self.cb_cmap.currentText(),
+            "interp_method": self.cb_interp.currentText(),
+            "grid_resolution": int(self.cb_grid.currentData()),
+            "show_circle": self.chk_circle.isChecked(),
+        }
+
+    def reload(self, cfg: dict[str, Any]) -> None:
+        widgets = (self.cb_cmap, self.cb_interp, self.cb_grid, self.chk_circle)
+        for w in widgets:
+            w.blockSignals(True)
+        try:
+            idx = self.cb_cmap.findText(cfg.get("colormap", "CET-L17"))
+            if idx >= 0: self.cb_cmap.setCurrentIndex(idx)
+            idx = self.cb_interp.findText(cfg.get("interp_method", "rbf"))
+            if idx >= 0: self.cb_interp.setCurrentIndex(idx)
+            idx = self.cb_grid.findData(int(cfg.get("grid_resolution", 200)))
+            if idx >= 0: self.cb_grid.setCurrentIndex(idx)
+            self.chk_circle.setChecked(bool(cfg.get("show_circle", True)))
+        finally:
+            for w in widgets:
+                w.blockSignals(False)
+        self.changed.emit()
+
+
+class Chart2DGroup(QGroupBox):
+    """2D MAP 전용 — 측정점/점 크기/라벨. 변경 즉시 `changed` emit."""
+
+    changed = Signal()
+
+    def __init__(self, cfg: dict[str, Any], parent: QWidget | None = None) -> None:
+        super().__init__("2D MAP 설정", parent)
+
         self.chk_points = _fix_width(QCheckBox())
         self.chk_points.setChecked(bool(cfg.get("show_points", True)))
-
-        self.chk_value_labels = _fix_width(QCheckBox())
-        self.chk_value_labels.setChecked(bool(cfg.get("show_value_labels", False)))
 
         self.cb_point = _limit_width(QComboBox())
         for v in (1, 2, 3, 4, 6, 8, 10, 12):
@@ -218,44 +294,39 @@ class Chart2DGroup(QGroupBox):
         idx = self.cb_point.findData(int(cfg.get("point_size", 4)))
         self.cb_point.setCurrentIndex(idx if idx >= 0 else 3)
 
-        self.chk_circle = _fix_width(QCheckBox())
-        self.chk_circle.setChecked(bool(cfg.get("show_circle", True)))
-
-        self.cb_grid = _limit_width(QComboBox())
-        for v in (100, 150, 200, 250, 300, 400):
-            self.cb_grid.addItem(str(v), v)
-        idx = self.cb_grid.findData(int(cfg.get("grid_resolution", 200)))
-        self.cb_grid.setCurrentIndex(idx if idx >= 0 else 2)
+        self.chk_value_labels = _fix_width(QCheckBox())
+        self.chk_value_labels.setChecked(bool(cfg.get("show_value_labels", False)))
 
         _populate_two_columns(self, [
-            ("컬러맵", self.cb_cmap),
-            ("보간 방법", self.cb_interp),
             ("측정점 표시", self.chk_points),
-            ("라벨 표시", self.chk_value_labels),
             ("점 크기", self.cb_point),
-            ("경계 원", self.chk_circle),
-            ("격자 해상도", self.cb_grid),
+            ("라벨 표시", self.chk_value_labels),
         ])
 
-        # 즉시 반영
-        self.cb_cmap.currentIndexChanged.connect(self.changed)
-        self.cb_interp.currentIndexChanged.connect(self.changed)
         self.chk_points.toggled.connect(self.changed)
-        self.chk_value_labels.toggled.connect(self.changed)
         self.cb_point.currentIndexChanged.connect(self.changed)
-        self.chk_circle.toggled.connect(self.changed)
-        self.cb_grid.currentIndexChanged.connect(self.changed)
+        self.chk_value_labels.toggled.connect(self.changed)
 
     def gather(self) -> dict[str, Any]:
         return {
-            "colormap": self.cb_cmap.currentText(),
-            "interp_method": self.cb_interp.currentText(),
             "show_points": self.chk_points.isChecked(),
-            "show_value_labels": self.chk_value_labels.isChecked(),
             "point_size": int(self.cb_point.currentData()),
-            "show_circle": self.chk_circle.isChecked(),
-            "grid_resolution": int(self.cb_grid.currentData()),
+            "show_value_labels": self.chk_value_labels.isChecked(),
         }
+
+    def reload(self, cfg: dict[str, Any]) -> None:
+        widgets = (self.chk_points, self.cb_point, self.chk_value_labels)
+        for w in widgets:
+            w.blockSignals(True)
+        try:
+            self.chk_points.setChecked(bool(cfg.get("show_points", True)))
+            idx = self.cb_point.findData(int(cfg.get("point_size", 4)))
+            if idx >= 0: self.cb_point.setCurrentIndex(idx)
+            self.chk_value_labels.setChecked(bool(cfg.get("show_value_labels", False)))
+        finally:
+            for w in widgets:
+                w.blockSignals(False)
+        self.changed.emit()
 
 
 class Chart3DGroup(QGroupBox):
@@ -265,12 +336,6 @@ class Chart3DGroup(QGroupBox):
 
     def __init__(self, cfg: dict[str, Any], parent: QWidget | None = None) -> None:
         super().__init__("3D MAP 설정", parent)
-
-        self.cb_cmap = _limit_width(QComboBox())
-        self.cb_cmap.addItems(HEATMAP_COLORMAPS)
-        idx = self.cb_cmap.findText(cfg.get("colormap", "CET-L17"))
-        if idx >= 0:
-            self.cb_cmap.setCurrentIndex(idx)
 
         self.cb_shading = _limit_width(QComboBox())
         self.cb_shading.addItems(SHADING_MODES)
@@ -295,48 +360,51 @@ class Chart3DGroup(QGroupBox):
                 idx = 0
             self.cb_zexag.setCurrentIndex(idx if idx >= 0 else 0)
 
-        self.cb_zmode = _limit_width(QComboBox())
-        self.cb_zmode.addItems(Z_SCALE_MODES)
-        idx = self.cb_zmode.findText(cfg.get("z_scale_mode", "common"))
-        if idx >= 0:
-            self.cb_zmode.setCurrentIndex(idx)
-
         self.chk_grid = _fix_width(QCheckBox())
         self.chk_grid.setChecked(bool(cfg.get("show_grid", True)))
 
-        self.chk_axes = _fix_width(QCheckBox())
-        self.chk_axes.setChecked(bool(cfg.get("show_axes", False)))
-
         _populate_two_columns(self, [
-            ("컬러맵", self.cb_cmap),
             ("쉐이딩", self.cb_shading),
             ("부드럽게 (smooth)", self.chk_smooth),
             ("Z 과장 배율", self.cb_zexag),
-            ("Z 스케일", self.cb_zmode),
             ("바닥 그리드", self.chk_grid),
-            ("축 표시", self.chk_axes),
         ])
 
-        # 즉시 반영
-        self.cb_cmap.currentIndexChanged.connect(self.changed)
         self.cb_shading.currentIndexChanged.connect(self.changed)
         self.chk_smooth.toggled.connect(self.changed)
         self.cb_zexag.currentIndexChanged.connect(self.changed)
-        self.cb_zmode.currentIndexChanged.connect(self.changed)
         self.chk_grid.toggled.connect(self.changed)
-        self.chk_axes.toggled.connect(self.changed)
 
     def gather(self) -> dict[str, Any]:
-        z_data = self.cb_zexag.currentData()
         return {
-            "colormap": self.cb_cmap.currentText(),
             "shading": self.cb_shading.currentText(),
             "smooth": self.chk_smooth.isChecked(),
-            "z_exaggeration": z_data,  # None(자동) or float
-            "z_scale_mode": self.cb_zmode.currentText(),
+            "z_exaggeration": self.cb_zexag.currentData(),  # None(자동) or float
             "show_grid": self.chk_grid.isChecked(),
-            "show_axes": self.chk_axes.isChecked(),
         }
+
+    def reload(self, cfg: dict[str, Any]) -> None:
+        widgets = (self.cb_shading, self.chk_smooth, self.cb_zexag, self.chk_grid)
+        for w in widgets:
+            w.blockSignals(True)
+        try:
+            idx = self.cb_shading.findText(cfg.get("shading", "shaded"))
+            if idx >= 0: self.cb_shading.setCurrentIndex(idx)
+            self.chk_smooth.setChecked(bool(cfg.get("smooth", True)))
+            cur = cfg.get("z_exaggeration", None)
+            if cur is None:
+                self.cb_zexag.setCurrentIndex(0)
+            else:
+                try:
+                    idx = self.cb_zexag.findData(float(cur))
+                except (TypeError, ValueError):
+                    idx = 0
+                self.cb_zexag.setCurrentIndex(idx if idx >= 0 else 0)
+            self.chk_grid.setChecked(bool(cfg.get("show_grid", True)))
+        finally:
+            for w in widgets:
+                w.blockSignals(False)
+        self.changed.emit()
 
 
 # ────────────────────────────────────────────────────────
@@ -358,9 +426,11 @@ class DesignTab(QScrollArea):
         lay.setSpacing(8)
 
         self._ui_card = UiSettingsCard(settings)
+        self._card_common = ChartCommonGroup(settings.get("chart_common", {}))
         self._card_2d = Chart2DGroup(settings.get("chart_2d", {}))
         self._card_3d = Chart3DGroup(settings.get("chart_3d", {}))
         lay.addWidget(self._ui_card)
+        lay.addWidget(self._card_common)
         lay.addWidget(self._card_2d)
         lay.addWidget(self._card_3d)
         lay.addStretch(1)
@@ -368,15 +438,25 @@ class DesignTab(QScrollArea):
         self.setWidget(container)
 
         self._ui_card.changed.connect(self.ui_changed)
+        self._card_common.changed.connect(self.graph_changed)
         self._card_2d.changed.connect(self.graph_changed)
         self._card_3d.changed.connect(self.graph_changed)
 
     def gather(self) -> dict[str, Any]:
         return {
             **self._ui_card.gather(),
+            "chart_common": self._card_common.gather(),
             "chart_2d": self._card_2d.gather(),
             "chart_3d": self._card_3d.gather(),
         }
+
+    def reset_to_defaults(self) -> None:
+        """4개 카드 모두 DEFAULT_SETTINGS 값으로 되돌리기."""
+        from core.themes import DEFAULT_SETTINGS
+        self._ui_card.reload(DEFAULT_SETTINGS)
+        self._card_common.reload(DEFAULT_SETTINGS.get("chart_common", {}))
+        self._card_2d.reload(DEFAULT_SETTINGS.get("chart_2d", {}))
+        self._card_3d.reload(DEFAULT_SETTINGS.get("chart_3d", {}))
 
 
 # ────────────────────────────────────────────────────────
@@ -447,12 +527,12 @@ class CoordLibraryTab(QWidget):
         self._sb_max_count = _fix_width(QSpinBox())
         self._sb_max_count.setRange(0, 100_000)
         self._sb_max_count.setSpecialValueText("무제한")
-        self._sb_max_count.setValue(int(cl_settings.get("max_count", 0)))
+        self._sb_max_count.setValue(int(cl_settings.get("max_count", 1000)))
 
         self._sb_max_days = _fix_width(QSpinBox())
         self._sb_max_days.setRange(0, 3650)
         self._sb_max_days.setSpecialValueText("무제한")
-        self._sb_max_days.setValue(int(cl_settings.get("max_days", 0)))
+        self._sb_max_days.setValue(int(cl_settings.get("max_days", 1000)))
 
         limits_form.addRow("최대 저장 개수", self._sb_max_count)
         limits_form.addRow("최대 보관일", self._sb_max_days)
@@ -596,9 +676,25 @@ class SettingsDialog(QDialog):
         self.btn_save.clicked.connect(self._on_save)
         self.btn_close.clicked.connect(self._on_close)
 
+        # 하단 좌측 Default — 디자인 탭 4개 카드를 DEFAULT_SETTINGS로 리셋
+        self.btn_default = QPushButton("Default")
+        self.btn_default.clicked.connect(self._design.reset_to_defaults)
+
+        # 모든 버튼 폭 통일 + default/auto-default 해제 (엔터로 dialog 닫힘 방지)
+        from widgets.paste_area import HEADER_BUTTON_WIDTH
+        for b in (self.btn_save, self.btn_close, self.btn_default):
+            b.setFixedWidth(HEADER_BUTTON_WIDTH)
+            b.setDefault(False)
+            b.setAutoDefault(False)
+
+        bottom = QHBoxLayout()
+        bottom.addWidget(self.btn_default)
+        bottom.addStretch(1)
+        bottom.addWidget(btns)
+
         lay = QVBoxLayout(self)
         lay.addWidget(self._tabs, stretch=1)
-        lay.addWidget(btns)
+        lay.addLayout(bottom)
 
     # ── 현재 다이얼로그의 설정 전체를 모아 반환 ──
     def _collect(self) -> dict[str, Any]:
@@ -623,6 +719,14 @@ class SettingsDialog(QDialog):
         main = self.parent()
         if main is not None and hasattr(main, "revisualize"):
             main.revisualize()
+
+    # ── Enter 키로 dialog가 닫히지 않게 (QSpinBox 등 자식 입력란용) ──
+    def keyPressEvent(self, event) -> None:
+        from PySide6.QtCore import Qt as _Qt
+        if event.key() in (_Qt.Key.Key_Return, _Qt.Key.Key_Enter):
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     # ── Save / Close ──────────────────────────
     def _on_save(self) -> None:

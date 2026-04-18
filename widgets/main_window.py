@@ -2,7 +2,7 @@
 메인 윈도우 — 3-패널 세로 스택 (Input / Control / Result).
 
 뼈대 단계:
-- Input: A/B PasteArea (QSplitter 좌우)
+- Input: A/B PasteArea (가로 1:1 고정)
 - Control: VALUE/X/Y 콤보, View(2D/3D) 콤보, Z 스케일, Visualize 버튼
 - Result: placeholder (Visualize 연결은 후속)
 - 우상단 ⚙ Settings 버튼 (현재는 알림만)
@@ -12,8 +12,9 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QShowEvent
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox,
-    QPushButton, QSizePolicy, QSplitter, QToolBar, QWidget,
+    QComboBox, QDialog, QGridLayout, QHBoxLayout, QLabel, QMainWindow,
+    QMessageBox, QPushButton, QSizePolicy, QSplitter, QToolBar, QToolButton,
+    QVBoxLayout, QWidget,
 )
 
 import numpy as np
@@ -32,7 +33,7 @@ from widgets.result_panel import ResultPanel
 from widgets.wafer_cell import WaferDisplay
 
 
-PRESET_BUTTON_DEFAULT_TEXT = "저장된 좌표 불러오기"
+PRESET_BUTTON_DEFAULT_TEXT = "좌표 불러오기"
 
 
 class MainWindow(QMainWindow):
@@ -51,7 +52,6 @@ class MainWindow(QMainWindow):
 
         self._result_a: ParseResult | None = None
         self._result_b: ParseResult | None = None
-        self._input_splitter_balanced = False
         self._main_splitter_restored = False
         self._preset_override: CoordPreset | None = None
 
@@ -60,17 +60,8 @@ class MainWindow(QMainWindow):
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
-        if not self._input_splitter_balanced:
-            QTimer.singleShot(0, self._balance_input_splitter)
         if not self._main_splitter_restored:
             QTimer.singleShot(0, self._restore_main_splitter)
-
-    def _balance_input_splitter(self) -> None:
-        w = self._input_splitter.width()
-        if w <= 0:
-            return
-        self._input_splitter.setSizes([w // 2, w - w // 2])
-        self._input_splitter_balanced = True
 
     def _restore_main_splitter(self) -> None:
         """저장된 splitter sizes 복원 (Control 항목은 항상 fixed height 로 강제)."""
@@ -94,17 +85,57 @@ class MainWindow(QMainWindow):
 
     # ── 빌드 ────────────────────────────────────────────────
     def _build_toolbar(self) -> None:
+        from app import VERSION
+
         tb = QToolBar("Top")
         tb.setMovable(False)
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, tb)
 
-        spacer = QWidget()
-        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        tb.addWidget(spacer)
+        # 좌·중·우 3-칼럼: 가운데 타이틀이 정확히 화면 가운데 오게 좌측 더미 컬럼은 우측과 동폭
+        bar = QWidget()
+        grid = QGridLayout(bar)
+        grid.setContentsMargins(8, 4, 8, 4)
+        grid.setHorizontalSpacing(8)
 
-        act_settings = QAction("⚙ Settings", self)
-        act_settings.triggered.connect(self._open_settings)
-        tb.addAction(act_settings)
+        # 우측 컬럼: 버전 라벨(위) + Settings 버튼(아래)
+        right_col = QWidget()
+        right_lay = QVBoxLayout(right_col)
+        right_lay.setContentsMargins(0, 0, 0, 0)
+        right_lay.setSpacing(4)
+        version_label = QLabel(f"v{VERSION} | © 2026 KP TF | Jihwan Park")
+        version_label.setStyleSheet(
+            "color: gray; background: transparent; "
+            "font-size: 9pt; font-style: italic;"
+        )
+        version_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        right_lay.addWidget(version_label)
+        btn_settings = QToolButton()
+        btn_settings.setText("⚙ Settings")
+        btn_settings.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        btn_settings.setStyleSheet("QToolButton { font-weight: bold; padding: 4px 10px; }")
+        btn_settings.clicked.connect(self._open_settings)
+        right_lay.addWidget(btn_settings, alignment=Qt.AlignmentFlag.AlignRight)
+
+        # 좌측 더미 컬럼: 우측 컬럼과 동일 폭으로 가운데 정렬 보존
+        left_dummy = QWidget()
+
+        # 가운데 타이틀
+        title = QLabel("Wafer Map")
+        title.setStyleSheet("font-size: 22pt; font-weight: bold;")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        grid.addWidget(left_dummy, 0, 0)
+        grid.addWidget(title, 0, 1)
+        grid.addWidget(right_col, 0, 2)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 0)
+        grid.setColumnStretch(2, 1)
+
+        # 좌·우 컬럼이 동일 폭이 되어야 가운데가 진짜 가운데 — 우측의 sizeHint를 좌측에 강제
+        left_dummy.setMinimumWidth(right_col.sizeHint().width())
+
+        tb.addWidget(bar)
+        bar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
     def _build_central(self) -> None:
         splitter = QSplitter(Qt.Orientation.Vertical)
@@ -118,17 +149,18 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(splitter)
 
     def _make_input_panel(self) -> QWidget:
-        hs = QSplitter(Qt.Orientation.Horizontal)
-        self.paste_a = PasteArea("Input A  (Ctrl+V)")
-        self.paste_b = PasteArea("Input B  (Ctrl+V, 선택)")
+        # Input A / B 1:1 고정 (사용자 비율 조정 불가)
+        w = QWidget()
+        lay = QHBoxLayout(w)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(4)
+        self.paste_a = PasteArea("Input A")
+        self.paste_b = PasteArea("Input B")
         self.paste_a.parsed.connect(self._on_a_parsed)
         self.paste_b.parsed.connect(self._on_b_parsed)
-        hs.addWidget(self.paste_a)
-        hs.addWidget(self.paste_b)
-        hs.setStretchFactor(0, 1)
-        hs.setStretchFactor(1, 1)
-        self._input_splitter = hs
-        return hs
+        lay.addWidget(self.paste_a, stretch=1)
+        lay.addWidget(self.paste_b, stretch=1)
+        return w
 
     def _make_control_panel(self) -> QWidget:
         w = QWidget()
@@ -138,9 +170,9 @@ class MainWindow(QMainWindow):
         lay.setContentsMargins(8, 6, 8, 6)
         lay.setSpacing(8)
 
-        self.cb_value = QComboBox(); self.cb_value.setMinimumWidth(120)
-        self.cb_x = QComboBox();     self.cb_x.setMinimumWidth(120)
-        self.cb_y = QComboBox();     self.cb_y.setMinimumWidth(120)
+        self.cb_value = QComboBox(); self.cb_value.setFixedWidth(84)
+        self.cb_x = QComboBox();     self.cb_x.setFixedWidth(84)
+        self.cb_y = QComboBox();     self.cb_y.setFixedWidth(84)
 
         self.btn_load_preset = QPushButton(PRESET_BUTTON_DEFAULT_TEXT)
         self.btn_load_preset.setEnabled(False)
@@ -149,15 +181,22 @@ class MainWindow(QMainWindow):
         self.cb_view = QComboBox(); self.cb_view.addItems(["2D", "3D"])
         self.cb_zscale = QComboBox(); self.cb_zscale.addItems(["공통", "개별"])
 
-        self.btn_visualize = QPushButton("Visualize")
+        self.btn_visualize = QPushButton("▶  Run Analysis")
+        self.btn_visualize.setProperty("class", "primary")
+        # Input B 헤더 Text+Table+Clear 폭 합과 동일 (시작/끝 X가 일치하도록)
+        from widgets.paste_area import HEADER_BUTTON_WIDTH, HEADER_BUTTON_SPACING
+        self.btn_visualize.setFixedWidth(
+            HEADER_BUTTON_WIDTH * 3 + HEADER_BUTTON_SPACING * 2
+        )
         self.btn_visualize.setEnabled(False)
         self.btn_visualize.clicked.connect(self._on_visualize)
 
         # X 콤보 변경 시 Y suffix 동기화
         self.cb_x.currentTextChanged.connect(self._on_x_changed)
-        # View(2D/3D) 변경 시 즉시 재렌더
-        self.cb_view.currentTextChanged.connect(lambda _: self.revisualize())
-        self.cb_zscale.currentTextChanged.connect(lambda _: self.revisualize())
+        # View(2D/3D) 변경 — cell 재생성 없이 stack 인덱스만 토글 (캐시 활용)
+        self.cb_view.currentTextChanged.connect(self._on_view_toggle)
+        # Z scale 변경 — z_range만 갈아끼우고 3D 캐시 무효화 (2D 캐시 유지)
+        self.cb_zscale.currentTextChanged.connect(self._on_zscale_toggle)
 
         for label, widget in [
             ("VALUE:", self.cb_value),
@@ -440,11 +479,15 @@ class MainWindow(QMainWindow):
         self._result_panel.set_displays(displays, v, view_mode=view_mode, summary_line=summary)
 
     def _apply_z_scale_mode(self, displays: list[WaferDisplay], view_mode: str) -> None:
-        """3D 공통 스케일 옵션이면 모든 display 에 동일 z_range 주입."""
-        if view_mode != "3D":
-            return
-        mode = (load_settings().get("chart_3d", {}) or {}).get("z_scale_mode", "common")
-        if mode != "common":
+        """cb_zscale을 ground truth로 모든 display의 z_range 세팅.
+
+        공통: 모든 display에 동일 (vmin, vmax) 주입.
+        개별: 모두 None reset (cell이 자체 데이터로 vmin/vmax 계산).
+        view_mode 무관 — 2D 상태에서 토글해도 다음 3D 진입 시 정합 보장.
+        """
+        if self.cb_zscale.currentText() != "공통":
+            for d in displays:
+                d.z_range = None
             return
         all_v: list[float] = []
         for d in displays:
@@ -477,3 +520,24 @@ class MainWindow(QMainWindow):
         if not self.btn_visualize.isEnabled():
             return
         self._on_visualize()
+
+    def _on_view_toggle(self, mode: str) -> None:
+        """View 콤보 변경 — cell 재생성 없이 stack 인덱스만 토글.
+
+        cell이 모드별 렌더 결과를 캐시 보유하므로 두 번째 진입부터는 0ms.
+        """
+        if mode:
+            self._result_panel.set_view_mode(mode)
+
+    def _on_zscale_toggle(self, _mode: str) -> None:
+        """Z scale 콤보 변경 — cell 재생성 없이 z_range만 갈아끼우고 3D 캐시 무효화.
+
+        2D는 영향 없으므로 캐시 유지, 3D만 재렌더 (현재 view가 3D면 즉시).
+        """
+        cells = self._result_panel.cells
+        if not cells:
+            return
+        view_mode = self.cb_view.currentText() or "2D"
+        displays = [c.display for c in cells]
+        self._apply_z_scale_mode(displays, view_mode)
+        self._result_panel.invalidate_3d()

@@ -145,6 +145,7 @@ THEMES = {
         "header_bg": "#dcfce7",
         "danger": "#dc2626",
         "success": "#10b981",
+        "primary_btn": "#047857",  # 메인 액션 강조 (success가 accent와 같아 fallback 분리)
         "title_color": "#10b981",
         "chart_lines": ["#10b981", "#3b82f6", "#a855f7", "#14b8a6"],
     },
@@ -173,6 +174,7 @@ THEMES = {
         "header_bg": "#e5dfbf",
         "danger": "#f85552",
         "success": "#8da101",
+        "primary_btn": "#3a94c5",  # 메인 액션 강조 (success가 accent와 같아 fallback 분리)
         "title_color": "#8da101",
         "chart_lines": ["#8da101", "#f85552", "#3a94c5", "#f57d26"],
     },
@@ -269,13 +271,10 @@ DEFAULT_SETTINGS = {
     },
     "window_save_enabled": True,   # True 면 종료 시 위 window 값 자동 갱신 (다음 실행 복원)
 
-    # 2D MAP
-    "chart_2d": {
+    # MAP 공통 설정 — 2D/3D 양쪽에 같이 적용
+    "chart_common": {
         "colormap": "CET-L17",
-        "show_points": True,       # 측정점 마커 표시
-        "point_size": 4,
         "show_circle": True,       # 웨이퍼 경계 원
-        "show_value_labels": False, # 측정점 옆에 VALUE 텍스트 표시
         "grid_resolution": 200,    # 보간 격자 해상도 (격자 한 변)
         # 보간 방법:
         #   "rbf"           — thin-plate spline, convex hull 외부까지 부드럽게 외삽 (기본)
@@ -285,15 +284,19 @@ DEFAULT_SETTINGS = {
         "interp_method": "rbf",
     },
 
-    # 3D MAP
+    # 2D MAP 전용 (공통은 chart_common 참조)
+    "chart_2d": {
+        "show_points": True,       # 측정점 마커 표시
+        "point_size": 4,
+        "show_value_labels": False, # 측정점 옆에 VALUE 텍스트 표시
+    },
+
+    # 3D MAP 전용 (공통은 chart_common, Z 스케일은 메인 윈도우 컨트롤)
     "chart_3d": {
-        "colormap": "CET-L17",
-        "shading": "shaded",       # shaded / flat
+        "shading": "shaded",       # shaded / normalColor / heightColor
         "smooth": True,
         "z_exaggeration": None,    # Z 과장 배율: None=자동(X/Y 범위 기준 정규화), float=고정 배율
-        "z_scale_mode": "common",  # "common" | "individual" (다중 웨이퍼)
         "show_grid": True,         # 바닥 그리드
-        "show_axes": False,
     },
 
     # Summary 표
@@ -322,8 +325,8 @@ DEFAULT_SETTINGS = {
 
     # 좌표 라이브러리 자동 정리
     "coord_library": {
-        "max_count": 0,          # 0 = 무제한
-        "max_days":  0,          # 0 = 무제한 (created_at 기준)
+        "max_count": 1000,       # 0 = 무제한
+        "max_days":  1000,       # 0 = 무제한 (created_at 기준)
     },
 }
 

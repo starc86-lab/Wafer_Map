@@ -20,6 +20,12 @@ from PySide6.QtWidgets import (
 from main import MissingColumnsError, ParseResult, _load_dataframe, parse_wafer_csv
 
 
+# 헤더 버튼(Text/Table/Clear) 폭 + 사이 spacing — 메인 윈도우의 Run Analysis가
+# 같은 폭(=72*3 + 6*2)으로 우측 정렬되어야 끝/시작이 일치 (사용자 요구).
+HEADER_BUTTON_WIDTH = 88
+HEADER_BUTTON_SPACING = 6
+
+
 class PasteArea(QWidget):
     """Ctrl+V 페이스트 + 텍스트/표 뷰 토글."""
 
@@ -29,6 +35,7 @@ class PasteArea(QWidget):
         super().__init__(parent)
         self._result: ParseResult | None = None
         self._df: pd.DataFrame | None = None
+        self._table_dirty = False  # df는 있는데 _fill_table 미실행 상태
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(8, 8, 8, 8)
@@ -36,7 +43,7 @@ class PasteArea(QWidget):
 
         # ── 헤더: 타이틀 + 뷰 토글 ──
         header = QHBoxLayout()
-        header.setSpacing(4)
+        header.setSpacing(HEADER_BUTTON_SPACING)
 
         title_label = QLabel(title)
         title_label.setStyleSheet("font-weight: bold;")
@@ -47,11 +54,7 @@ class PasteArea(QWidget):
         self._btn_table = QPushButton("Table")
         self._btn_clear = QPushButton("Clear")
         for b in (self._btn_text, self._btn_table, self._btn_clear):
-            b.setFixedHeight(24)
-            b.setStyleSheet(
-                "QPushButton { padding: 2px 10px; min-height: 24px; max-height: 24px; "
-                "font-weight: normal; }"
-            )
+            b.setFixedWidth(HEADER_BUTTON_WIDTH)
         for b in (self._btn_text, self._btn_table):
             b.setCheckable(True)
         self._btn_text.setChecked(True)
@@ -66,7 +69,6 @@ class PasteArea(QWidget):
 
         header.addWidget(self._btn_text)
         header.addWidget(self._btn_table)
-        header.addSpacing(8)
         header.addWidget(self._btn_clear)
         lay.addLayout(header)
 
@@ -75,7 +77,7 @@ class PasteArea(QWidget):
 
         self._editor = QPlainTextEdit()
         self._editor.setPlaceholderText(
-            "여기에 클립보드 데이터를 Ctrl+V 로 붙여넣기"
+            "MES DCOL DATA를 통째로  Ctrl+C, Ctrl+V"
         )
         # 줄바꿈 OFF → 원본 행 그대로, 긴 행은 가로 스크롤바
         self._editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
@@ -118,6 +120,10 @@ class PasteArea(QWidget):
     # ── 슬롯 ──────────────────────────────────────────
     def _on_view_changed(self, idx: int) -> None:
         self._stacked.setCurrentIndex(idx)
+        # Table 뷰로 들어왔는데 아직 채우지 않은 상태면 그때 채움 (lazy)
+        if idx == 1 and self._table_dirty and self._df is not None:
+            self._fill_table(self._df)
+            self._table_dirty = False
 
     def _on_clear_clicked(self) -> None:
         self._editor.clear()
@@ -173,28 +179,40 @@ class PasteArea(QWidget):
         self._summary.setStyleSheet(style)
 
         if df is not None and len(df) > 0:
-            self._fill_table(df)
             self._btn_table.setEnabled(True)
+            # Table 뷰가 이미 활성이면 즉시 채우기, 아니면 dirty만 표시(lazy fill)
+            if self._stacked.currentIndex() == 1:
+                self._fill_table(df)
+                self._table_dirty = False
+            else:
+                self._table_dirty = True
         else:
             self._table.clear()
             self._table.setRowCount(0)
             self._table.setColumnCount(0)
             self._btn_table.setEnabled(False)
+            self._table_dirty = False
             # 뷰는 현재 상태 유지 — Clear 후 바로 Ctrl+V 하면 Table 뷰 그대로 이어짐
 
         self.parsed.emit(result)
 
     def _fill_table(self, df: pd.DataFrame) -> None:
+        # 채우는 동안 ResizeToContents 끔 — setItem마다 컬럼 측정 트리거 방지
+        header = self._table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self._table.setUpdatesEnabled(False)
         try:
             self._table.clear()
             self._table.setRowCount(len(df))
             self._table.setColumnCount(len(df.columns))
             self._table.setHorizontalHeaderLabels([str(c) for c in df.columns])
-            for r in range(len(df)):
-                for c in range(len(df.columns)):
-                    v = df.iat[r, c]
+            # df.values로 한 번에 ndarray 추출 — iat보다 훨씬 빠름
+            arr = df.values
+            for r in range(arr.shape[0]):
+                for c in range(arr.shape[1]):
+                    v = arr[r, c]
                     text = "" if pd.isna(v) else str(v)
                     self._table.setItem(r, c, QTableWidgetItem(text))
         finally:
             self._table.setUpdatesEnabled(True)
+            header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)

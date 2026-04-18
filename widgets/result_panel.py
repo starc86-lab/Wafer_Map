@@ -45,6 +45,14 @@ class ResultPanel(QWidget):
         self._scroll.setWidget(self._container)
         root.addWidget(self._scroll, stretch=1)
 
+        # 첫 Run Analysis 시 GLViewWidget이 추가되며 ancestor가 native window로
+        # 일괄 승격되는 시점의 윈도우 깜빡임 제거 — startup에 미리 영구 자식 1개 두기
+        import pyqtgraph.opengl as gl
+        self._gl_anchor = gl.GLViewWidget(self._container)
+        self._gl_anchor.resize(1, 1)
+        self._gl_anchor.hide()
+
+        self._cells: list[WaferCell] = []
         self._show_placeholder()
 
     def _show_placeholder(self) -> None:
@@ -64,6 +72,7 @@ class ResultPanel(QWidget):
             if w is not None:
                 w.setParent(None)
                 w.deleteLater()
+        self._cells.clear()
 
     def clear(self) -> None:
         self._show_placeholder()
@@ -89,5 +98,20 @@ class ResultPanel(QWidget):
 
         for d in displays:
             cell = WaferCell(d, value_name, view_mode=view_mode)
+            self._cells.append(cell)
             self._layout.addWidget(cell)
         self._layout.addStretch(1)
+
+    def set_view_mode(self, mode: str) -> None:
+        """View 토글 — 모든 cell에 forward (cell이 캐시 보유, 재계산 없음)."""
+        for c in self._cells:
+            c.set_view_mode(mode)
+
+    @property
+    def cells(self) -> list[WaferCell]:
+        return self._cells
+
+    def invalidate_3d(self) -> None:
+        """3D 캐시 무효화 — z_range 변경 시. 2D 캐시는 그대로."""
+        for c in self._cells:
+            c.invalidate_3d()

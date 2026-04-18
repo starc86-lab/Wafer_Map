@@ -87,6 +87,13 @@ QPushButton:pressed {{
 }}
 QPushButton[class="danger"]    {{ background-color: {t['danger']}; }}
 QPushButton[class="secondary"] {{ background-color: {t['success']}; }}
+QPushButton[class="primary"] {{
+    background-color: {t.get('primary_btn', t['success'])};
+    color: {t['bg']};
+    padding: 0px 24px;
+    font-size: {F['section']}px;
+    letter-spacing: 0.5px;
+}}
 QSplitter::handle {{ background-color: {t['border']}; }}
 QScrollArea {{ background: transparent; border: none; }}
 QDialog {{ background-color: {t['bg']}; color: {t['text']}; }}
@@ -163,5 +170,16 @@ QToolTip {{
     color: {t['text']};
     border: 1px solid {t['border']};
     padding: 4px 8px;
+}}
+QTabBar::tab {{
+    padding: 6px 14px;
+    font-size: {F['body']}px;
+    font-weight: bold;
+}}
+QGroupBox::title {{
+    font-weight: bold;
+    subcontrol-origin: margin;
+    left: 10px;
+    padding: 0px 4px;
 }}
 """
