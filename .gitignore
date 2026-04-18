@@ -19,3 +19,8 @@ assets/check_*.svg
 # 로그·캐시 (아직 폴더 없음, 추후 대비)
 logs/
 cache/
+
+# PyInstaller 빌드 산출물 (배포판은 별도 공유, 레포에 올리지 않음)
+build/
+dist/
+*.spec
