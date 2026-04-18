@@ -1,0 +1,10 @@
+# === 핵심 (앱 실행 필수) ===
+numpy
+scipy
+PySide6
+pyqtgraph
+PyOpenGL
+
+# === 확장 대비 ===
+pandas       # 클립보드 TSV 파싱 편의 (pd.read_clipboard 등)
+chardet      # 파일 입력 확장 시 인코딩 감지 (Profile Vision 참고)

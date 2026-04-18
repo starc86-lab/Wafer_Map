@@ -1,0 +1,109 @@
+"""
+settings.json I/O.
+
+- 앱 실행 폴더 기준 `settings.json` (무설치 포터블 배포 정책).
+- 로드 시 누락 키는 `DEFAULT_SETTINGS` 로부터 재귀적으로 merge.
+- 최소 변경: 앱 시작 시 `load_settings()`, 변경 시 `save_settings(settings)`.
+"""
+from __future__ import annotations
+
+import copy
+import json
+from pathlib import Path
+from typing import Any
+
+from core.themes import DEFAULT_CUSTOM_COLORS, DEFAULT_SETTINGS
+
+SETTINGS_FILE = "settings.json"  # 앱 실행 폴더 기준 상대 경로
+
+# 런타임 캐시 — 다이얼로그에서 "메모리만 갱신(Save 전)" 상태를 공유하기 위함.
+# WaferCell / apply_global_style 등 읽기 경로는 load_settings() 한 번이면 충분하도록.
+_cache: dict[str, Any] | None = None
+
+
+def _merge_defaults(loaded: dict, defaults: dict) -> dict:
+    """loaded + defaults nested merge. loaded 우선, 누락 키만 defaults에서 채움."""
+    result = copy.deepcopy(defaults)
+    for k, v in loaded.items():
+        if isinstance(v, dict) and isinstance(result.get(k), dict):
+            result[k] = _merge_defaults(v, result[k])
+        else:
+            result[k] = v
+    return result
+
+
+def load_settings() -> dict[str, Any]:
+    """설정 반환 — 런타임 캐시 우선, 없으면 파일 로드.
+
+    미저장 변경분(set_runtime)도 같은 dict로 반환되므로 WaferCell 등이 즉시 반영.
+    """
+    global _cache
+    if _cache is not None:
+        return _cache
+    path = Path(SETTINGS_FILE)
+    if path.exists():
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            _cache = _merge_defaults(loaded, DEFAULT_SETTINGS)
+            return _cache
+        except Exception:
+            pass
+    _cache = copy.deepcopy(DEFAULT_SETTINGS)
+    return _cache
+
+
+def save_settings(settings: dict[str, Any]) -> None:
+    """파일 저장 + 캐시 동기화."""
+    global _cache
+    path = Path(SETTINGS_FILE)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(settings, f, ensure_ascii=False, indent=2)
+    _cache = copy.deepcopy(settings)
+
+
+def set_runtime(settings: dict[str, Any]) -> None:
+    """파일 저장 없이 캐시만 갱신 — Settings 다이얼로그의 즉시 반영 경로."""
+    global _cache
+    _cache = copy.deepcopy(settings)
+
+
+def invalidate_cache() -> None:
+    """다음 load_settings 호출 시 파일에서 재로드하도록 캐시 폐기 (Close 등에서 사용)."""
+    global _cache
+    _cache = None
+
+
+# ────────────────────────────────────────────────────────────────
+# QColorDialog Custom Colors (Profile Vision과 동일 패턴)
+# ────────────────────────────────────────────────────────────────
+def load_custom_colors() -> list[str]:
+    saved = load_settings().get("custom_colors")
+    if isinstance(saved, list) and len(saved) == 16:
+        return list(saved)
+    return list(DEFAULT_CUSTOM_COLORS)
+
+
+def apply_custom_colors_to_dialog(colors: list[str]) -> None:
+    """16개 hex 문자열을 QColorDialog 전역 custom color 슬롯에 적용."""
+    from PySide6.QtGui import QColor
+    from PySide6.QtWidgets import QColorDialog
+    for i, hex_str in enumerate(colors[:16]):
+        try:
+            QColorDialog.setCustomColor(i, QColor(hex_str))
+        except Exception:
+            pass
+
+
+def save_custom_colors_from_dialog() -> None:
+    """QColorDialog 전역 custom color 16개를 settings.json에 저장."""
+    from PySide6.QtGui import QColor  # noqa: F401  (QColorDialog 의존)
+    from PySide6.QtWidgets import QColorDialog
+    colors: list[str] = []
+    for i in range(16):
+        c = QColorDialog.customColor(i)
+        colors.append(c.name() if c.isValid() else "#ffffff")
+    settings = load_settings()
+    settings["custom_colors"] = colors
+    save_settings(settings)

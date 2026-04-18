@@ -1,0 +1,24 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.vscode/
+.idea/
+
+# 사용자별 런타임 파일 (앱이 자동 생성·갱신)
+settings.json
+coord_library.json
+*.bak
+
+# 샘플·테스트 산출물 (재생성 가능)
+samples/output_*.png
+samples/output_*.html
+tests/output_*.png
+tests/output_*.html
+
+# stylesheet 가 동적으로 만드는 체크박스 SVG (테마 accent 색별)
+assets/check_*.svg
+
+# 로그·캐시 (아직 폴더 없음, 추후 대비)
+logs/
+cache/
