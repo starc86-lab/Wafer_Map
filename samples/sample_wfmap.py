@@ -5,11 +5,15 @@ wfmap은 정수 격자(MAP_ROW / MAP_COL) 기반 die map 라이브러리이고 3
 실행: python sample_wfmap.py
 PNG 저장: output_wfmap_num.png, output_wfmap_full.png
 """
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+
+_DEBUG = Path(__file__).resolve().parent.parent / "debug"
+_DEBUG.mkdir(exist_ok=True)
 
 # wfmap 1.0.3은 오래된 pandas API(positional pivot)를 써서 pandas 2+에서 실패 →
 # pd.DataFrame.pivot 을 감싸서 positional→keyword 변환. 샘플 한정 임시 shim.
@@ -52,8 +56,8 @@ def main():
         ax=ax,
     )
     fig1.tight_layout()
-    fig1.savefig("output_wfmap_num.png", dpi=120)
-    print("Saved: output_wfmap_num.png")
+    fig1.savefig(str(_DEBUG / "output_wfmap_num.png"), dpi=120)
+    print(f"Saved → {_DEBUG}/output_wfmap_num.png")
 
     # (2) wafermap — 라이브러리 내장 레이아웃 (spec map 포함 느낌)
     wfmap.wafermap(
@@ -62,8 +66,8 @@ def main():
         vsigma=3,
     )
     fig2 = plt.gcf()
-    fig2.savefig("output_wfmap_full.png", dpi=120)
-    print("Saved: output_wfmap_full.png")
+    fig2.savefig(str(_DEBUG / "output_wfmap_full.png"), dpi=120)
+    print(f"Saved → {_DEBUG}/output_wfmap_full.png")
 
 
 if __name__ == "__main__":

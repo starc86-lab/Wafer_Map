@@ -3,12 +3,16 @@ matplotlib 2D contour + 3D surface 샘플.
 실행: python sample_matplotlib.py
 PNG 저장: output_mpl_2d.png, output_mpl_3d.png
 """
+from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.tri import Triangulation
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 
 from sample_data import make_wafer_points, WAFER_RADIUS
+
+_DEBUG = Path(__file__).resolve().parent.parent / "debug"
+_DEBUG.mkdir(exist_ok=True)
 
 
 def main():
@@ -27,8 +31,8 @@ def main():
     ax.set_xlabel("X (mm)"); ax.set_ylabel("Y (mm)")
     plt.colorbar(cs, ax=ax, label="Thickness (Å)")
     fig2d.tight_layout()
-    fig2d.savefig("output_mpl_2d.png", dpi=120)
-    print("Saved: output_mpl_2d.png")
+    fig2d.savefig(str(_DEBUG / "output_mpl_2d.png"), dpi=120)
+    print(f"Saved → {_DEBUG}/output_mpl_2d.png")
 
     # 3D surface
     fig3d = plt.figure(figsize=(7.5, 6))
@@ -37,8 +41,8 @@ def main():
     ax3.set_title(f"3D Surface (matplotlib) — N={len(X)}")
     ax3.set_xlabel("X (mm)"); ax3.set_ylabel("Y (mm)"); ax3.set_zlabel("Thickness (Å)")
     fig3d.tight_layout()
-    fig3d.savefig("output_mpl_3d.png", dpi=120)
-    print("Saved: output_mpl_3d.png")
+    fig3d.savefig(str(_DEBUG / "output_mpl_3d.png"), dpi=120)
+    print(f"Saved → {_DEBUG}/output_mpl_3d.png")
 
     plt.show()
 

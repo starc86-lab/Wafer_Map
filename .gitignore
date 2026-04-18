@@ -10,11 +10,8 @@ settings.json
 coord_library.json
 *.bak
 
-# 샘플·테스트 산출물 (재생성 가능)
-samples/output_*.png
-samples/output_*.html
-tests/output_*.png
-tests/output_*.html
+# 디버그/샘플/검증용 산출물 — 모두 debug/ 한 곳에 모음
+debug/
 
 # stylesheet 가 동적으로 만드는 체크박스 SVG (테마 accent 색별)
 assets/check_*.svg

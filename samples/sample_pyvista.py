@@ -1,11 +1,15 @@
 """
 pyvista 3D wafer surface 샘플. off_screen 렌더로 PNG 저장.
 """
+from pathlib import Path
 import numpy as np
 from scipy.interpolate import griddata
 import pyvista as pv
 
 from sample_data import make_wafer_points, WAFER_RADIUS
+
+_DEBUG = Path(__file__).resolve().parent.parent / "debug"
+_DEBUG.mkdir(exist_ok=True)
 
 
 def main():
@@ -53,9 +57,9 @@ def main():
 
     # 카메라
     p.camera_position = [(450, -450, 260), (0, 0, 40), (0, 0, 1)]
-    p.screenshot("output_pyvista_3d.png")
+    p.screenshot(str(_DEBUG / "output_pyvista_3d.png"))
     p.close()
-    print("Saved: output_pyvista_3d.png")
+    print(f"Saved → {_DEBUG}/output_pyvista_3d.png")
 
 
 if __name__ == "__main__":

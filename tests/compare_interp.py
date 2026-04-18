@@ -2,7 +2,7 @@
 4가지 보간 방법을 한 윈도우에 나란히 렌더해서 PNG 비교.
 
 실행: python tests/compare_interp.py
-저장: tests/output_compare_interp.png
+저장: debug/output_compare_interp.png
 """
 from __future__ import annotations
 
@@ -14,6 +14,9 @@ for s in (sys.stdout, sys.stderr):
     except Exception: pass
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+_DEBUG = Path(__file__).resolve().parent.parent / "debug"
+_DEBUG.mkdir(exist_ok=True)
 
 import numpy as np
 import pyqtgraph as pg
@@ -90,7 +93,7 @@ def main() -> int:
         app.processEvents()
         time.sleep(0.05)
 
-    out = Path("tests/output_compare_interp.png")
+    out = _DEBUG / "output_compare_interp.png"
     root.grab().save(str(out))
     print(f"Saved: {out}")
     return 0

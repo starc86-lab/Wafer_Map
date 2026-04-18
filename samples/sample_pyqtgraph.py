@@ -6,6 +6,7 @@ pyqtgraph 2D heatmap + 3D surface 샘플.
 PNG: output_pg2d.png, output_pg3d.png
 """
 import sys
+from pathlib import Path
 import numpy as np
 from scipy.interpolate import griddata
 import pyqtgraph as pg
@@ -13,6 +14,9 @@ from pyqtgraph.Qt import QtWidgets, QtCore
 import pyqtgraph.opengl as gl
 
 from sample_data import make_wafer_points, WAFER_RADIUS
+
+_DEBUG = Path(__file__).resolve().parent.parent / "debug"
+_DEBUG.mkdir(exist_ok=True)
 
 
 def build_surface_colors(z: np.ndarray, inside: np.ndarray) -> np.ndarray:
@@ -115,9 +119,9 @@ def main():
     # ── --save 플래그: 렌더 안정화 후 PNG 저장 + 종료 ──────────
     if "--save" in sys.argv:
         def save_and_quit():
-            win2d.grab().save("output_pg2d.png")
-            gview.grabFramebuffer().save("output_pg3d.png")
-            print("Saved: output_pg2d.png, output_pg3d.png")
+            win2d.grab().save(str(_DEBUG / "output_pg2d.png"))
+            gview.grabFramebuffer().save(str(_DEBUG / "output_pg3d.png"))
+            print(f"Saved → {_DEBUG}/output_pg2d.png, output_pg3d.png")
             app.quit()
         QtCore.QTimer.singleShot(400, save_and_quit)
         app.exec()

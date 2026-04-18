@@ -4,11 +4,15 @@ plotly 2D heatmap + 3D surface 샘플.
 HTML 저장: output_plotly_2d.html, output_plotly_3d.html
 저장된 HTML을 브라우저로 열면 hover/회전/줌 인터랙션이 가능하다.
 """
+from pathlib import Path
 import numpy as np
 import plotly.graph_objects as go
 from scipy.interpolate import griddata
 
 from sample_data import make_wafer_points, WAFER_RADIUS
+
+_DEBUG = Path(__file__).resolve().parent.parent / "debug"
+_DEBUG.mkdir(exist_ok=True)
 
 
 def main():
@@ -40,8 +44,8 @@ def main():
         xaxis_title="X (mm)", yaxis_title="Y (mm)",
     )
     fig2d.update_yaxes(scaleanchor="x", scaleratio=1)
-    fig2d.write_html("output_plotly_2d.html", auto_open=False)
-    print("Saved: output_plotly_2d.html")
+    fig2d.write_html(str(_DEBUG / "output_plotly_2d.html"), auto_open=False)
+    print(f"Saved → {_DEBUG}/output_plotly_2d.html")
 
     # 3D
     fig3d = go.Figure(data=[go.Surface(x=xg, y=yg, z=ZG, colorscale="Jet")])
@@ -51,12 +55,12 @@ def main():
         scene=dict(xaxis_title="X (mm)", yaxis_title="Y (mm)",
                    zaxis_title="Thickness (Å)"),
     )
-    fig3d.write_html("output_plotly_3d.html", auto_open=False)
-    print("Saved: output_plotly_3d.html")
+    fig3d.write_html(str(_DEBUG / "output_plotly_3d.html"), auto_open=False)
+    print(f"Saved → {_DEBUG}/output_plotly_3d.html")
     try:
-        fig2d.write_image("output_plotly_2d.png", width=720, height=720)
-        fig3d.write_image("output_plotly_3d.png", width=820, height=720)
-        print("Saved: output_plotly_2d.png, output_plotly_3d.png")
+        fig2d.write_image(str(_DEBUG / "output_plotly_2d.png"), width=720, height=720)
+        fig3d.write_image(str(_DEBUG / "output_plotly_3d.png"), width=820, height=720)
+        print(f"Saved → {_DEBUG}/output_plotly_2d.png, output_plotly_3d.png")
     except Exception as e:
         print(f"PNG export failed: {e}")
 

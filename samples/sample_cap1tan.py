@@ -2,11 +2,15 @@
 cap1tan/wafermap 샘플. die grid + 점 단위 플로팅 (연속 heatmap은 미지원).
 HTML 출력 (folium 기반 zoomable map). PNG 저장은 선택 (headless Chrome 필요).
 """
+from pathlib import Path
 import numpy as np
 import wafermap
 import pyqtgraph as pg
 
 from sample_data import make_wafer_points, WAFER_RADIUS
+
+_DEBUG = Path(__file__).resolve().parent.parent / "debug"
+_DEBUG.mkdir(exist_ok=True)
 
 
 def value_to_hex(v, vmin, vmax, lut):
@@ -43,11 +47,11 @@ def main():
             },
         )
 
-    wm.save_html("output_cap1tan_wafermap.html")
-    print("Saved: output_cap1tan_wafermap.html")
+    wm.save_html(str(_DEBUG / "output_cap1tan_wafermap.html"))
+    print(f"Saved → {_DEBUG}/output_cap1tan_wafermap.html")
     try:
-        wm.save_png("output_cap1tan_wafermap.png")
-        print("Saved: output_cap1tan_wafermap.png")
+        wm.save_png(str(_DEBUG / "output_cap1tan_wafermap.png"))
+        print(f"Saved → {_DEBUG}/output_cap1tan_wafermap.png")
     except Exception as e:
         print(f"PNG save failed (headless Chrome 필요할 수도): {e}")
 

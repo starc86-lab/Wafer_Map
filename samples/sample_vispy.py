@@ -1,6 +1,7 @@
 """
 vispy 3D wafer surface 샘플. Mesh visual에 vertex_colors를 직접 주는 방식.
 """
+from pathlib import Path
 import numpy as np
 from scipy.interpolate import griddata
 from PIL import Image
@@ -10,6 +11,9 @@ from vispy.scene import visuals
 from vispy.color import get_colormap
 
 from sample_data import make_wafer_points, WAFER_RADIUS
+
+_DEBUG = Path(__file__).resolve().parent.parent / "debug"
+_DEBUG.mkdir(exist_ok=True)
 
 vp_app.use_app("pyside6")
 
@@ -76,8 +80,8 @@ def main():
     canvas.update()
     vp_app.process_events()
     img = canvas.render(alpha=False)
-    Image.fromarray(img).save("output_vispy_3d.png")
-    print("Saved: output_vispy_3d.png")
+    Image.fromarray(img).save(str(_DEBUG / "output_vispy_3d.png"))
+    print(f"Saved → {_DEBUG}/output_vispy_3d.png")
 
 
 if __name__ == "__main__":
