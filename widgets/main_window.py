@@ -539,9 +539,10 @@ class MainWindow(QMainWindow):
             self._result_panel.set_view_mode(mode)
 
     def _on_zscale_toggle(self, _mode: str) -> None:
-        """Z scale 콤보 변경 — cell 재생성 없이 z_range만 갈아끼우고 3D 캐시 무효화.
+        """Z scale 콤보 변경 — z_range 갱신 후 2D/3D 양쪽 재렌더.
 
-        2D는 영향 없으므로 캐시 유지, 3D만 재렌더 (현재 view가 3D면 즉시).
+        z_range는 2D ImageItem levels(+colorbar)와 3D surface colors 모두에
+        영향. 양쪽 렌더 캐시 reset 필요 (보간 캐시는 유지되므로 빠름).
         """
         cells = self._result_panel.cells
         if not cells:
@@ -549,4 +550,4 @@ class MainWindow(QMainWindow):
         view_mode = self.cb_view.currentText() or "2D"
         displays = [c.display for c in cells]
         self._apply_z_scale_mode(displays, view_mode)
-        self._result_panel.invalidate_3d()
+        self._result_panel.refresh_all()

@@ -11,11 +11,13 @@ import numpy as np
 
 import pyqtgraph as pg
 import pyqtgraph.opengl as gl
-from PySide6.QtCore import QMimeData, QPoint, QRectF, Qt
-from PySide6.QtGui import QImage, QPainter, QPixmap
+from PySide6.QtCore import QMimeData, QPoint, QRect, QRectF, Qt
+from PySide6.QtGui import (
+    QColor, QFont, QFontMetrics, QImage, QLinearGradient, QPainter, QPen, QPixmap,
+)
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QHeaderView, QLabel, QMenu,
-    QStackedLayout, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QAbstractItemView, QApplication, QFrame, QHBoxLayout, QHeaderView, QLabel,
+    QMenu, QStackedLayout, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from core import settings as settings_io
@@ -64,16 +66,34 @@ def _points_inside_wafer(XG, YG, show_notch: bool, depth: float = _NOTCH_DEFAULT
     return inside
 
 
-# ── 커스텀 컬러맵 — pyqtgraph 기본 목록에 없는 2-stop gradient ──────
-# 이름은 core.themes.HEATMAP_COLORMAPS에 함께 등록. 값은 0..1 정규화 기준.
+# ── 커스텀 컬러맵 — pyqtgraph 기본 목록에 없는 것 ──────
+# 이름은 core.themes.HEATMAP_COLORMAPS에 함께 등록.
+def _reversed_pg_cmap(name: str) -> pg.ColorMap:
+    """pyqtgraph 기본 컬러맵을 min↔max 뒤집어 새 ColorMap 반환.
+
+    pg 기본은 color가 float64(0~1). 새 ColorMap 생성자는 float 입력을 정상
+    처리 못 해 uint8(0~255)로 변환 후 넘긴다.
+    """
+    cm = pg.colormap.get(name)
+    color_u8 = (cm.color[::-1] * 255).astype(np.uint8)
+    return pg.ColorMap(pos=cm.pos, color=color_u8)
+
+
 _CUSTOM_CMAPS: dict[str, pg.ColorMap] = {
-    "Red-White":   pg.ColorMap([0.0, 1.0], [(255, 255, 255), (220,  30,  30)]),
-    "Blue-White":  pg.ColorMap([0.0, 1.0], [(255, 255, 255), ( 30,  70, 220)]),
-    "Black-White": pg.ColorMap([0.0, 1.0], [(255, 255, 255), ( 20,  20,  20)]),
-    "Navy-White":  pg.ColorMap([0.0, 1.0], [(255, 255, 255), ( 20,  35, 110)]),
-    "Pink-White":  pg.ColorMap([0.0, 1.0], [(255, 255, 255), (230,  70, 150)]),
-    "Brown-White": pg.ColorMap([0.0, 1.0], [(255, 255, 255), (130,  75,  40)]),
+    # 2-stop gradient (min=White)
+    "Red-White":      pg.ColorMap([0.0, 1.0], [(255, 255, 255), (220,  30,  30)]),
+    "Blue-White":     pg.ColorMap([0.0, 1.0], [(255, 255, 255), ( 30,  70, 220)]),
+    "Black-White":    pg.ColorMap([0.0, 1.0], [(255, 255, 255), ( 20,  20,  20)]),
+    "Navy-White":     pg.ColorMap([0.0, 1.0], [(255, 255, 255), ( 20,  35, 110)]),
+    "Pink-White":     pg.ColorMap([0.0, 1.0], [(255, 255, 255), (230,  70, 150)]),
+    "Brown-White":    pg.ColorMap([0.0, 1.0], [(255, 255, 255), (130,  75,  40)]),
     "Charcoal-White": pg.ColorMap([0.0, 1.0], [(255, 255, 255), ( 65,  70,  80)]),
+    # 뒤집힌 변형 (Turbo 제외)
+    "Reverse-Viridis": _reversed_pg_cmap("viridis"),
+    "Reverse-Plasma":  _reversed_pg_cmap("plasma"),
+    "Reverse-Inferno": _reversed_pg_cmap("inferno"),
+    "Reverse-Magma":   _reversed_pg_cmap("magma"),
+    "Reverse-Cividis": _reversed_pg_cmap("cividis"),
 }
 
 
@@ -102,16 +122,99 @@ def _compute_smooth_vertex_normals(vertexes: np.ndarray, faces: np.ndarray) -> n
     return vert_n.astype(np.float32)
 
 
+class _LockedGLView(gl.GLViewWidget):
+    """휠 줌 차단 GLViewWidget — chart 크기 고정을 위함. 드래그 회전/팬은 허용."""
+
+    def wheelEvent(self, ev):
+        ev.ignore()
+
+
+class _ColorBar(QWidget):
+    """QWidget + QPainter 기반 경량 컬러맵 스케일바.
+
+    pg.PlotWidget 버전은 cell당 ~18ms 생성 비용. 이 구현은 ~0.1ms.
+    20-stop QLinearGradient(GPU 가속)로 충분히 부드러운 그라데이션 + tick 라벨 5개.
+    """
+
+    _BAR_RIGHT = 5  # 색상바 우측 margin (bar는 우측, 라벨은 좌측)
+    _BAR_W = 14     # 색상바 폭
+    _LABEL_GAP = 4  # bar와 라벨 사이 간격
+    _MARGIN_V = 12  # 상하 여유 (라벨 잘림 방지)
+    _N_STOPS = 20   # QLinearGradient stop 수
+    _N_TICKS = 5    # 라벨 수
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setFixedWidth(60)
+        self._cmap: pg.ColorMap | None = None
+        self._vmin: float = 0.0
+        self._vmax: float = 1.0
+        self._has_data: bool = False
+
+    def update_bar(self, cmap: pg.ColorMap, vmin: float, vmax: float) -> None:
+        if (vmin is None or vmax is None
+                or not np.isfinite(vmin) or not np.isfinite(vmax)
+                or vmin == vmax):
+            return
+        self._cmap = cmap
+        self._vmin = float(vmin)
+        self._vmax = float(vmax)
+        self._has_data = True
+        self.update()
+
+    def paintEvent(self, ev) -> None:
+        if not self._has_data or self._cmap is None:
+            return
+        p = QPainter(self)
+        try:
+            p.fillRect(self.rect(), QColor("white"))
+            w = self.width()
+            h = self.height()
+            bar_top = self._MARGIN_V
+            bar_bottom = h - self._MARGIN_V
+            bar_h = bar_bottom - bar_top
+            if bar_h <= 0:
+                return
+            bar_x = w - self._BAR_RIGHT - self._BAR_W
+            # 세로 gradient — top=max 색, bottom=min 색
+            grad = QLinearGradient(0, bar_top, 0, bar_bottom)
+            lut = self._cmap.getLookupTable(0.0, 1.0, self._N_STOPS)
+            for i in range(self._N_STOPS):
+                t = i / (self._N_STOPS - 1)     # 0=top, 1=bottom
+                idx = self._N_STOPS - 1 - i     # top=LUT 마지막(max)
+                rgb = lut[idx]
+                grad.setColorAt(t, QColor(int(rgb[0]), int(rgb[1]), int(rgb[2])))
+            p.fillRect(QRect(bar_x, bar_top, self._BAR_W, bar_h), grad)
+            # tick 라벨 (5개, top=max) — bar 좌측에 우측 정렬
+            fmt = "{:.0f}" if (self._vmax - self._vmin) >= 20 else "{:.1f}"
+            font = QFont("Arial", 8)
+            p.setFont(font)
+            p.setPen(QPen(QColor(40, 40, 40)))
+            fm = QFontMetrics(font)
+            text_right = bar_x - self._LABEL_GAP
+            for i in range(self._N_TICKS):
+                t = i / (self._N_TICKS - 1)
+                val = self._vmax - t * (self._vmax - self._vmin)
+                y = bar_top + t * bar_h
+                text = fmt.format(val)
+                tw = fm.horizontalAdvance(text)
+                p.drawText(text_right - tw, int(y + fm.height() / 3), text)
+        finally:
+            p.end()
+
+
 def resolve_colormap(name: str) -> pg.ColorMap:
-    """이름 → pg.ColorMap. 커스텀 dict 먼저, 없으면 pyqtgraph 기본. 최종 fallback은 viridis."""
+    """이름 → pg.ColorMap. 커스텀 먼저, pyqtgraph는 대소문자 무관 lookup. fallback: viridis."""
     if name in _CUSTOM_CMAPS:
         return _CUSTOM_CMAPS[name]
-    try:
-        cm = pg.colormap.get(name)
-        if cm is not None:
-            return cm
-    except Exception:
-        pass
+    # pyqtgraph 기본(plasma/turbo 등)은 소문자라, 대문자 표기도 받아들이도록 소문자 재시도
+    for candidate in (name, name.lower()):
+        try:
+            cm = pg.colormap.get(candidate)
+            if cm is not None:
+                return cm
+        except Exception:
+            continue
     return pg.colormap.get("viridis")
 
 
@@ -137,8 +240,11 @@ def _fmt(v, decimals: int) -> str:
     return f"{v:.{decimals}f}"
 
 
-class WaferCell(QWidget):
-    """2D heatmap + 4행×2열 Summary 표. 컨테이너 grab → Copy Graph 합성 이미지."""
+class WaferCell(QFrame):
+    """2D heatmap + 4행×2열 Summary 표. 컨테이너 grab → Copy Graph 합성 이미지.
+
+    title + chart_box + table 전체가 하나의 패널 (border 박스)로 묶임.
+    """
 
     def __init__(
         self,
@@ -154,6 +260,12 @@ class WaferCell(QWidget):
         self._view_mode = view_mode  # "2D" | "3D"
         self._deferred = defer_render
 
+        # cell 전체를 하나의 흰 패널 + 테두리로 묶음 (ID selector로 자식 위젯 영향 차단)
+        self.setObjectName("waferCell")
+        self.setStyleSheet(
+            "#waferCell { background: white; border: 1px solid #bfbfbf; }"
+        )
+
         lay = QVBoxLayout(self)
         lay.setContentsMargins(6, 6, 6, 6)
         lay.setSpacing(4)
@@ -163,24 +275,52 @@ class WaferCell(QWidget):
         self._title.setStyleSheet("font-weight: bold;")
         lay.addWidget(self._title)
 
-        # 차트 컨테이너 — 2D/3D 위젯 둘 다 미리 생성, QStackedLayout으로 인덱스만 토글
-        # 효과: 토글 즉시 swap (위젯 파괴/생성 없음), 첫 3D 진입 시 깜빡임 제거
+        # 차트 컨테이너 — [stacked(2D/3D)] + [colorbar] 좌우 배치. 하나의 패널로 통합.
+        # stacked: 2D/3D 위젯 둘 다 미리 생성, QStackedLayout으로 인덱스만 토글.
+        # colorbar: 2D/3D 공통, 매 렌더 시 (cmap, vmin, vmax)로 업데이트.
         self._chart_box = QWidget()
-        self._chart_box.setMinimumSize(280, 280)
-        self._chart_box_layout = QStackedLayout(self._chart_box)
+        _hbox = QHBoxLayout(self._chart_box)
+        _hbox.setContentsMargins(0, 0, 0, 0); _hbox.setSpacing(0)
+
+        self._chart_area = QWidget()
+        self._chart_box_layout = QStackedLayout(self._chart_area)
         self._chart_box_layout.setContentsMargins(0, 0, 0, 0)
+        _hbox.addWidget(self._chart_area, stretch=1)
+
+        self._colorbar = _ColorBar()
+        _hbox.addWidget(self._colorbar)
+
         lay.addWidget(self._chart_box, stretch=1)
 
         self._plot_2d = pg.PlotWidget()
         self._plot_2d.setBackground("w")
         self._plot_2d.setAspectLocked(True)
+        self._plot_2d.setFrameShape(QFrame.Shape.NoFrame)
+        # 300mm 웨이퍼는 항상 -150~+150 mm이라 축 눈금 불필요
+        self._plot_2d.getPlotItem().hideAxis("bottom")
+        self._plot_2d.getPlotItem().hideAxis("left")
+        # 마우스 줌/팬/메뉴 차단 + 웨이퍼 전체가 꽉 차도록 range 고정
+        self._plot_2d.setMouseEnabled(False, False)
+        self._plot_2d.getPlotItem().setMenuEnabled(False)
+        self._plot_2d.getPlotItem().setDefaultPadding(0)
+        self._plot_2d.setRange(
+            xRange=(-WAFER_RADIUS_MM, WAFER_RADIUS_MM),
+            yRange=(-WAFER_RADIUS_MM, WAFER_RADIUS_MM),
+            padding=0.05,
+        )
         self._plot_2d.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._plot_2d.customContextMenuRequested.connect(self._show_plot_menu)
         self._chart_box_layout.addWidget(self._plot_2d)  # index 0
 
-        self._gl_3d = gl.GLViewWidget()
+        self._gl_3d = _LockedGLView()
         self._gl_3d.setBackgroundColor("w")
-        self._gl_3d.setCameraPosition(distance=480, elevation=28, azimuth=-135)
+        # 초기 카메라 — FOV 45° 하드, distance는 settings 값
+        s = settings_io.load_settings().get("chart_3d", {})
+        self._gl_3d.setCameraPosition(
+            distance=float(s.get("camera_distance", 500)),
+            elevation=28, azimuth=-135,
+        )
+        self._gl_3d.opts["fov"] = 45
         self._gl_3d.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._gl_3d.customContextMenuRequested.connect(self._show_plot_menu)
         self._chart_box_layout.addWidget(self._gl_3d)    # index 1
@@ -242,9 +382,35 @@ class WaferCell(QWidget):
         if self._v_in.size == 0:
             return
         settings = settings_io.load_settings()
+        self._apply_chart_size(settings.get("chart_common", {}))
         self._update_table(self._v_in, settings.get("table", {}))
         self._activate_current_view()
         self._deferred = False
+
+    def _apply_chart_size(self, common: dict) -> None:
+        """cell 전체를 컨텐츠에 딱 맞춘 고정 크기로 — 리사이즈 시 간격 stretch 없음.
+
+        스케일바 유무와 **무관하게 cell 전체 폭도, chart_area 크기도 동일** —
+        3D 크기는 카메라 distance로만 변함. 스케일바 해제 시 chart_area가
+        좌우로 중앙 정렬만 될 뿐(좌우 margin 대칭).
+        """
+        w = int(common.get("chart_width", 360))
+        h = int(common.get("chart_height", 280))
+        show_bar = bool(common.get("show_scale_bar", True))
+        bar_w = 60  # colorbar fixed width (0.8× of 75)
+        self._chart_area.setFixedSize(w, h)   # 항상 동일 → 3D viewport 고정
+        self._colorbar.setFixedHeight(h)
+        # 스케일바 해제 시엔 좌/우 margin으로 chart_area 중앙 정렬
+        hbox = self._chart_box.layout()
+        if show_bar:
+            hbox.setContentsMargins(0, 0, 0, 0)
+        else:
+            hbox.setContentsMargins(bar_w // 2, 0, bar_w // 2, 0)
+        title_h = self._title.sizeHint().height()
+        table_h = self._table.height()
+        total_h = title_h + h + table_h + 6 * 2 + 4 * 2
+        total_w = w + bar_w + 6 * 2  # show_bar 무관 고정
+        self.setFixedSize(total_w, total_h)
 
     # ── 외부 API ───────────────────────────────────
     @property
@@ -279,6 +445,8 @@ class WaferCell(QWidget):
         self._rendered_3d = False
         self._reset_2d_items()
         self._reset_3d_items()
+        settings = settings_io.load_settings()
+        self._apply_chart_size(settings.get("chart_common", {}))
         self._activate_current_view()
 
     def prefetch_interp(self) -> None:
@@ -382,7 +550,7 @@ class WaferCell(QWidget):
 
         컬러맵·shading 등은 interp 결과에 영향 없으므로 캐시 히트 경로로 수 ms 처리.
         """
-        method = common.get("interp_method", "rbf")
+        method = common.get("interp_method", "RBF-ThinPlate")
         G = int(common.get("grid_resolution", 100))
         show_notch = bool(common.get("show_notch", True))
         depth = float(common.get("notch_depth_mm", _NOTCH_DEFAULT_DEPTH_MM))
@@ -416,7 +584,7 @@ class WaferCell(QWidget):
         plot = self._plot_2d
         self._reset_2d_items()
 
-        cmap_name = common.get("colormap", "turbo")
+        cmap_name = common.get("colormap", "Turbo")
         img = pg.ImageItem(ZG)
         img.setRect(QRectF(
             -WAFER_RADIUS_MM, -WAFER_RADIUS_MM,
@@ -424,6 +592,9 @@ class WaferCell(QWidget):
         ))
         cmap = resolve_colormap(cmap_name)
         img.setLookupTable(cmap.getLookupTable())
+        # Z-Scale 공통 모드면 display.z_range로 levels 고정 → 2D에도 공통 스케일 반영
+        if self._display.z_range is not None:
+            img.setLevels(self._display.z_range)
         plot.addItem(img)
 
         if common.get("show_circle", True):
@@ -453,9 +624,23 @@ class WaferCell(QWidget):
                 txt.setPos(float(x), float(y))
                 plot.addItem(txt)
 
+        # colorbar 갱신 — 공통 스케일이면 display.z_range, 아니면 ZG inside 유효값
+        if self._display.z_range is not None:
+            self._update_colorbar(common, None, vmin=self._display.z_range[0], vmax=self._display.z_range[1])
+        else:
+            self._update_colorbar(common, ZG[inside])
+
     def _render_3d(self, x_in, y_in, v_in, settings) -> None:
         common = settings.get("chart_common", {})
         chart3d = settings.get("chart_3d", {})
+
+        # 카메라 distance — Settings 변경 시 즉시 반영. FOV는 45° 하드코딩.
+        # (elevation/azimuth는 드래그로 사용자 조작 유지)
+        opts = self._gl_3d.opts
+        dist = float(chart3d.get("camera_distance", 500))
+        if opts.get("distance") != dist:
+            self._gl_3d.setCameraPosition(distance=dist)
+            self._gl_3d.update()
 
         XG, YG, ZG, inside, xg, yg = self._ensure_interp(x_in, y_in, v_in, common)
 
@@ -483,7 +668,7 @@ class WaferCell(QWidget):
         z_disp = np.where(inside, z_disp, 0.0)
 
         # 컬러: 정점마다 RGBA (공통 컬러맵)
-        cmap_name = common.get("colormap", "turbo")
+        cmap_name = common.get("colormap", "Turbo")
         cmap = resolve_colormap(cmap_name)
         lut = cmap.getLookupTable(0.0, 1.0, 256)  # (256, 4) ubyte
         norm = (ZG - vmin) / z_range
@@ -509,7 +694,7 @@ class WaferCell(QWidget):
             self._gl_grid.setVisible(False)
 
         # ── surface — shader/smooth 변경 시만 재생성, 그 외엔 setData로 데이터만 교체 ──
-        shader = str(chart3d.get("shading", "shaded"))
+        shader = "shaded"  # 하드코딩 — 다른 shader(normalColor/heightColor)는 컬러맵 무시라 UX 혼란
         smooth = bool(chart3d.get("smooth", True))
         surf_key = (shader, smooth)
         z_f32 = z_disp.astype(np.float32)
@@ -567,6 +752,26 @@ class WaferCell(QWidget):
         elif self._gl_boundary is not None:
             self._gl_boundary.setVisible(False)
 
+        # colorbar 갱신 (3D용 범위 = vmin~vmax. display.z_range가 있으면 그걸 사용)
+        self._update_colorbar(common, None, vmin=vmin, vmax=vmax)
+
+    def _update_colorbar(self, common: dict, values=None, vmin=None, vmax=None) -> None:
+        """show_scale_bar 옵션 반영 + 컬러맵/범위로 스케일바 갱신."""
+        if not bool(common.get("show_scale_bar", True)):
+            self._colorbar.setVisible(False)
+            return
+        self._colorbar.setVisible(True)
+        if vmin is None or vmax is None:
+            if values is None or values.size == 0:
+                return
+            valid = values[~np.isnan(values)]
+            if valid.size == 0:
+                return
+            vmin = float(valid.min())
+            vmax = float(valid.max())
+        cmap = resolve_colormap(common.get("colormap", "Turbo"))
+        self._colorbar.update_bar(cmap, vmin, vmax)
+
     def _update_table(self, v: np.ndarray, tbl_cfg: dict) -> None:
         decimals = int(tbl_cfg.get("decimals", 3))
         percent_suffix = bool(tbl_cfg.get("nu_percent_suffix", True))
@@ -609,7 +814,13 @@ class WaferCell(QWidget):
             if isinstance(chart, pg.PlotWidget):
                 chart.getPlotItem().enableAutoRange()
             elif isinstance(chart, gl.GLViewWidget):
-                chart.setCameraPosition(distance=480, elevation=28, azimuth=-135)
+                s = settings_io.load_settings().get("chart_3d", {})
+                chart.setCameraPosition(
+                    distance=float(s.get("camera_distance", 500)),
+                    elevation=28, azimuth=-135,
+                )
+                chart.opts["fov"] = 45
+                chart.update()
         elif chosen is a_graph:
             self._copy_graph()
         elif chosen is a_data:

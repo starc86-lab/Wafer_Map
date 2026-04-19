@@ -232,12 +232,17 @@ HEATMAP_COLORMAPS = [
     "CET-L8",
     "CET-L16",
     "CET-L19",
-    "viridis",
-    "plasma",
-    "inferno",
-    "magma",
-    "cividis",
-    "turbo",
+    "Viridis",
+    "Reverse-Viridis",
+    "Plasma",
+    "Reverse-Plasma",
+    "Inferno",
+    "Reverse-Inferno",
+    "Magma",
+    "Reverse-Magma",
+    "Cividis",
+    "Reverse-Cividis",
+    "Turbo",
     "CET-D1",
     "CET-D4",
     "CET-D8",
@@ -289,17 +294,16 @@ DEFAULT_SETTINGS = {
 
     # MAP 공통 설정 — 2D/3D 양쪽에 같이 적용
     "chart_common": {
-        "colormap": "turbo",
+        "colormap": "Turbo",
         "show_circle": True,       # 웨이퍼 경계 원
         "show_notch": True,        # 경계 원에 notch(V자 홈) 표시 — 6시 방향 고정
         "notch_depth_mm": 5.0,     # notch 깊이(mm, 시각적 과장)
-        "grid_resolution": 100,    # 보간 격자 해상도 (격자 한 변)
-        # 보간 방법:
-        #   "rbf"           — thin-plate spline, convex hull 외부까지 부드럽게 외삽 (기본)
-        #   "cubic"         — scipy.griddata cubic, 외부 NaN (8각형 경계)
-        #   "cubic_nearest" — cubic 내부 + nearest 외부 (계단 경계)
-        #   "phantom_ring"  — 원 둘레 가상점 추가 후 cubic
-        "interp_method": "rbf",
+        "show_scale_bar": True,    # 그래프 우측에 컬러맵 스케일바
+        "chart_width": 360,        # 그래프 가로 (px) — 360:280 비율 기준 중
+        "chart_height": 280,       # 그래프 세로 (px)
+        "grid_resolution": 150,    # 보간 격자 해상도 (격자 한 변)
+        # 보간 방법 — core/interp.py 참고
+        "interp_method": "RBF-ThinPlate",
     },
 
     # 2D MAP 전용 (공통은 chart_common 참조)
@@ -311,10 +315,10 @@ DEFAULT_SETTINGS = {
 
     # 3D MAP 전용 (공통은 chart_common, Z 스케일은 메인 윈도우 컨트롤)
     "chart_3d": {
-        "shading": "shaded",       # shaded / normalColor / heightColor
         "smooth": True,
-        "z_exaggeration": None,    # Z 과장 배율: None=자동(X/Y 범위 기준 정규화), float=고정 배율
+        "z_exaggeration": 1.0,     # Z 과장 배율 (0.5~3.0, 1.0=기준)
         "show_grid": False,        # 바닥 그리드
+        "camera_distance": 550,    # 카메라 거리 (작을수록 확대, 400~800)
     },
 
     # Summary 표

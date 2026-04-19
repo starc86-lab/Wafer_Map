@@ -22,20 +22,51 @@ from widgets.settings_dialog import apply_global_style
 
 
 def _gl_warmup() -> None:
-    """앱 시작 시 OpenGL 컨텍스트/드라이버 초기화 비용을 미리 지불.
-
-    첫 GLViewWidget이 생성되는 시점(= 사용자가 처음 3D 선택)에 발생하는
-    화면 깜빡임을 제거. show 없이 setVisible(False)로 만들고 즉시 폐기.
-    """
+    """OpenGL 컨텍스트 사전 초기화 — 첫 3D 깜빡임 제거용."""
     try:
         import pyqtgraph.opengl as gl
         w = gl.GLViewWidget()
         w.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
         w.resize(8, 8)
-        w.show()                # 컨텍스트 생성 트리거
+        w.show()
         QApplication.processEvents()
         w.hide()
         w.deleteLater()
+    except Exception:
+        pass
+
+
+def _render_warmup() -> None:
+    """pyqtgraph / scipy 의 lazy 초기화 비용을 앱 시작 시점에 흡수.
+
+    첫 Run Analysis에서 발생하던 cell 순차 생성 느낌(cell 하나씩 나타남)은
+    이 lib들의 첫 호출 cost가 cell마다 누적되어 발생. 여기서 미리 한 번 돌려
+    이후 Run Analysis는 두 번째 실행부터와 동일한 속도로 시작.
+    """
+    import numpy as np
+    try:
+        # pyqtgraph — PlotWidget / ImageItem / ColorMap 첫 사용 준비
+        import pyqtgraph as pg
+        pw = pg.PlotWidget()
+        pw.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
+        pw.resize(8, 8)
+        img = pg.ImageItem(np.zeros((8, 8), dtype=np.float32))
+        pw.addItem(img)
+        cm = pg.colormap.get("turbo")
+        img.setLookupTable(cm.getLookupTable(0.0, 1.0, 32))
+        pw.show()
+        QApplication.processEvents()
+        pw.hide()
+        pw.deleteLater()
+    except Exception:
+        pass
+    try:
+        # scipy RBF — 첫 호출 JIT/초기화 비용 흡수
+        from scipy.interpolate import RBFInterpolator
+        pts = np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
+        vals = np.array([1.0, 2.0, 3.0, 4.0])
+        rbf = RBFInterpolator(pts, vals, kernel="thin_plate_spline")
+        rbf(np.array([[0.5, 0.5]]))
     except Exception:
         pass
 
@@ -61,7 +92,8 @@ def main() -> int:
     except Exception:
         pass
 
-    _gl_warmup()  # 첫 3D 깜빡임 제거: 윈도우 show 전에 OpenGL 컨텍스트 정착
+    _gl_warmup()      # OpenGL 컨텍스트 정착
+    _render_warmup()  # pyqtgraph/scipy lazy 초기화 → 첫 Run Analysis가 2번째와 동속
 
     win = MainWindow()
     win.show()

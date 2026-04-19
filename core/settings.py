@@ -74,6 +74,33 @@ def _migrate_chart_common(loaded: dict[str, Any]) -> None:
     if isinstance(c3d, dict):
         c3d.pop("z_scale_mode", None)
         c3d.pop("show_axes", None)
+        c3d.pop("shading", None)
+        c3d.pop("camera_fov", None)
+        c3d.pop("x_stretch", None)
+        # z_exaggeration None(자동) → 1.0 (동등 결과)
+        if c3d.get("z_exaggeration") is None:
+            c3d["z_exaggeration"] = 1.0
+    # interp_method 이름 표기 통일 (소문자 snake_case → PascalCase + dash).
+    # 삭제된 방식(cubic/idw 등)은 default(RBF-ThinPlate)로.
+    _INTERP_ALIASES = {
+        "rbf_thin_plate":   "RBF-ThinPlate",
+        "rbf_multiquadric": "RBF-Multiquadric",
+        "rbf_gaussian":     "RBF-Gaussian",
+        "rbf_quintic":      "RBF-Quintic",
+        # 삭제된 것들 → default
+        "rbf": "RBF-ThinPlate",
+        "cubic": "RBF-ThinPlate",
+        "cubic_nearest": "RBF-ThinPlate",
+        "phantom_ring": "RBF-ThinPlate",
+        "idw": "RBF-ThinPlate",
+    }
+    im = common.get("interp_method")
+    if im in _INTERP_ALIASES:
+        common["interp_method"] = _INTERP_ALIASES[im]
+    # colormap 소문자 mpl 이름(viridis, plasma 등) → 첫글자 대문자 표기로 통일
+    cmap = common.get("colormap")
+    if cmap in ("viridis", "plasma", "inferno", "magma", "cividis", "turbo"):
+        common["colormap"] = cmap.capitalize()
 
 
 def save_settings(settings: dict[str, Any]) -> None:

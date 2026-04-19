@@ -96,24 +96,39 @@ class ResultPanel(QWidget):
         else:
             self._summary_label.hide()
 
-        # 1. cells 생성 — defer_render=True로 Qt 아이템 생성 스킵
-        for d in displays:
-            cell = WaferCell(d, value_name, view_mode=view_mode, defer_render=True)
-            self._cells.append(cell)
-            self._layout.addWidget(cell)
-        self._layout.addStretch(1)
+        # container 전체를 hide한 채 cells 생성·렌더·layout 완료 → 최종 show.
+        # hide 동안은 paint/layout activate가 deferred라 "중첩→펼쳐짐" 현상 제거.
+        self._container.hide()
+        try:
+            new_cells = []
+            for d in displays:
+                cell = WaferCell(d, value_name, view_mode=view_mode, defer_render=True)
+                new_cells.append(cell)
+                self._cells.append(cell)
 
-        # 2. 병렬 보간 prefetch — cell당 RBF가 GIL 해제라 ThreadPoolExecutor 이득 큼
-        if len(self._cells) > 1:
-            from concurrent.futures import ThreadPoolExecutor
-            with ThreadPoolExecutor(max_workers=len(self._cells)) as ex:
-                list(ex.map(lambda c: c.prefetch_interp(), self._cells))
+            # 병렬 보간 prefetch
+            if len(new_cells) > 1:
+                from concurrent.futures import ThreadPoolExecutor
+                with ThreadPoolExecutor(max_workers=len(new_cells)) as ex:
+                    list(ex.map(lambda c: c.prefetch_interp(), new_cells))
 
-        # 3. 각 cell 초기 렌더 (보간 캐시 hit 경로)
-        for c in self._cells:
-            c.render_initial()
+            # 초기 렌더 (container hidden이라 paint 없음)
+            for c in new_cells:
+                c.render_initial()
 
-        # 4. 2D paint 완료 이후 비활성 view(주로 3D) 백그라운드 prefetch
+            # layout에 add
+            for c in new_cells:
+                self._layout.addWidget(c)
+            self._layout.addStretch(1)
+
+            # hidden 상태에서 layout을 강제 activate → 자식 geometry 확정
+            # 이걸 빼면 show() 직후 (0,0)에 쌓였다가 HBoxLayout이 펼쳐지는 1프레임이 보임
+            self._layout.activate()
+            self._container.adjustSize()
+        finally:
+            self._container.show()
+
+        # 비활성 view(주로 3D) 백그라운드 prefetch
         QTimer.singleShot(50, self._prefetch_inactive_views)
 
     def _prefetch_inactive_views(self) -> None:

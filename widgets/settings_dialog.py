@@ -206,8 +206,9 @@ class UiSettingsCard(QGroupBox):
 # ────────────────────────────────────────────────────────
 # Graph 설정 카드 — 2D / 3D 서브그룹
 # ────────────────────────────────────────────────────────
-INTERP_METHODS = ["rbf", "cubic", "cubic_nearest", "phantom_ring"]
-SHADING_MODES = ["shaded", "normalColor", "heightColor"]  # pyqtgraph.opengl 지원 셰이더
+INTERP_METHODS = [
+    "RBF-ThinPlate", "RBF-Multiquadric", "RBF-Gaussian", "RBF-Quintic",
+]
 
 
 class ChartCommonGroup(QGroupBox):
@@ -220,13 +221,13 @@ class ChartCommonGroup(QGroupBox):
 
         self.cb_cmap = _limit_width(QComboBox())
         self.cb_cmap.addItems(HEATMAP_COLORMAPS)
-        idx = self.cb_cmap.findText(cfg.get("colormap", "turbo"))
+        idx = self.cb_cmap.findText(cfg.get("colormap", "Turbo"))
         if idx >= 0:
             self.cb_cmap.setCurrentIndex(idx)
 
         self.cb_interp = _limit_width(QComboBox())
         self.cb_interp.addItems(INTERP_METHODS)
-        idx = self.cb_interp.findText(cfg.get("interp_method", "rbf"))
+        idx = self.cb_interp.findText(cfg.get("interp_method", "RBF-ThinPlate"))
         if idx >= 0:
             self.cb_interp.setCurrentIndex(idx)
 
@@ -241,6 +242,23 @@ class ChartCommonGroup(QGroupBox):
 
         self.chk_notch = _fix_width(QCheckBox())
         self.chk_notch.setChecked(bool(cfg.get("show_notch", True)))
+
+        self.chk_scale_bar = _fix_width(QCheckBox())
+        self.chk_scale_bar.setChecked(bool(cfg.get("show_scale_bar", True)))
+
+        # 그래프 크기 — 360:280 비율 고정, 대/중/소 3 프리셋
+        self.cb_chart_size = _limit_width(QComboBox())
+        for label, w, h in (("소", 288, 224), ("중", 360, 280), ("대", 432, 336)):
+            self.cb_chart_size.addItem(f"{label} ({w}×{h})", (w, h))
+        cur_w = int(cfg.get("chart_width", 360))
+        cur_h = int(cfg.get("chart_height", 280))
+        match_idx = 1  # 중 기본
+        for i in range(self.cb_chart_size.count()):
+            w, h = self.cb_chart_size.itemData(i)
+            if w == cur_w and h == cur_h:
+                match_idx = i
+                break
+        self.cb_chart_size.setCurrentIndex(match_idx)
 
         # Notch Depth 콤보 + "mm" 단위 라벨
         self.cb_notch_depth = QComboBox()
@@ -262,6 +280,8 @@ class ChartCommonGroup(QGroupBox):
             ("경계 원", self.chk_circle),
             ("Notch 표시", self.chk_notch),
             ("Notch Depth", depth_row),
+            ("스케일바 표시", self.chk_scale_bar),
+            ("그래프 크기", self.cb_chart_size),
         ])
 
         self.cb_cmap.currentIndexChanged.connect(self.changed)
@@ -270,8 +290,11 @@ class ChartCommonGroup(QGroupBox):
         self.chk_circle.toggled.connect(self.changed)
         self.chk_notch.toggled.connect(self.changed)
         self.cb_notch_depth.currentIndexChanged.connect(self.changed)
+        self.chk_scale_bar.toggled.connect(self.changed)
+        self.cb_chart_size.currentIndexChanged.connect(self.changed)
 
     def gather(self) -> dict[str, Any]:
+        w, h = self.cb_chart_size.currentData()
         return {
             "colormap": self.cb_cmap.currentText(),
             "interp_method": self.cb_interp.currentText(),
@@ -279,17 +302,21 @@ class ChartCommonGroup(QGroupBox):
             "show_circle": self.chk_circle.isChecked(),
             "show_notch": self.chk_notch.isChecked(),
             "notch_depth_mm": float(self.cb_notch_depth.currentData()),
+            "show_scale_bar": self.chk_scale_bar.isChecked(),
+            "chart_width": int(w),
+            "chart_height": int(h),
         }
 
     def reload(self, cfg: dict[str, Any]) -> None:
         widgets = (self.cb_cmap, self.cb_interp, self.cb_grid, self.chk_circle,
-                   self.chk_notch, self.cb_notch_depth)
+                   self.chk_notch, self.cb_notch_depth, self.chk_scale_bar,
+                   self.cb_chart_size)
         for w in widgets:
             w.blockSignals(True)
         try:
-            idx = self.cb_cmap.findText(cfg.get("colormap", "turbo"))
+            idx = self.cb_cmap.findText(cfg.get("colormap", "Turbo"))
             if idx >= 0: self.cb_cmap.setCurrentIndex(idx)
-            idx = self.cb_interp.findText(cfg.get("interp_method", "rbf"))
+            idx = self.cb_interp.findText(cfg.get("interp_method", "RBF-ThinPlate"))
             if idx >= 0: self.cb_interp.setCurrentIndex(idx)
             idx = self.cb_grid.findData(int(cfg.get("grid_resolution", 100)))
             if idx >= 0: self.cb_grid.setCurrentIndex(idx)
@@ -297,6 +324,14 @@ class ChartCommonGroup(QGroupBox):
             self.chk_notch.setChecked(bool(cfg.get("show_notch", True)))
             idx = self.cb_notch_depth.findData(float(cfg.get("notch_depth_mm", 5.0)))
             if idx >= 0: self.cb_notch_depth.setCurrentIndex(idx)
+            self.chk_scale_bar.setChecked(bool(cfg.get("show_scale_bar", True)))
+            cur_w = int(cfg.get("chart_width", 360))
+            cur_h = int(cfg.get("chart_height", 280))
+            for i in range(self.cb_chart_size.count()):
+                w, h = self.cb_chart_size.itemData(i)
+                if w == cur_w and h == cur_h:
+                    self.cb_chart_size.setCurrentIndex(i)
+                    break
         finally:
             for w in widgets:
                 w.blockSignals(False)
@@ -363,70 +398,57 @@ class Chart3DGroup(QGroupBox):
     def __init__(self, cfg: dict[str, Any], parent: QWidget | None = None) -> None:
         super().__init__("3D MAP 설정", parent)
 
-        self.cb_shading = _limit_width(QComboBox())
-        self.cb_shading.addItems(SHADING_MODES)
-        idx = self.cb_shading.findText(cfg.get("shading", "shaded"))
-        if idx >= 0:
-            self.cb_shading.setCurrentIndex(idx)
-
         self.chk_smooth = _fix_width(QCheckBox())
         self.chk_smooth.setChecked(bool(cfg.get("smooth", True)))
 
-        self.cb_zexag = _limit_width(QComboBox())
-        self.cb_zexag.addItem("자동", None)
-        for v in (0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0, 5.0):
-            self.cb_zexag.addItem(f"{v:g}\u00d7", v)
-        cur = cfg.get("z_exaggeration", None)
-        if cur is None:
-            self.cb_zexag.setCurrentIndex(0)
-        else:
-            try:
-                idx = self.cb_zexag.findData(float(cur))
-            except (TypeError, ValueError):
-                idx = 0
-            self.cb_zexag.setCurrentIndex(idx if idx >= 0 else 0)
+        # Z-Height (배율) — DoubleSpinBox, 0.5~3.0, step 0.1, 소수 1자리
+        self.sp_zexag = _limit_width(QDoubleSpinBox())
+        self.sp_zexag.setRange(0.5, 3.0)
+        self.sp_zexag.setSingleStep(0.1)
+        self.sp_zexag.setDecimals(1)
+        self.sp_zexag.setSuffix("×")
+        cur_z = cfg.get("z_exaggeration", 1.0)
+        self.sp_zexag.setValue(1.0 if cur_z is None else float(cur_z))
 
         self.chk_grid = _fix_width(QCheckBox())
         self.chk_grid.setChecked(bool(cfg.get("show_grid", True)))
 
+        # 카메라 distance — SpinBox, 400~800, step 10
+        self.sp_cam_dist = _limit_width(QSpinBox())
+        self.sp_cam_dist.setRange(400, 800)
+        self.sp_cam_dist.setSingleStep(10)
+        self.sp_cam_dist.setValue(int(cfg.get("camera_distance", 550)))
+
         _populate_two_columns(self, [
-            ("쉐이딩", self.cb_shading),
             ("부드럽게 (smooth)", self.chk_smooth),
-            ("Z-Height", self.cb_zexag),
+            ("Z-Height", self.sp_zexag),
             ("바닥 그리드", self.chk_grid),
+            ("카메라 거리", self.sp_cam_dist),
         ])
 
-        self.cb_shading.currentIndexChanged.connect(self.changed)
         self.chk_smooth.toggled.connect(self.changed)
-        self.cb_zexag.currentIndexChanged.connect(self.changed)
+        self.sp_zexag.valueChanged.connect(self.changed)
         self.chk_grid.toggled.connect(self.changed)
+        self.sp_cam_dist.valueChanged.connect(self.changed)
 
     def gather(self) -> dict[str, Any]:
         return {
-            "shading": self.cb_shading.currentText(),
             "smooth": self.chk_smooth.isChecked(),
-            "z_exaggeration": self.cb_zexag.currentData(),  # None(자동) or float
+            "z_exaggeration": float(self.sp_zexag.value()),
             "show_grid": self.chk_grid.isChecked(),
+            "camera_distance": int(self.sp_cam_dist.value()),
         }
 
     def reload(self, cfg: dict[str, Any]) -> None:
-        widgets = (self.cb_shading, self.chk_smooth, self.cb_zexag, self.chk_grid)
+        widgets = (self.chk_smooth, self.sp_zexag, self.chk_grid, self.sp_cam_dist)
         for w in widgets:
             w.blockSignals(True)
         try:
-            idx = self.cb_shading.findText(cfg.get("shading", "shaded"))
-            if idx >= 0: self.cb_shading.setCurrentIndex(idx)
             self.chk_smooth.setChecked(bool(cfg.get("smooth", True)))
-            cur = cfg.get("z_exaggeration", None)
-            if cur is None:
-                self.cb_zexag.setCurrentIndex(0)
-            else:
-                try:
-                    idx = self.cb_zexag.findData(float(cur))
-                except (TypeError, ValueError):
-                    idx = 0
-                self.cb_zexag.setCurrentIndex(idx if idx >= 0 else 0)
+            cur_z = cfg.get("z_exaggeration", 1.0)
+            self.sp_zexag.setValue(1.0 if cur_z is None else float(cur_z))
             self.chk_grid.setChecked(bool(cfg.get("show_grid", True)))
+            self.sp_cam_dist.setValue(int(cfg.get("camera_distance", 550)))
         finally:
             for w in widgets:
                 w.blockSignals(False)
@@ -760,12 +782,13 @@ class SettingsDialog(QDialog):
 
     # ── Save / Close ──────────────────────────
     def _on_save(self) -> None:
+        """파일 저장만 수행 — 다이얼로그는 닫지 않음. 사용자가 값 더 바꾸고
+        추가 저장하거나 Close로 닫을 수 있게."""
         merged = self._collect()
         settings_io.save_settings(merged)
         app = QApplication.instance()
         if app is not None:
             apply_global_style(app, merged)
-        self.accept()
 
     def _on_close(self) -> None:
         """메모리 변경은 유지(현재 앱에 이미 반영됨). 파일 저장은 안 함."""
