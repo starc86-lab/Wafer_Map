@@ -27,21 +27,41 @@ from core.metrics import summary_metrics
 BOUNDARY_SEGMENTS = 361
 
 # 300mm 웨이퍼 notch — 실제 스펙은 ~3mm 폭/~1mm 깊이지만 화면에서 잘 보이도록 과장.
-# 방향은 6시(하단, 3π/2) 고정.
+# 방향은 6시(하단, 3π/2) 고정. 깊이는 settings(chart_common.notch_depth_mm)에서 주입.
 _NOTCH_ANGLE = 3 * np.pi / 2
 _NOTCH_HALF_RAD = np.radians(3.0)
-_NOTCH_DEPTH_MM = 4.0
+_NOTCH_DEFAULT_DEPTH_MM = 5.0
 
 
-def _boundary_xy(show_notch: bool):
+def _boundary_xy(show_notch: bool, depth: float = _NOTCH_DEFAULT_DEPTH_MM):
     """웨이퍼 경계 좌표. notch 옵션 시 6시 방향에 V자 홈 반영."""
     theta = np.linspace(0, 2 * np.pi, BOUNDARY_SEGMENTS)
     r = np.full_like(theta, WAFER_RADIUS_MM)
     if show_notch:
         d = np.abs(((theta - _NOTCH_ANGLE + np.pi) % (2 * np.pi)) - np.pi)
         in_notch = d < _NOTCH_HALF_RAD
-        r[in_notch] = WAFER_RADIUS_MM - _NOTCH_DEPTH_MM * (1 - d[in_notch] / _NOTCH_HALF_RAD)
+        r[in_notch] = WAFER_RADIUS_MM - depth * (1 - d[in_notch] / _NOTCH_HALF_RAD)
     return r * np.cos(theta), r * np.sin(theta)
+
+
+def _points_inside_wafer(XG, YG, show_notch: bool, depth: float = _NOTCH_DEFAULT_DEPTH_MM):
+    """격자점이 웨이퍼 내부인가. notch 옵션 시 V자 + margin까지 제외.
+
+    margin은 cell의 반지름(0.5 픽셀)만큼 — V자 **경계선과 교차하는** cell만 추가 투명화.
+    해상도 무관하게 V자 "영역 크기"는 동일 (고해상도엔 부드럽게, 저해상도엔 계단).
+    """
+    r = np.sqrt(XG * XG + YG * YG)
+    inside = r <= WAFER_RADIUS_MM
+    if show_notch:
+        cell = abs(XG[1, 0] - XG[0, 0]) if XG.shape[0] > 1 else 3.0
+        theta = np.arctan2(YG, XG)
+        d = np.abs(((theta - _NOTCH_ANGLE + np.pi) % (2 * np.pi)) - np.pi)
+        angle_margin = 0.5 * cell / WAFER_RADIUS_MM
+        in_notch_angle = d < _NOTCH_HALF_RAD + angle_margin
+        boundary_r = WAFER_RADIUS_MM - depth * (1 - d / _NOTCH_HALF_RAD)
+        boundary_r_render = boundary_r - 0.5 * cell
+        inside &= ~(in_notch_angle & (r > boundary_r_render))
+    return inside
 
 
 # ── 커스텀 컬러맵 — pyqtgraph 기본 목록에 없는 2-stop gradient ──────
@@ -159,9 +179,12 @@ class WaferCell(QWidget):
         # 렌더 캐시 — 한 번 그려진 모드는 재계산 없이 인덱스 토글만
         self._rendered_2d = False
         self._rendered_3d = False
-        # 보간 캐시 — 같은 데이터 + 같은 (interp_method, grid_resolution)이면 재사용
-        self._interp_cache: tuple | None = None
-        self._interp_key: tuple | None = None
+        # 보간 캐시 — 같은 데이터 + 같은 (interp_method, grid_resolution)이면 ZG 재사용
+        self._interp_cache: tuple | None = None   # (XG, YG, ZG, xg, yg)
+        self._interp_key: tuple | None = None     # (method, G)
+        # mask 캐시 — (show_notch, notch_depth) 따로 관리. depth만 바꿔도 ZG 보존
+        self._mask_cache: np.ndarray | None = None
+        self._mask_key: tuple | None = None       # (G, show_notch, depth)
         self._render()
 
     # ── 외부 API ───────────────────────────────────
@@ -199,6 +222,18 @@ class WaferCell(QWidget):
         self._reset_3d_items()
         self._activate_current_view()
 
+    def prefetch_interp(self) -> None:
+        """보간 캐시만 미리 채움 (GUI 미접근) — ResultPanel 병렬 보간용.
+
+        GIL 해제되는 scipy RBF C 코드를 여러 cell에서 동시에 돌려 wall-clock 단축.
+        렌더는 이후 메인 스레드에서 순차 수행.
+        """
+        if self._v_in.size == 0:
+            return
+        settings = settings_io.load_settings()
+        common = settings.get("chart_common", {})
+        self._ensure_interp(self._x_in, self._y_in, self._v_in, common)
+
     # ── 렌더 ────────────────────────────────────────
     def _render(self) -> None:
         d = self._display
@@ -219,6 +254,8 @@ class WaferCell(QWidget):
         self._rendered_3d = False
         self._interp_cache = None
         self._interp_key = None
+        self._mask_cache = None
+        self._mask_key = None
         self._reset_2d_items()
         self._reset_3d_items()
 
@@ -258,18 +295,28 @@ class WaferCell(QWidget):
         """
         method = common.get("interp_method", "rbf")
         G = int(common.get("grid_resolution", 100))
-        key = (method, G)
-        if self._interp_cache is not None and self._interp_key == key:
-            return self._interp_cache
+        show_notch = bool(common.get("show_notch", True))
+        depth = float(common.get("notch_depth_mm", _NOTCH_DEFAULT_DEPTH_MM))
+        interp_key = (method, G)
+        mask_key = (G, show_notch, depth)
 
-        xg = np.linspace(-WAFER_RADIUS_MM, WAFER_RADIUS_MM, G)
-        yg = np.linspace(-WAFER_RADIUS_MM, WAFER_RADIUS_MM, G)
-        XG, YG = np.meshgrid(xg, yg, indexing="ij")
-        ZG = interpolate_wafer(x_in, y_in, v_in, XG, YG, method=method)
-        inside = XG * XG + YG * YG <= WAFER_RADIUS_MM * WAFER_RADIUS_MM
-        self._interp_cache = (XG, YG, ZG, inside, xg, yg)
-        self._interp_key = key
-        return self._interp_cache
+        # 보간(RBF) — (method, G) 그대로면 ZG 재사용
+        if self._interp_cache is None or self._interp_key != interp_key:
+            xg = np.linspace(-WAFER_RADIUS_MM, WAFER_RADIUS_MM, G)
+            yg = np.linspace(-WAFER_RADIUS_MM, WAFER_RADIUS_MM, G)
+            XG, YG = np.meshgrid(xg, yg, indexing="ij")
+            ZG = interpolate_wafer(x_in, y_in, v_in, XG, YG, method=method)
+            self._interp_cache = (XG, YG, ZG, xg, yg)
+            self._interp_key = interp_key
+            self._mask_cache = None  # G 바뀌면 mask도 재계산
+        XG, YG, ZG, xg, yg = self._interp_cache
+
+        # mask — (G, show_notch, depth) 별도 관리. depth만 바꿔도 RBF는 안 돎
+        if self._mask_cache is None or self._mask_key != mask_key:
+            self._mask_cache = _points_inside_wafer(XG, YG, show_notch, depth)
+            self._mask_key = mask_key
+
+        return XG, YG, ZG, self._mask_cache, xg, yg
 
     def _render_2d(self, x_in, y_in, v_in, settings) -> None:
         common = settings.get("chart_common", {})
@@ -291,7 +338,10 @@ class WaferCell(QWidget):
         plot.addItem(img)
 
         if common.get("show_circle", True):
-            bx, by = _boundary_xy(common.get("show_notch", True))
+            bx, by = _boundary_xy(
+                common.get("show_notch", True),
+                float(common.get("notch_depth_mm", _NOTCH_DEFAULT_DEPTH_MM)),
+            )
             plot.plot(bx, by, pen=pg.mkPen("k", width=2))
         if chart.get("show_points", True):
             plot.addItem(pg.ScatterPlotItem(
@@ -376,7 +426,10 @@ class WaferCell(QWidget):
         gview.addItem(surf)
 
         if common.get("show_circle", True):
-            bx, by = _boundary_xy(common.get("show_notch", True))
+            bx, by = _boundary_xy(
+                common.get("show_notch", True),
+                float(common.get("notch_depth_mm", _NOTCH_DEFAULT_DEPTH_MM)),
+            )
             circ = np.column_stack([bx, by, np.zeros_like(bx)])
             # glOptions='opaque' → depth test ON, surface 뒤쪽 라인 가려짐
             line = gl.GLLinePlotItem(

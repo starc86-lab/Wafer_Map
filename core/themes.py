@@ -292,6 +292,7 @@ DEFAULT_SETTINGS = {
         "colormap": "turbo",
         "show_circle": True,       # 웨이퍼 경계 원
         "show_notch": True,        # 경계 원에 notch(V자 홈) 표시 — 6시 방향 고정
+        "notch_depth_mm": 5.0,     # notch 깊이(mm, 시각적 과장)
         "grid_resolution": 100,    # 보간 격자 해상도 (격자 한 변)
         # 보간 방법:
         #   "rbf"           — thin-plate spline, convex hull 외부까지 부드럽게 외삽 (기본)

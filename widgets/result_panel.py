@@ -117,9 +117,15 @@ class ResultPanel(QWidget):
             c.invalidate_3d()
 
     def refresh_all(self) -> None:
-        """Settings 변경 시 — 모든 cell 렌더 캐시 reset.
+        """Settings 변경 시 — 모든 cell 렌더 캐시 reset + 보간 병렬 prefetch.
 
         보간 캐시는 각 cell이 (method, grid) 비교로 알아서 재사용/재계산 결정.
+        grid 큰 값 + RBF일 때 cell별 보간이 cell당 80~130ms까지 나가서, GIL 해제되는
+        scipy RBF를 ThreadPoolExecutor로 동시에 돌림. 렌더는 메인 스레드에서 순차.
         """
+        if len(self._cells) > 1:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=len(self._cells)) as ex:
+                list(ex.map(lambda c: c.prefetch_interp(), self._cells))
         for c in self._cells:
             c.refresh()

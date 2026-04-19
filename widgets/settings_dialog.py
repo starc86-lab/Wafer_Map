@@ -231,7 +231,7 @@ class ChartCommonGroup(QGroupBox):
             self.cb_interp.setCurrentIndex(idx)
 
         self.cb_grid = _limit_width(QComboBox())
-        for v in (50, 75, 100, 150, 200):
+        for v in (100, 150, 200, 250):
             self.cb_grid.addItem(str(v), v)
         idx = self.cb_grid.findData(int(cfg.get("grid_resolution", 100)))
         self.cb_grid.setCurrentIndex(idx if idx >= 0 else 2)
@@ -242,12 +242,26 @@ class ChartCommonGroup(QGroupBox):
         self.chk_notch = _fix_width(QCheckBox())
         self.chk_notch.setChecked(bool(cfg.get("show_notch", True)))
 
+        # Notch Depth 콤보 + "mm" 단위 라벨
+        self.cb_notch_depth = QComboBox()
+        for v in (3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0):
+            self.cb_notch_depth.addItem(f"{v:g}", v)
+        idx = self.cb_notch_depth.findData(float(cfg.get("notch_depth_mm", 5.0)))
+        self.cb_notch_depth.setCurrentIndex(idx if idx >= 0 else 4)
+        depth_row = QWidget()
+        _row = QHBoxLayout(depth_row)
+        _row.setContentsMargins(0, 0, 0, 0); _row.setSpacing(4)
+        _row.addWidget(_limit_width(self.cb_notch_depth))
+        _row.addWidget(QLabel("mm"))
+        _row.addStretch(1)
+
         _populate_two_columns(self, [
             ("컬러맵", self.cb_cmap),
             ("보간 방법", self.cb_interp),
             ("격자 해상도", self.cb_grid),
             ("경계 원", self.chk_circle),
             ("Notch 표시", self.chk_notch),
+            ("Notch Depth", depth_row),
         ])
 
         self.cb_cmap.currentIndexChanged.connect(self.changed)
@@ -255,6 +269,7 @@ class ChartCommonGroup(QGroupBox):
         self.cb_grid.currentIndexChanged.connect(self.changed)
         self.chk_circle.toggled.connect(self.changed)
         self.chk_notch.toggled.connect(self.changed)
+        self.cb_notch_depth.currentIndexChanged.connect(self.changed)
 
     def gather(self) -> dict[str, Any]:
         return {
@@ -263,10 +278,12 @@ class ChartCommonGroup(QGroupBox):
             "grid_resolution": int(self.cb_grid.currentData()),
             "show_circle": self.chk_circle.isChecked(),
             "show_notch": self.chk_notch.isChecked(),
+            "notch_depth_mm": float(self.cb_notch_depth.currentData()),
         }
 
     def reload(self, cfg: dict[str, Any]) -> None:
-        widgets = (self.cb_cmap, self.cb_interp, self.cb_grid, self.chk_circle, self.chk_notch)
+        widgets = (self.cb_cmap, self.cb_interp, self.cb_grid, self.chk_circle,
+                   self.chk_notch, self.cb_notch_depth)
         for w in widgets:
             w.blockSignals(True)
         try:
@@ -278,6 +295,8 @@ class ChartCommonGroup(QGroupBox):
             if idx >= 0: self.cb_grid.setCurrentIndex(idx)
             self.chk_circle.setChecked(bool(cfg.get("show_circle", True)))
             self.chk_notch.setChecked(bool(cfg.get("show_notch", True)))
+            idx = self.cb_notch_depth.findData(float(cfg.get("notch_depth_mm", 5.0)))
+            if idx >= 0: self.cb_notch_depth.setCurrentIndex(idx)
         finally:
             for w in widgets:
                 w.blockSignals(False)
