@@ -180,6 +180,7 @@ class MainWindow(QMainWindow):
 
         self.cb_view = QComboBox(); self.cb_view.addItems(["2D", "3D"])
         self.cb_zscale = QComboBox(); self.cb_zscale.addItems(["공통", "개별"])
+        self.cb_zscale.setCurrentText("개별")  # 세션 디폴트 (저장 X)
 
         self.btn_visualize = QPushButton("▶  Run Analysis")
         self.btn_visualize.setProperty("class", "primary")
@@ -209,7 +210,7 @@ class MainWindow(QMainWindow):
         lay.addSpacing(16)
         lay.addWidget(QLabel("View:"))
         lay.addWidget(self.cb_view)
-        lay.addWidget(QLabel("Z scale:"))
+        lay.addWidget(QLabel("Z-Scale:"))
         lay.addWidget(self.cb_zscale)
         lay.addStretch(1)
         lay.addWidget(self.btn_visualize)
@@ -514,12 +515,20 @@ class MainWindow(QMainWindow):
         dlg.activateWindow()
 
     def revisualize(self) -> None:
-        """현재 선택 기반으로 결과 패널 재렌더 — Settings 에서 Graph 설정 바꿨을 때 호출."""
+        """현재 선택 기반으로 결과 패널 재렌더 — Run Analysis 재실행 경로 (cell 재생성)."""
         if self._result_a is None and self._result_b is None:
             return
         if not self.btn_visualize.isEnabled():
             return
         self._on_visualize()
+
+    def refresh_graph(self) -> None:
+        """Settings Graph 변경 — cell 재생성 없이 렌더 캐시만 reset + 재렌더.
+
+        보간 캐시는 cell 내부에서 (interp_method, grid_resolution) 비교로 재사용 판단.
+        컬러맵·shading 등 대부분의 변경에서 RBF 50~100ms 비용 생략.
+        """
+        self._result_panel.refresh_all()
 
     def _on_view_toggle(self, mode: str) -> None:
         """View 콤보 변경 — cell 재생성 없이 stack 인덱스만 토글.

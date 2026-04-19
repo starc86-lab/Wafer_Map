@@ -115,3 +115,11 @@ class ResultPanel(QWidget):
         """3D 캐시 무효화 — z_range 변경 시. 2D 캐시는 그대로."""
         for c in self._cells:
             c.invalidate_3d()
+
+    def refresh_all(self) -> None:
+        """Settings 변경 시 — 모든 cell 렌더 캐시 reset.
+
+        보간 캐시는 각 cell이 (method, grid) 비교로 알아서 재사용/재계산 결정.
+        """
+        for c in self._cells:
+            c.refresh()

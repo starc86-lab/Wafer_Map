@@ -220,7 +220,7 @@ class ChartCommonGroup(QGroupBox):
 
         self.cb_cmap = _limit_width(QComboBox())
         self.cb_cmap.addItems(HEATMAP_COLORMAPS)
-        idx = self.cb_cmap.findText(cfg.get("colormap", "CET-L17"))
+        idx = self.cb_cmap.findText(cfg.get("colormap", "turbo"))
         if idx >= 0:
             self.cb_cmap.setCurrentIndex(idx)
 
@@ -231,25 +231,30 @@ class ChartCommonGroup(QGroupBox):
             self.cb_interp.setCurrentIndex(idx)
 
         self.cb_grid = _limit_width(QComboBox())
-        for v in (100, 150, 200, 250, 300, 400):
+        for v in (50, 75, 100, 150, 200):
             self.cb_grid.addItem(str(v), v)
-        idx = self.cb_grid.findData(int(cfg.get("grid_resolution", 200)))
+        idx = self.cb_grid.findData(int(cfg.get("grid_resolution", 100)))
         self.cb_grid.setCurrentIndex(idx if idx >= 0 else 2)
 
         self.chk_circle = _fix_width(QCheckBox())
         self.chk_circle.setChecked(bool(cfg.get("show_circle", True)))
+
+        self.chk_notch = _fix_width(QCheckBox())
+        self.chk_notch.setChecked(bool(cfg.get("show_notch", True)))
 
         _populate_two_columns(self, [
             ("컬러맵", self.cb_cmap),
             ("보간 방법", self.cb_interp),
             ("격자 해상도", self.cb_grid),
             ("경계 원", self.chk_circle),
+            ("Notch 표시", self.chk_notch),
         ])
 
         self.cb_cmap.currentIndexChanged.connect(self.changed)
         self.cb_interp.currentIndexChanged.connect(self.changed)
         self.cb_grid.currentIndexChanged.connect(self.changed)
         self.chk_circle.toggled.connect(self.changed)
+        self.chk_notch.toggled.connect(self.changed)
 
     def gather(self) -> dict[str, Any]:
         return {
@@ -257,20 +262,22 @@ class ChartCommonGroup(QGroupBox):
             "interp_method": self.cb_interp.currentText(),
             "grid_resolution": int(self.cb_grid.currentData()),
             "show_circle": self.chk_circle.isChecked(),
+            "show_notch": self.chk_notch.isChecked(),
         }
 
     def reload(self, cfg: dict[str, Any]) -> None:
-        widgets = (self.cb_cmap, self.cb_interp, self.cb_grid, self.chk_circle)
+        widgets = (self.cb_cmap, self.cb_interp, self.cb_grid, self.chk_circle, self.chk_notch)
         for w in widgets:
             w.blockSignals(True)
         try:
-            idx = self.cb_cmap.findText(cfg.get("colormap", "CET-L17"))
+            idx = self.cb_cmap.findText(cfg.get("colormap", "turbo"))
             if idx >= 0: self.cb_cmap.setCurrentIndex(idx)
             idx = self.cb_interp.findText(cfg.get("interp_method", "rbf"))
             if idx >= 0: self.cb_interp.setCurrentIndex(idx)
-            idx = self.cb_grid.findData(int(cfg.get("grid_resolution", 200)))
+            idx = self.cb_grid.findData(int(cfg.get("grid_resolution", 100)))
             if idx >= 0: self.cb_grid.setCurrentIndex(idx)
             self.chk_circle.setChecked(bool(cfg.get("show_circle", True)))
+            self.chk_notch.setChecked(bool(cfg.get("show_notch", True)))
         finally:
             for w in widgets:
                 w.blockSignals(False)
@@ -348,7 +355,7 @@ class Chart3DGroup(QGroupBox):
 
         self.cb_zexag = _limit_width(QComboBox())
         self.cb_zexag.addItem("자동", None)
-        for v in (1.0, 2.0, 5.0, 10.0):
+        for v in (0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0, 5.0):
             self.cb_zexag.addItem(f"{v:g}\u00d7", v)
         cur = cfg.get("z_exaggeration", None)
         if cur is None:
@@ -366,7 +373,7 @@ class Chart3DGroup(QGroupBox):
         _populate_two_columns(self, [
             ("쉐이딩", self.cb_shading),
             ("부드럽게 (smooth)", self.chk_smooth),
-            ("Z 과장 배율", self.cb_zexag),
+            ("Z-Height", self.cb_zexag),
             ("바닥 그리드", self.chk_grid),
         ])
 
@@ -713,12 +720,16 @@ class SettingsDialog(QDialog):
             apply_global_style(app, merged)
 
     def _apply_graph_runtime(self) -> None:
-        """Graph(2D/3D) 설정 변경 → 런타임 캐시 + MainWindow 재렌더."""
+        """Graph(2D/3D) 설정 변경 → 런타임 캐시 + MainWindow 재렌더 (cell 재생성 없이).
+
+        cell의 보간 캐시는 (interp_method, grid_resolution) 비교로 재사용 판단 →
+        컬러맵·shading·점 크기 등 변경 시 RBF 50~100ms 비용 생략.
+        """
         merged = self._collect()
         settings_io.set_runtime(merged)
         main = self.parent()
-        if main is not None and hasattr(main, "revisualize"):
-            main.revisualize()
+        if main is not None and hasattr(main, "refresh_graph"):
+            main.refresh_graph()
 
     # ── Enter 키로 dialog가 닫히지 않게 (QSpinBox 등 자식 입력란용) ──
     def keyPressEvent(self, event) -> None:

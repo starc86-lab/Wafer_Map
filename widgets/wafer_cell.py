@@ -26,6 +26,49 @@ from core.metrics import summary_metrics
 
 BOUNDARY_SEGMENTS = 361
 
+# 300mm 웨이퍼 notch — 실제 스펙은 ~3mm 폭/~1mm 깊이지만 화면에서 잘 보이도록 과장.
+# 방향은 6시(하단, 3π/2) 고정.
+_NOTCH_ANGLE = 3 * np.pi / 2
+_NOTCH_HALF_RAD = np.radians(3.0)
+_NOTCH_DEPTH_MM = 4.0
+
+
+def _boundary_xy(show_notch: bool):
+    """웨이퍼 경계 좌표. notch 옵션 시 6시 방향에 V자 홈 반영."""
+    theta = np.linspace(0, 2 * np.pi, BOUNDARY_SEGMENTS)
+    r = np.full_like(theta, WAFER_RADIUS_MM)
+    if show_notch:
+        d = np.abs(((theta - _NOTCH_ANGLE + np.pi) % (2 * np.pi)) - np.pi)
+        in_notch = d < _NOTCH_HALF_RAD
+        r[in_notch] = WAFER_RADIUS_MM - _NOTCH_DEPTH_MM * (1 - d[in_notch] / _NOTCH_HALF_RAD)
+    return r * np.cos(theta), r * np.sin(theta)
+
+
+# ── 커스텀 컬러맵 — pyqtgraph 기본 목록에 없는 2-stop gradient ──────
+# 이름은 core.themes.HEATMAP_COLORMAPS에 함께 등록. 값은 0..1 정규화 기준.
+_CUSTOM_CMAPS: dict[str, pg.ColorMap] = {
+    "Red-White":   pg.ColorMap([0.0, 1.0], [(255, 255, 255), (220,  30,  30)]),
+    "Blue-White":  pg.ColorMap([0.0, 1.0], [(255, 255, 255), ( 30,  70, 220)]),
+    "Black-White": pg.ColorMap([0.0, 1.0], [(255, 255, 255), ( 20,  20,  20)]),
+    "Navy-White":  pg.ColorMap([0.0, 1.0], [(255, 255, 255), ( 20,  35, 110)]),
+    "Pink-White":  pg.ColorMap([0.0, 1.0], [(255, 255, 255), (230,  70, 150)]),
+    "Brown-White": pg.ColorMap([0.0, 1.0], [(255, 255, 255), (130,  75,  40)]),
+    "Charcoal-White": pg.ColorMap([0.0, 1.0], [(255, 255, 255), ( 65,  70,  80)]),
+}
+
+
+def resolve_colormap(name: str) -> pg.ColorMap:
+    """이름 → pg.ColorMap. 커스텀 dict 먼저, 없으면 pyqtgraph 기본. 최종 fallback은 viridis."""
+    if name in _CUSTOM_CMAPS:
+        return _CUSTOM_CMAPS[name]
+    try:
+        cm = pg.colormap.get(name)
+        if cm is not None:
+            return cm
+    except Exception:
+        pass
+    return pg.colormap.get("viridis")
+
 
 @dataclass
 class WaferDisplay:
@@ -90,7 +133,7 @@ class WaferCell(QWidget):
 
         self._gl_3d = gl.GLViewWidget()
         self._gl_3d.setBackgroundColor("w")
-        self._gl_3d.setCameraPosition(distance=480, elevation=28, azimuth=135)
+        self._gl_3d.setCameraPosition(distance=480, elevation=28, azimuth=-135)
         self._gl_3d.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._gl_3d.customContextMenuRequested.connect(self._show_plot_menu)
         self._chart_box_layout.addWidget(self._gl_3d)    # index 1
@@ -113,9 +156,12 @@ class WaferCell(QWidget):
         self._x_in = np.array([])
         self._y_in = np.array([])
         self._v_in = np.array([])
-        # 캐시 — 한 번 그려진 모드는 재계산 없이 인덱스 토글만
+        # 렌더 캐시 — 한 번 그려진 모드는 재계산 없이 인덱스 토글만
         self._rendered_2d = False
         self._rendered_3d = False
+        # 보간 캐시 — 같은 데이터 + 같은 (interp_method, grid_resolution)이면 재사용
+        self._interp_cache: tuple | None = None
+        self._interp_key: tuple | None = None
         self._render()
 
     # ── 외부 API ───────────────────────────────────
@@ -141,12 +187,25 @@ class WaferCell(QWidget):
         if self._view_mode == "3D":
             self._activate_current_view()
 
+    def refresh(self) -> None:
+        """Settings(컬러맵·shading·격자 옵션 등) 변경 시 호출.
+
+        렌더 캐시는 reset하되 **보간 캐시는 유지** — interp_method/grid_resolution이
+        바뀐 경우에만 `_ensure_interp`가 내부적으로 재계산. 덕분에 RBF 50~100ms 비용 생략.
+        """
+        self._rendered_2d = False
+        self._rendered_3d = False
+        self._reset_2d_items()
+        self._reset_3d_items()
+        self._activate_current_view()
+
     # ── 렌더 ────────────────────────────────────────
     def _render(self) -> None:
         d = self._display
         n = min(len(d.x_mm), len(d.y_mm), len(d.values))
         if n == 0:
-            self._clear_chart()
+            self._reset_2d_items()
+            self._reset_3d_items()
             return
         x_mm = np.asarray(d.x_mm[:n], dtype=float)
         y_mm = np.asarray(d.y_mm[:n], dtype=float)
@@ -155,9 +214,11 @@ class WaferCell(QWidget):
         x_in, y_in, v_in, _ = filter_in_wafer(x_mm, y_mm, v)
         self._x_in, self._y_in, self._v_in = x_in, y_in, v_in
 
-        # 데이터/설정이 바뀌었으니 양쪽 캐시 무효화
+        # 새 데이터이므로 렌더/보간 캐시 모두 무효화
         self._rendered_2d = False
         self._rendered_3d = False
+        self._interp_cache = None
+        self._interp_key = None
         self._reset_2d_items()
         self._reset_3d_items()
 
@@ -190,43 +251,48 @@ class WaferCell(QWidget):
         for it in list(self._gl_3d.items):
             self._gl_3d.removeItem(it)
 
-    def _interp_grid(self, x_in, y_in, v_in, common):
-        """공통 보간: (XG, YG, ZG, inside, xg, yg) 반환."""
-        G = int(common.get("grid_resolution", 200))
+    def _ensure_interp(self, x_in, y_in, v_in, common):
+        """보간 결과를 캐시 — (method, grid_resolution)이 그대로면 재사용.
+
+        컬러맵·shading 등은 interp 결과에 영향 없으므로 캐시 히트 경로로 수 ms 처리.
+        """
+        method = common.get("interp_method", "rbf")
+        G = int(common.get("grid_resolution", 100))
+        key = (method, G)
+        if self._interp_cache is not None and self._interp_key == key:
+            return self._interp_cache
+
         xg = np.linspace(-WAFER_RADIUS_MM, WAFER_RADIUS_MM, G)
         yg = np.linspace(-WAFER_RADIUS_MM, WAFER_RADIUS_MM, G)
         XG, YG = np.meshgrid(xg, yg, indexing="ij")
-        method = common.get("interp_method", "rbf")
         ZG = interpolate_wafer(x_in, y_in, v_in, XG, YG, method=method)
         inside = XG * XG + YG * YG <= WAFER_RADIUS_MM * WAFER_RADIUS_MM
-        return XG, YG, ZG, inside, xg, yg
+        self._interp_cache = (XG, YG, ZG, inside, xg, yg)
+        self._interp_key = key
+        return self._interp_cache
 
     def _render_2d(self, x_in, y_in, v_in, settings) -> None:
         common = settings.get("chart_common", {})
         chart = settings.get("chart_2d", {})
-        XG, YG, ZG, inside, xg, yg = self._interp_grid(x_in, y_in, v_in, common)
+        XG, YG, ZG, inside, xg, yg = self._ensure_interp(x_in, y_in, v_in, common)
         ZG = np.where(inside, ZG, np.nan)
 
         plot = self._plot_2d
         self._reset_2d_items()
 
-        cmap_name = common.get("colormap", "CET-L17")
+        cmap_name = common.get("colormap", "turbo")
         img = pg.ImageItem(ZG)
         img.setRect(QRectF(
             -WAFER_RADIUS_MM, -WAFER_RADIUS_MM,
             2 * WAFER_RADIUS_MM, 2 * WAFER_RADIUS_MM,
         ))
-        cmap = pg.colormap.get(cmap_name) or pg.colormap.get("viridis")
+        cmap = resolve_colormap(cmap_name)
         img.setLookupTable(cmap.getLookupTable())
         plot.addItem(img)
 
         if common.get("show_circle", True):
-            theta = np.linspace(0, 2 * np.pi, BOUNDARY_SEGMENTS)
-            plot.plot(
-                WAFER_RADIUS_MM * np.cos(theta),
-                WAFER_RADIUS_MM * np.sin(theta),
-                pen=pg.mkPen("k", width=2),
-            )
+            bx, by = _boundary_xy(common.get("show_notch", True))
+            plot.plot(bx, by, pen=pg.mkPen("k", width=2))
         if chart.get("show_points", True):
             plot.addItem(pg.ScatterPlotItem(
                 x_in, y_in, pen=None,
@@ -252,7 +318,7 @@ class WaferCell(QWidget):
         common = settings.get("chart_common", {})
         chart3d = settings.get("chart_3d", {})
 
-        XG, YG, ZG, inside, xg, yg = self._interp_grid(x_in, y_in, v_in, common)
+        XG, YG, ZG, inside, xg, yg = self._ensure_interp(x_in, y_in, v_in, common)
 
         # Z 범위 (공통 스케일이면 display.z_range, 아니면 자체 데이터)
         if self._display.z_range is not None:
@@ -278,8 +344,8 @@ class WaferCell(QWidget):
         z_disp = np.where(inside, z_disp, 0.0)
 
         # 컬러: 정점마다 RGBA (공통 컬러맵)
-        cmap_name = common.get("colormap", "CET-L17")
-        cmap = pg.colormap.get(cmap_name) or pg.colormap.get("viridis")
+        cmap_name = common.get("colormap", "turbo")
+        cmap = resolve_colormap(cmap_name)
         lut = cmap.getLookupTable(0.0, 1.0, 256)  # (256, 4) ubyte
         norm = (ZG - vmin) / z_range
         norm = np.where(inside, norm, 0.0)
@@ -296,7 +362,7 @@ class WaferCell(QWidget):
             grid = gl.GLGridItem()
             grid.setSize(x=350, y=350)
             grid.setSpacing(x=50, y=50)
-            grid.setColor((140, 140, 140, 200))
+            grid.setColor((205, 205, 205, 150))
             gview.addItem(grid)
 
         surf = gl.GLSurfacePlotItem(
@@ -310,12 +376,8 @@ class WaferCell(QWidget):
         gview.addItem(surf)
 
         if common.get("show_circle", True):
-            theta = np.linspace(0, 2 * np.pi, BOUNDARY_SEGMENTS)
-            circ = np.column_stack([
-                WAFER_RADIUS_MM * np.cos(theta),
-                WAFER_RADIUS_MM * np.sin(theta),
-                np.zeros(BOUNDARY_SEGMENTS),
-            ])
+            bx, by = _boundary_xy(common.get("show_notch", True))
+            circ = np.column_stack([bx, by, np.zeros_like(bx)])
             # glOptions='opaque' → depth test ON, surface 뒤쪽 라인 가려짐
             line = gl.GLLinePlotItem(
                 pos=circ, color=(0, 0, 0, 1), width=2,
@@ -365,7 +427,7 @@ class WaferCell(QWidget):
             if isinstance(chart, pg.PlotWidget):
                 chart.getPlotItem().enableAutoRange()
             elif isinstance(chart, gl.GLViewWidget):
-                chart.setCameraPosition(distance=480, elevation=28, azimuth=135)
+                chart.setCameraPosition(distance=480, elevation=28, azimuth=-135)
         elif chosen is a_graph:
             self._copy_graph()
         elif chosen is a_data:

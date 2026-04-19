@@ -227,14 +227,30 @@ THEMES = {
 # Heatmap 컬러맵 (pyqtgraph 내장 이름)
 # ────────────────────────────────────────────────────────────────
 HEATMAP_COLORMAPS = [
-    "CET-L17",   # 기본 — 균등 휘도 (viridis 계열)
+    "CET-L17",   # 기본
+    "CET-L4",
+    "CET-L8",
+    "CET-L16",
+    "CET-L19",
     "viridis",
     "plasma",
     "inferno",
     "magma",
-    "CET-D1",    # diverging (DELTA에 적합)
-    "CET-D8",    # diverging
-    "CET-R4",    # rainbow
+    "cividis",
+    "turbo",
+    "CET-D1",
+    "CET-D4",
+    "CET-D8",
+    "CET-D13",
+    "CET-R4",
+    # 커스텀 — wafer_cell._CUSTOM_CMAPS에 실제 pg.ColorMap 정의 (min=White, max=지정색)
+    "Red-White",
+    "Blue-White",
+    "Black-White",
+    "Navy-White",
+    "Pink-White",
+    "Brown-White",
+    "Charcoal-White",
 ]
 
 
@@ -273,9 +289,10 @@ DEFAULT_SETTINGS = {
 
     # MAP 공통 설정 — 2D/3D 양쪽에 같이 적용
     "chart_common": {
-        "colormap": "CET-L17",
+        "colormap": "turbo",
         "show_circle": True,       # 웨이퍼 경계 원
-        "grid_resolution": 200,    # 보간 격자 해상도 (격자 한 변)
+        "show_notch": True,        # 경계 원에 notch(V자 홈) 표시 — 6시 방향 고정
+        "grid_resolution": 100,    # 보간 격자 해상도 (격자 한 변)
         # 보간 방법:
         #   "rbf"           — thin-plate spline, convex hull 외부까지 부드럽게 외삽 (기본)
         #   "cubic"         — scipy.griddata cubic, 외부 NaN (8각형 경계)
@@ -296,7 +313,7 @@ DEFAULT_SETTINGS = {
         "shading": "shaded",       # shaded / normalColor / heightColor
         "smooth": True,
         "z_exaggeration": None,    # Z 과장 배율: None=자동(X/Y 범위 기준 정규화), float=고정 배율
-        "show_grid": True,         # 바닥 그리드
+        "show_grid": False,        # 바닥 그리드
     },
 
     # Summary 표
