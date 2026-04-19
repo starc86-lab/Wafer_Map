@@ -394,20 +394,19 @@ Wafer Map/
 - X 변경 시 Y는 suffix 일치로 재선택 / Y 변경 시 X는 그대로 유지
 - `X=X_1000`, `Y=Y_B` 처럼 사용자가 다른 suffix 조합을 의도적으로 고를 수 있게 함
 
-**렌더링 캐시 — view_mode / z_scale / Settings 토글 시 재계산 방지 (b0.0.0~)**
-- `WaferCell`이 `_chart_box`를 `QStackedLayout`으로 보유. 셀 생성 시 `_plot_2d`(idx 0) + `_gl_3d`(idx 1) 둘 다 미리 인스턴스화. 토글은 `setCurrentIndex` 한 줄, 0ms.
-- 모드별 캐시 플래그 `_rendered_2d` / `_rendered_3d`. 첫 진입에만 그리고 캐시. `set_view_mode(mode)` API.
-- `invalidate_3d()` — z_range 변경 등 3D만 영향받을 때 사용. 2D 캐시는 유지. 현재 view가 3D면 즉시 재렌더, 2D면 다음 진입 시.
-- **2단 캐시**: `_interp_cache`(method, G) + `_mask_cache`(G, show_notch, depth) 분리. notch_depth만 바꿔도 RBF 재계산 없이 mask만 새로 (RBF 90ms → 4ms).
-- `refresh()` 는 렌더 캐시 reset + 현재 view 재렌더 (보간 캐시는 유지). Settings graph_changed가 `revisualize`(cell 재생성) 대신 `ResultPanel.refresh_all()` → 각 cell.refresh() 호출.
-- **ResultPanel.refresh_all()의 병렬 RBF**: `prefetch_interp()`를 `ThreadPoolExecutor`로 cell당 병렬 호출. scipy RBF가 GIL 해제하는 C 코드라 6-cell 병렬이 ~5× 향상 (grid=250 기준 791ms → 160ms). 보간 완료 후 렌더는 메인 스레드에서 순차. scipy `neighbors` 옵션은 N=70 작은 케이스에서 오히려 악효과라 미사용.
-- **3D GL item 재사용 + z_sig skip** (`GLSurfacePlotItem.setData` 활용):
-  - surface/boundary/grid를 slot(`_gl_surface`, `_gl_boundary`, `_gl_grid`)에 보관. `_reset_3d_items`는 `setVisible(False)`만 — GPU buffer 유지.
-  - shader·smooth 변경 시에만 surface 재생성 (`_surface_key`).
-  - z signature `(interp_key, mask_key, vmin, vmax, factor)` 비교 → z 동일하면 `setData(colors=only)`로 교체. `smooth=True` 환경에서 z 갱신 시 250² vertex normals 재계산이 매우 비쌈을 회피.
-  - ⚠️ `setData(colors=only)`는 pyqtgraph 내부에서 `meshDataChanged()` 호출을 생략하는 이슈 → 명시적으로 호출해야 GPU 반영. 빠뜨리면 화면이 안 바뀜.
-  - 효과: grid=250 · 6 cell colormap 변경 체감 3300ms → 110ms (~30× 향상).
-- `_apply_z_scale_mode`는 메인 윈도우의 `cb_zscale`을 ground truth로 (settings 무시), view_mode 분기 제거. 토글 시 cell 재생성 없이 displays z_range만 갈아끼우고 `invalidate_3d()`.
+**렌더링 최적화 전반**
+상세 이력·측정 결과·실패·롤백 사례·pyqtgraph 내부 의존성은 **[docs/rendering_optimizations.md](docs/rendering_optimizations.md)** 참고 필수. 새 최적화 시도 전 "실패·롤백" 섹션부터 확인 — 같은 실수 반복 금지.
+
+핵심 구조만 요약:
+- `WaferCell._chart_box` = `QStackedLayout` (2D/3D 위젯 둘 다 미리 생성, `setCurrentIndex`로 즉시 토글)
+- **3단 캐시**: 렌더(`_rendered_2d/3d`) · 보간(`_interp_cache`, key `(method, G)`) · mask(`_mask_cache`, key `(G, show_notch, depth)`)
+- **3D GL item 재사용**: `_gl_surface`/`_gl_boundary`/`_gl_grid` slot 보관, `setData`로 데이터만 교체. shader/smooth 변경 시에만 재생성
+- **z signature skip**: `_surface_z_sig`가 같으면 `setData(colors=only)` + **명시 `meshDataChanged()`** (pyqtgraph setData(colors-only)가 meshDataChanged 호출 누락하는 버그 우회)
+- **Vectorized vertex normals 주입**: `_meshdata._vertexNormals` 직접 set (pyqtgraph 기본 Python loop 우회)
+- **병렬 RBF**: `ResultPanel.refresh_all`·`set_displays`에서 `ThreadPoolExecutor`로 cell별 `prefetch_interp` 병렬
+- **첫 3D 전환 prefetch**: `set_displays` 후 `QTimer.singleShot(50, prefetch_inactive_views)` → hidden `_gl_3d.grabFramebuffer()`로 GL init 강제 (깜빡임 없음)
+- **Settings graph_changed** → `refresh_graph` = `ResultPanel.refresh_all` (cell 재생성 없이 각 cell.refresh())
+- `_apply_z_scale_mode`는 `cb_zscale`을 ground truth로, view_mode 분기 없음. 토글 시 `invalidate_3d()`만
 
 **3D 첫 렌더링 깜빡임 제거 (b0.0.0~)**
 - `app.py`에서 `Qt.AA_ShareOpenGLContexts` set + 시작 시 dummy `GLViewWidget` show→hide→deleteLater (`_gl_warmup`).

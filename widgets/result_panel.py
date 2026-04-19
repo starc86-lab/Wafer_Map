@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget,
 )
@@ -96,11 +96,29 @@ class ResultPanel(QWidget):
         else:
             self._summary_label.hide()
 
+        # 1. cells 생성 — defer_render=True로 Qt 아이템 생성 스킵
         for d in displays:
-            cell = WaferCell(d, value_name, view_mode=view_mode)
+            cell = WaferCell(d, value_name, view_mode=view_mode, defer_render=True)
             self._cells.append(cell)
             self._layout.addWidget(cell)
         self._layout.addStretch(1)
+
+        # 2. 병렬 보간 prefetch — cell당 RBF가 GIL 해제라 ThreadPoolExecutor 이득 큼
+        if len(self._cells) > 1:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=len(self._cells)) as ex:
+                list(ex.map(lambda c: c.prefetch_interp(), self._cells))
+
+        # 3. 각 cell 초기 렌더 (보간 캐시 hit 경로)
+        for c in self._cells:
+            c.render_initial()
+
+        # 4. 2D paint 완료 이후 비활성 view(주로 3D) 백그라운드 prefetch
+        QTimer.singleShot(50, self._prefetch_inactive_views)
+
+    def _prefetch_inactive_views(self) -> None:
+        for c in self._cells:
+            c.prefetch_inactive_view()
 
     def set_view_mode(self, mode: str) -> None:
         """View 토글 — 모든 cell에 forward (cell이 캐시 보유, 재계산 없음)."""
