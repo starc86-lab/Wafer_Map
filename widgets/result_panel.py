@@ -59,9 +59,15 @@ class ResultPanel(QWidget):
         self._summary_label.hide()
         self._clear_layout()
         ph = QLabel(
-            "결과 영역 — Visualize 누르면 여기에 MAP + Summary 표가 가로로 나열됩니다"
+            "그래프를 우클릭하여 그래프 이미지나 데이터를 Clipboard로 Copy할 수 있습니다.\n"
+            "그래프 이미지 Copy 시에 그래프가 가려지지 않도록 주의하세요 (화면에 보이는 그대로 Copy됨).\n"
+            "\n"
+            "3D 그래프 Tips\n"
+            "- Ctrl + 드래그 : 그래프 이동\n"
+            "- Shift + 드래그 : 전체 그래프 앵글 변경\n"
+            "- Shift + Ctrl + 드래그 : 전체 그래프 위치 변경"
         )
-        ph.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ph.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         ph.setStyleSheet("color: gray; padding: 40px;")
         self._layout.addWidget(ph)
 

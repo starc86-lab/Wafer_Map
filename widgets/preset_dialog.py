@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
-from core.coord_library import CoordLibrary, CoordPreset, recipe_similarity
+from core.coord_library import CoordLibrary, CoordPreset, format_dt_display, recipe_similarity
 
 
 class PresetSelectDialog(QDialog):
@@ -57,7 +57,7 @@ class PresetSelectDialog(QDialog):
 
         self._table = QTableWidget(len(groups), 5)
         self._table.setHorizontalHeaderLabels(
-            ["이름", "RECIPE", "유사도", "n", "마지막 사용"],
+            ["이름", "RECIPE", "유사도", "Point", "마지막 사용"],
         )
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -80,7 +80,7 @@ class PresetSelectDialog(QDialog):
                 rep.recipe,
                 sim_text,
                 str(rep.n_points),
-                rep.last_used,
+                format_dt_display(rep.last_used),
             ]):
                 item = QTableWidgetItem(text)
                 if col in (2, 3):

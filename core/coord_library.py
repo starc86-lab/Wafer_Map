@@ -82,6 +82,18 @@ def _iso_now() -> str:
     return datetime.now(timezone.utc).astimezone().replace(microsecond=0).isoformat()
 
 
+def format_dt_display(iso: str) -> str:
+    """ISO 문자열(`...+09:00`)을 `YYYY-MM-DD HH:MM:SS` 표시용으로 포맷. 실패 시 원문.
+
+    초까지 표시 — 1분 이내 레시피 두 개 저장 시 사용자가 순서 구분할 수 있어야 함.
+    """
+    try:
+        dt = datetime.fromisoformat(iso)
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    except (ValueError, TypeError):
+        return iso
+
+
 def _arrays_close(
     a: np.ndarray, b: np.ndarray, tol: float = COORD_TOLERANCE_MM,
 ) -> bool:

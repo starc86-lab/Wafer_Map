@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import sys
 
-VERSION = "b0.0.0"
+VERSION = "0.1.0"
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QGuiApplication, QSurfaceFormat

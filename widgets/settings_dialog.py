@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from core import settings as settings_io
-from core.coord_library import CoordLibrary, CoordPreset
+from core.coord_library import CoordLibrary, CoordPreset, format_dt_display
 from core.stylesheet import build_stylesheet
 from core.themes import FONTS, FONT_SIZES, HEATMAP_COLORMAPS, THEMES
 
@@ -252,13 +252,13 @@ class ChartCommonGroup(QGroupBox):
         self.chk_scale_bar = _fix_width(QCheckBox())
         self.chk_scale_bar.setChecked(bool(cfg.get("show_scale_bar", True)))
 
-        # 그래프 크기 — 360:280 비율 고정, 대/중/소 3 프리셋
+        # 그래프 크기 — 9:7 비율 고정 (360:280 기준, 0.8× ~ 1.6×)
         self.cb_chart_size = _limit_width(QComboBox())
-        for label, w, h in (("소", 288, 224), ("중", 360, 280), ("대", 432, 336)):
-            self.cb_chart_size.addItem(f"{label} ({w}×{h})", (w, h))
+        for w, h in ((288, 224), (360, 280), (432, 336), (504, 392), (576, 448)):
+            self.cb_chart_size.addItem(f"{w}×{h}", (w, h))
         cur_w = int(cfg.get("chart_width", 360))
         cur_h = int(cfg.get("chart_height", 280))
-        match_idx = 1  # 중 기본
+        match_idx = 1  # 360×280 기본
         for i in range(self.cb_chart_size.count()):
             w, h = self.cb_chart_size.itemData(i)
             if w == cur_w and h == cur_h:
@@ -557,7 +557,7 @@ class CoordLibraryTab(QWidget):
 
         self._table = QTableWidget(0, 5)
         self._table.setHorizontalHeaderLabels(
-            ["이름", "RECIPE", "n", "최초 저장", "마지막 사용"],
+            ["이름", "RECIPE", "Point", "최초 저장", "마지막 사용"],
         )
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -630,9 +630,9 @@ class CoordLibraryTab(QWidget):
                 n_item.setData(Qt.ItemDataRole.DisplayRole, p.n_points)
                 n_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self._table.setItem(r, 2, n_item)
-                # 최초 저장 / 마지막 사용 — ISO 문자열이라 사전순 = 시간순
-                self._table.setItem(r, 3, QTableWidgetItem(p.created_at))
-                self._table.setItem(r, 4, QTableWidgetItem(p.last_used))
+                # 최초 저장 / 마지막 사용 — 표시만 짧게 (YYYY-MM-DD HH:MM), 저장 ISO는 그대로
+                self._table.setItem(r, 3, QTableWidgetItem(format_dt_display(p.created_at)))
+                self._table.setItem(r, 4, QTableWidgetItem(format_dt_display(p.last_used)))
         finally:
             self._table.setUpdatesEnabled(True)
             self._table.setSortingEnabled(True)
@@ -644,16 +644,19 @@ class CoordLibraryTab(QWidget):
         self._distribute_extra_width()
 
     def _distribute_extra_width(self) -> None:
-        """viewport 폭이 natural 합보다 크면 차이를 전 컬럼에 균등 분배."""
+        """viewport 폭이 natural 합보다 크면 차이를 전 컬럼에 균등 분배. 나머지 픽셀은 마지막 컬럼."""
         if not self._natural_widths:
             return
         cols = len(self._natural_widths)
         vp = self._table.viewport().width()
         total = sum(self._natural_widths)
         if vp > total:
-            extra = (vp - total) // cols
+            diff = vp - total
+            extra = diff // cols
+            remainder = diff - extra * cols  # 정수 division 후 남는 픽셀
             for i in range(cols):
-                self._table.setColumnWidth(i, self._natural_widths[i] + extra)
+                add = extra + (remainder if i == cols - 1 else 0)
+                self._table.setColumnWidth(i, self._natural_widths[i] + add)
         else:
             for i in range(cols):
                 self._table.setColumnWidth(i, self._natural_widths[i])
@@ -661,6 +664,13 @@ class CoordLibraryTab(QWidget):
     def resizeEvent(self, event) -> None:  # noqa: D401
         super().resizeEvent(event)
         self._distribute_extra_width()
+
+    def showEvent(self, event) -> None:
+        # 최초 show 시점엔 viewport 폭이 초기 default라 init의 distribute가 안 맞음 —
+        # show 완료 후 이벤트 루프 한 틱 지연시켜 재계산
+        super().showEvent(event)
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, self._distribute_extra_width)
 
     def _selected_presets(self) -> list[CoordPreset]:
         rows = sorted({i.row() for i in self._table.selectedIndexes()})
@@ -755,7 +765,7 @@ class SettingsDialog(QDialog):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Settings")
-        self.resize(780, 700)
+        self.resize(760, 740)
         self.setModal(False)
         # QDialog 기본은 Qt.Dialog (parent에 transient로 묶여 항상 위). Window로 완전 대체해야
         # 메인 윈도우 뒤로 갈 수 있음. 최소화·닫기 버튼 포함.

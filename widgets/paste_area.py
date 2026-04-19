@@ -76,9 +76,15 @@ class PasteArea(QWidget):
         self._stacked = QStackedWidget()
 
         self._editor = QPlainTextEdit()
-        self._editor.setPlaceholderText(
-            "MES DCOL DATA를 통째로  Ctrl+C, Ctrl+V"
-        )
+        # Input B는 Pre-Post 워크플로 설명으로 교체 (MES DCOL 설명은 Input A와 중복이라 생략)
+        if title == "Input B":
+            placeholder = (
+                "Pre-Post 계산 시에 Input A에 Pre, 여기에 Post Data를 입력하세요.\n"
+                "WAFERID가 동일한 데이터들만 선별하여 Pre-Post 계산."
+            )
+        else:
+            placeholder = "MES DCOL DATA를 통째로 Ctrl+C, Ctrl+V."
+        self._editor.setPlaceholderText(placeholder)
         # 줄바꿈 OFF → 원본 행 그대로, 긴 행은 가로 스크롤바
         self._editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         self._editor.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)

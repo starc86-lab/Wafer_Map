@@ -687,8 +687,9 @@ class WaferCell(QFrame):
             ))
 
         if chart.get("show_value_labels", False):
+            # 측정점 value label 소수점은 chart_common.decimals 사용 (Summary 표와 동일)
             tbl = settings.get("table", {})
-            decimals = int(tbl.get("decimals", 3))
+            decimals = int(common.get("decimals", tbl.get("decimals", 2)))
             for x, y, val in zip(x_in, y_in, v_in):
                 if np.isnan(val):
                     continue

@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+현재 버전: **0.1.0** (첫 사용 가능 배포, 2026-04-20). 버전 이력은 [CHANGELOG.md](CHANGELOG.md) 참고, 사용자 가이드는 [USER_GUIDE.md](USER_GUIDE.md).
+
 ## 개발자 정보
 - 한국인, 코딩 중급 수준
 - 직접 코딩하지 않고 Claude에 코드 수정 권한 위임 — 제안·논의·리뷰 중심 협업
@@ -458,11 +460,11 @@ Wafer Map/
 - **첫 Run Analysis 시퀀셜 표시 제거**: `ResultPanel.set_displays`가 `container.hide() → cells 생성·렌더·addWidget → layout.activate() + adjustSize() → container.show()` 순서. activate/adjustSize 빠지면 show() 직후 (0,0) 중첩 → HBoxLayout 펼침이 1프레임 보임
 - **첫 Run lazy init 흡수**: `app.py::_render_warmup`이 시작 시 dummy `pg.PlotWidget` + dummy `RBFInterpolator` 1회 호출 — 첫 Run Analysis가 두번째와 동속
 
-**3D 첫 렌더링 깜빡임 제거 (b0.0.0~)**
+**3D 첫 렌더링 깜빡임 제거 (0.1.0~)**
 - `app.py`에서 `Qt.AA_ShareOpenGLContexts` set + 시작 시 dummy `GLViewWidget` show→hide→deleteLater (`_gl_warmup`).
 - `result_panel`에 hidden `GLViewWidget` 1개 영구 자식. startup show 시점에 ancestor가 native window로 일괄 승격되어, 이후 cell의 GL widget 추가 시 깜빡임 없음.
 
-**페이스트 응답성 (b0.0.0~)**
+**페이스트 응답성 (0.1.0~)**
 - `_fill_table` 동안 `ResizeToContents` 일시 해제(`Interactive` 모드) — 매 setItem마다 컬럼 측정 트리거 방지 (991ms → 6ms)
 - Table 뷰가 비활성이면 dirty 플래그만 set, Table 토글 시점에 채움 (lazy fill) — paste 직후 0ms
 

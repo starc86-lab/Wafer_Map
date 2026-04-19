@@ -167,9 +167,9 @@ class PresetAddDialog(QDialog):
         self._coords.setPlaceholderText(
             "좌표를 통째로 Ctrl+C, Ctrl+V로 입력하세요.\n"
             "모든 형식을 지원합니다.\n"
-            "- 공백, 비데이터 자동 필터링\n"
-            "- Row 형식, Column 형식 자동 인식\n"
-            "- X, Y 명시 없는 경우 순서대로 X, Y로 자동 인식"
+            "- 공백, 비데이터 자동 필터링.\n"
+            "- Row 형식, Column 형식 자동 인식.\n"
+            "- X, Y 명시 없는 경우 순서대로 X, Y로 자동 인식."
         )
         self._coords.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         self._coords.textChanged.connect(self._refresh_preview)
