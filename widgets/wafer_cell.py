@@ -185,6 +185,14 @@ class WaferCell(QWidget):
         # mask 캐시 — (show_notch, notch_depth) 따로 관리. depth만 바꿔도 ZG 보존
         self._mask_cache: np.ndarray | None = None
         self._mask_key: tuple | None = None       # (G, show_notch, depth)
+        # 3D GL items — 재사용 slot (setData로 데이터만 교체, GPU buffer 유지)
+        self._gl_surface = None
+        self._surface_key: tuple | None = None    # (shader, smooth) — 바뀌면 재생성
+        # z_sig: 이전 surface의 z 값 signature. 동일하면 z 재전달 안 함 → normals 재계산 생략
+        # (smooth=True 에서 z 업데이트는 매우 비쌈: 250² vertex normals 계산)
+        self._surface_z_sig: tuple | None = None
+        self._gl_boundary = None
+        self._gl_grid = None
         self._render()
 
     # ── 외부 API ───────────────────────────────────
@@ -284,9 +292,14 @@ class WaferCell(QWidget):
         self._plot_2d.getPlotItem().clear()
 
     def _reset_3d_items(self) -> None:
-        """GLViewWidget 안의 모든 item 제거 (위젯 자체는 유지)."""
-        for it in list(self._gl_3d.items):
-            self._gl_3d.removeItem(it)
+        """3D items는 slot에 보관되어 setData로 재사용 — 여기선 가시성만 OFF.
+
+        items 자체를 제거하면 GPU buffer 재할당이 발생해 grid=250에서 cell당 수백 ms.
+        hide만 해두면 다음 render에서 setData로 즉시 교체.
+        """
+        for it in (self._gl_surface, self._gl_boundary, self._gl_grid):
+            if it is not None:
+                it.setVisible(False)
 
     def _ensure_interp(self, x_in, y_in, v_in, common):
         """보간 결과를 캐시 — (method, grid_resolution)이 그대로면 재사용.
@@ -406,37 +419,67 @@ class WaferCell(QWidget):
         colors[~inside] = (1.0, 1.0, 1.0, 0.0)
 
         gview = self._gl_3d
-        self._reset_3d_items()
 
+        # ── grid (바닥) — 재사용 ──
         if chart3d.get("show_grid", True):
-            grid = gl.GLGridItem()
-            grid.setSize(x=350, y=350)
-            grid.setSpacing(x=50, y=50)
-            grid.setColor((205, 205, 205, 150))
-            gview.addItem(grid)
+            if self._gl_grid is None:
+                self._gl_grid = gl.GLGridItem()
+                self._gl_grid.setSize(x=350, y=350)
+                self._gl_grid.setSpacing(x=50, y=50)
+                self._gl_grid.setColor((205, 205, 205, 150))
+                gview.addItem(self._gl_grid)
+            self._gl_grid.setVisible(True)
+        elif self._gl_grid is not None:
+            self._gl_grid.setVisible(False)
 
-        surf = gl.GLSurfacePlotItem(
-            x=xg, y=yg, z=z_disp.astype(np.float32),
-            colors=colors.reshape(-1, 4),
-            shader=str(chart3d.get("shading", "shaded")),
-            smooth=bool(chart3d.get("smooth", True)),
-            computeNormals=True,
-            glOptions="opaque",
-        )
-        gview.addItem(surf)
+        # ── surface — shader/smooth 변경 시만 재생성, 그 외엔 setData로 데이터만 교체 ──
+        shader = str(chart3d.get("shading", "shaded"))
+        smooth = bool(chart3d.get("smooth", True))
+        surf_key = (shader, smooth)
+        z_f32 = z_disp.astype(np.float32)
+        colors_flat = colors.reshape(-1, 4)
+        # z signature — (보간 cache key, mask cache key, vmin/vmax, factor)
+        z_sig = (self._interp_key, self._mask_key, vmin, vmax, factor)
+        if self._gl_surface is None or self._surface_key != surf_key:
+            if self._gl_surface is not None:
+                gview.removeItem(self._gl_surface)
+            self._gl_surface = gl.GLSurfacePlotItem(
+                x=xg, y=yg, z=z_f32, colors=colors_flat,
+                shader=shader, smooth=smooth,
+                computeNormals=True, glOptions="opaque",
+            )
+            gview.addItem(self._gl_surface)
+            self._surface_key = surf_key
+            self._surface_z_sig = z_sig
+        elif self._surface_z_sig == z_sig:
+            # z 동일 → colors만 교체 (normals 재계산 생략, smooth=True에서 큰 이득)
+            # 단 setData(colors=only)는 pyqtgraph 내부에서 meshDataChanged 호출이
+            # 빠져서 GPU에 반영 안 됨 → 명시 트리거 필요
+            self._gl_surface.setData(colors=colors_flat)
+            self._gl_surface.meshDataChanged()
+        else:
+            self._gl_surface.setData(x=xg, y=yg, z=z_f32, colors=colors_flat)
+            self._surface_z_sig = z_sig
+        self._gl_surface.setVisible(True)
 
+        # ── boundary line — 재사용 ──
         if common.get("show_circle", True):
             bx, by = _boundary_xy(
                 common.get("show_notch", True),
                 float(common.get("notch_depth_mm", _NOTCH_DEFAULT_DEPTH_MM)),
             )
             circ = np.column_stack([bx, by, np.zeros_like(bx)])
-            # glOptions='opaque' → depth test ON, surface 뒤쪽 라인 가려짐
-            line = gl.GLLinePlotItem(
-                pos=circ, color=(0, 0, 0, 1), width=2,
-                antialias=True, glOptions="opaque",
-            )
-            gview.addItem(line)
+            if self._gl_boundary is None:
+                self._gl_boundary = gl.GLLinePlotItem(
+                    pos=circ, color=(0, 0, 0, 1), width=2,
+                    antialias=True, glOptions="opaque",
+                )
+                gview.addItem(self._gl_boundary)
+            else:
+                self._gl_boundary.setData(pos=circ)
+            self._gl_boundary.setVisible(True)
+        elif self._gl_boundary is not None:
+            self._gl_boundary.setVisible(False)
 
     def _update_table(self, v: np.ndarray, tbl_cfg: dict) -> None:
         decimals = int(tbl_cfg.get("decimals", 3))

@@ -401,6 +401,12 @@ Wafer Map/
 - **2단 캐시**: `_interp_cache`(method, G) + `_mask_cache`(G, show_notch, depth) 분리. notch_depth만 바꿔도 RBF 재계산 없이 mask만 새로 (RBF 90ms → 4ms).
 - `refresh()` 는 렌더 캐시 reset + 현재 view 재렌더 (보간 캐시는 유지). Settings graph_changed가 `revisualize`(cell 재생성) 대신 `ResultPanel.refresh_all()` → 각 cell.refresh() 호출.
 - **ResultPanel.refresh_all()의 병렬 RBF**: `prefetch_interp()`를 `ThreadPoolExecutor`로 cell당 병렬 호출. scipy RBF가 GIL 해제하는 C 코드라 6-cell 병렬이 ~5× 향상 (grid=250 기준 791ms → 160ms). 보간 완료 후 렌더는 메인 스레드에서 순차. scipy `neighbors` 옵션은 N=70 작은 케이스에서 오히려 악효과라 미사용.
+- **3D GL item 재사용 + z_sig skip** (`GLSurfacePlotItem.setData` 활용):
+  - surface/boundary/grid를 slot(`_gl_surface`, `_gl_boundary`, `_gl_grid`)에 보관. `_reset_3d_items`는 `setVisible(False)`만 — GPU buffer 유지.
+  - shader·smooth 변경 시에만 surface 재생성 (`_surface_key`).
+  - z signature `(interp_key, mask_key, vmin, vmax, factor)` 비교 → z 동일하면 `setData(colors=only)`로 교체. `smooth=True` 환경에서 z 갱신 시 250² vertex normals 재계산이 매우 비쌈을 회피.
+  - ⚠️ `setData(colors=only)`는 pyqtgraph 내부에서 `meshDataChanged()` 호출을 생략하는 이슈 → 명시적으로 호출해야 GPU 반영. 빠뜨리면 화면이 안 바뀜.
+  - 효과: grid=250 · 6 cell colormap 변경 체감 3300ms → 110ms (~30× 향상).
 - `_apply_z_scale_mode`는 메인 윈도우의 `cb_zscale`을 ground truth로 (settings 무시), view_mode 분기 제거. 토글 시 cell 재생성 없이 displays z_range만 갈아끼우고 `invalidate_3d()`.
 
 **3D 첫 렌더링 깜빡임 제거 (b0.0.0~)**
