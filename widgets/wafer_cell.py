@@ -125,11 +125,13 @@ def _compute_smooth_vertex_normals(vertexes: np.ndarray, faces: np.ndarray) -> n
 class _LockedGLView(gl.GLViewWidget):
     """휠 줌 차단 GLViewWidget — chart 크기 고정을 위함. 드래그 회전/팬은 허용.
 
-    4x MSAA — surface edge·GLLinePlotItem(경계원·grid) 계단 제거 +
-    grabFramebuffer() 시 resolve된 이미지를 반환해 Copy Graph 품질 개선.
-    app.py의 setDefaultFormat만으로 pyqtgraph가 안 먹는 케이스가 있어
-    위젯 인스턴스에도 명시 set.
+    Shift+좌클릭 누르면 클릭 시점에 모든 다른 셀을 자신의 카메라와 동일 각도로 스냅.
+    이어서 Shift 유지하며 드래그하면 회전이 나머지 셀로 실시간 전파.
+
+    4x MSAA — surface edge·GLLinePlotItem(경계원·grid) 계단 제거 시도.
     """
+    import weakref
+    _instances: "weakref.WeakSet[_LockedGLView]" = weakref.WeakSet()
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -137,9 +139,43 @@ class _LockedGLView(gl.GLViewWidget):
         fmt = self.format()
         fmt.setSamples(4)
         self.setFormat(fmt)
+        _LockedGLView._instances.add(self)
+        self._sync_active: bool = False
 
     def wheelEvent(self, ev):
         ev.ignore()
+
+    def _broadcast_camera(self) -> None:
+        """자신의 카메라 opts를 다른 살아있는 _LockedGLView 인스턴스에 복사 + update."""
+        keys = ("elevation", "azimuth", "distance", "center", "fov")
+        my = {k: self.opts.get(k) for k in keys if k in self.opts}
+        for other in list(_LockedGLView._instances):
+            if other is self:
+                continue
+            try:
+                if not other.isVisible():
+                    continue
+                other.opts.update(my)
+                other.update()
+            except RuntimeError:
+                # widget deleted
+                continue
+
+    def mousePressEvent(self, ev):
+        if ev.button() == Qt.MouseButton.LeftButton and (ev.modifiers() & Qt.KeyboardModifier.ShiftModifier):
+            # 즉시 전 셀을 현재 카메라와 동일 각도로 스냅 (회전 시작 전 정렬)
+            self._sync_active = True
+            self._broadcast_camera()
+        super().mousePressEvent(ev)
+
+    def mouseMoveEvent(self, ev):
+        super().mouseMoveEvent(ev)
+        if self._sync_active and (ev.modifiers() & Qt.KeyboardModifier.ShiftModifier):
+            self._broadcast_camera()
+
+    def mouseReleaseEvent(self, ev):
+        super().mouseReleaseEvent(ev)
+        self._sync_active = False
 
 
 class _ColorBar(QWidget):
@@ -331,6 +367,8 @@ class WaferCell(QFrame):
         # 마우스 줌/팬/메뉴 차단 + 웨이퍼 전체가 꽉 차도록 range 고정
         self._plot_2d.setMouseEnabled(False, False)
         self._plot_2d.getPlotItem().setMenuEnabled(False)
+        # 좌하단 [A] auto-range 버튼 숨김 — 누르면 enableAutoRange로 크기 바뀜
+        self._plot_2d.getPlotItem().hideButtons()
         self._plot_2d.getPlotItem().setDefaultPadding(0)
         self._plot_2d.setRange(
             xRange=(-WAFER_RADIUS_MM, WAFER_RADIUS_MM),

@@ -391,7 +391,9 @@ Wafer Map/
 - 3D 휠 zoom 비활성: `_LockedGLView.wheelEvent`가 `ev.ignore()` — 사이즈 고정이 깨지지 않게
 - 경계 원 `GLLinePlotItem`은 `glOptions='opaque'`로 둬야 뒤쪽이 가려짐 (기본 `translucent`는 depth-write off라 항상 보임)
 - **Copy Graph는 `QScreen.grabWindow(0)` + crop 방식** (WYSIWYG — MSAA/QSS/테마 그대로). `grabFramebuffer` + painter 합성은 jaggies/알파 leak 문제로 폐기. **Settings 창이 위에 뜨면 캡처에 포함되는 한계** 있어 임시로 `SettingsDialog(parent=None)`+`Qt.Window`로 transient owner 끊어 뒤로 가게 함 (tech debt — offscreen FBO 2x 렌더로 제대로 고치면 parent 원복)
-- `_LockedGLView`는 `wheelEvent.ignore()` + `Reset` 메뉴로 카메라 초기화. **Shift+drag 다중 셀 동기** 계획 있음
+- `_LockedGLView`는 `wheelEvent.ignore()` + `Reset` 메뉴로 카메라 초기화
+- **Shift+좌클릭 다중 셀 동기**: press 순간 클릭 셀의 카메라(`elevation/azimuth/distance/center/fov`)를 전 셀에 복사 → 이어서 Shift 유지 드래그하면 실시간 전파. WeakSet 레지스트리로 인스턴스 자동 추적, `update()`만 재호출해 캐시 영향 없음
+- 2D `PlotWidget`: `setMouseEnabled(False, False)` + `setMenuEnabled(False)` + **`hideButtons()`로 좌하단 auto-range [A] 버튼 숨김** (누르면 크기 변화)
 - 렌더 AA: `app.py`에서 `QSurfaceFormat.setDefaultFormat(samples=4)` + `_LockedGLView.setFormat(samples=4)` — 드라이버/pyqtgraph 조합에 따라 안 먹을 수 있음
 
 **좌표 프리셋 라이브러리 성능**
