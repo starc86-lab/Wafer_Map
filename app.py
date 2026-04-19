@@ -12,7 +12,7 @@ import sys
 VERSION = "b0.0.0"
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QGuiApplication, QSurfaceFormat
 from PySide6.QtWidgets import QApplication
 
 from core import runtime
@@ -74,6 +74,12 @@ def _render_warmup() -> None:
 def main() -> int:
     # GL 컨텍스트 공유 (warm-up 컨텍스트와 실제 셀들이 같은 자원 공유)
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
+
+    # 3D GLViewWidget 전역 4x MSAA — 경계선·surface edge·grid line 계단 제거
+    # (표시 + grabFramebuffer 둘 다 효과). 반드시 첫 GL 위젯 생성 전에 호출
+    fmt = QSurfaceFormat()
+    fmt.setSamples(4)
+    QSurfaceFormat.setDefaultFormat(fmt)
 
     app = QApplication(sys.argv)
     app.setStyle("Fusion")

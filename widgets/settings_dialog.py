@@ -237,6 +237,12 @@ class ChartCommonGroup(QGroupBox):
         idx = self.cb_grid.findData(int(cfg.get("grid_resolution", 100)))
         self.cb_grid.setCurrentIndex(idx if idx >= 0 else 2)
 
+        self.cb_decimals = _limit_width(QComboBox())
+        for v in (0, 1, 2, 3):
+            self.cb_decimals.addItem(str(v), v)
+        idx = self.cb_decimals.findData(int(cfg.get("decimals", 2)))
+        self.cb_decimals.setCurrentIndex(idx if idx >= 0 else 2)
+
         self.chk_circle = _fix_width(QCheckBox())
         self.chk_circle.setChecked(bool(cfg.get("show_circle", True)))
 
@@ -282,6 +288,7 @@ class ChartCommonGroup(QGroupBox):
             ("Notch Depth", depth_row),
             ("스케일바 표시", self.chk_scale_bar),
             ("그래프 크기", self.cb_chart_size),
+            ("소수점 자릿수", self.cb_decimals),
         ])
 
         self.cb_cmap.currentIndexChanged.connect(self.changed)
@@ -292,6 +299,7 @@ class ChartCommonGroup(QGroupBox):
         self.cb_notch_depth.currentIndexChanged.connect(self.changed)
         self.chk_scale_bar.toggled.connect(self.changed)
         self.cb_chart_size.currentIndexChanged.connect(self.changed)
+        self.cb_decimals.currentIndexChanged.connect(self.changed)
 
     def gather(self) -> dict[str, Any]:
         w, h = self.cb_chart_size.currentData()
@@ -305,12 +313,13 @@ class ChartCommonGroup(QGroupBox):
             "show_scale_bar": self.chk_scale_bar.isChecked(),
             "chart_width": int(w),
             "chart_height": int(h),
+            "decimals": int(self.cb_decimals.currentData()),
         }
 
     def reload(self, cfg: dict[str, Any]) -> None:
         widgets = (self.cb_cmap, self.cb_interp, self.cb_grid, self.chk_circle,
                    self.chk_notch, self.cb_notch_depth, self.chk_scale_bar,
-                   self.cb_chart_size)
+                   self.cb_chart_size, self.cb_decimals)
         for w in widgets:
             w.blockSignals(True)
         try:
@@ -332,6 +341,9 @@ class ChartCommonGroup(QGroupBox):
                 if w == cur_w and h == cur_h:
                     self.cb_chart_size.setCurrentIndex(i)
                     break
+            idx = self.cb_decimals.findData(int(cfg.get("decimals", 2)))
+            if idx >= 0:
+                self.cb_decimals.setCurrentIndex(idx)
         finally:
             for w in widgets:
                 w.blockSignals(False)
@@ -458,32 +470,51 @@ class Chart3DGroup(QGroupBox):
 # ────────────────────────────────────────────────────────
 # 디자인 설정 탭 (UI / 2D / 3D 세 카드를 flat 세로 스택)
 # ────────────────────────────────────────────────────────
-class DesignTab(QScrollArea):
-    """UI · 2D · 3D 세 카드. 개별 카드의 changed 시그널을 통합 forward."""
+class DesignTab(QWidget):
+    """UI · 2D · 3D 세 카드 + 하단 좌측 Default 버튼. 카드 changed 시그널 통합 forward."""
 
     ui_changed = Signal()       # UI 설정(테마·글꼴·크기) 변경
     graph_changed = Signal()    # 2D / 3D 설정 변경
 
     def __init__(self, settings: dict[str, Any], parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWidgetResizable(True)
 
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
         container = QWidget()
-        lay = QVBoxLayout(container)
-        lay.setContentsMargins(8, 8, 8, 8)
-        lay.setSpacing(8)
+        cards = QVBoxLayout(container)
+        cards.setContentsMargins(8, 8, 8, 8)
+        cards.setSpacing(8)
 
         self._ui_card = UiSettingsCard(settings)
         self._card_common = ChartCommonGroup(settings.get("chart_common", {}))
         self._card_2d = Chart2DGroup(settings.get("chart_2d", {}))
         self._card_3d = Chart3DGroup(settings.get("chart_3d", {}))
-        lay.addWidget(self._ui_card)
-        lay.addWidget(self._card_common)
-        lay.addWidget(self._card_2d)
-        lay.addWidget(self._card_3d)
-        lay.addStretch(1)
+        cards.addWidget(self._ui_card)
+        cards.addWidget(self._card_common)
+        cards.addWidget(self._card_2d)
+        cards.addWidget(self._card_3d)
+        cards.addStretch(1)
+        scroll.setWidget(container)
 
-        self.setWidget(container)
+        # Default — 디자인 탭 전용. 스크롤 밖 sticky 위치
+        from widgets.paste_area import HEADER_BUTTON_WIDTH
+        self.btn_default = QPushButton("Default")
+        self.btn_default.setFixedWidth(HEADER_BUTTON_WIDTH)
+        self.btn_default.setDefault(False)
+        self.btn_default.setAutoDefault(False)
+        self.btn_default.clicked.connect(self.reset_to_defaults)
+
+        btn_row = QHBoxLayout()
+        btn_row.setContentsMargins(8, 4, 8, 8)
+        btn_row.addWidget(self.btn_default)
+        btn_row.addStretch(1)
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(scroll, stretch=1)
+        lay.addLayout(btn_row)
 
         self._ui_card.changed.connect(self.ui_changed)
         self._card_common.changed.connect(self.graph_changed)
@@ -510,15 +541,6 @@ class DesignTab(QScrollArea):
 # ────────────────────────────────────────────────────────
 # Coord Library 탭 (기존 유지, 클래스 이름만)
 # ────────────────────────────────────────────────────────
-SORT_OPTIONS = [
-    ("RECIPE (오름차순)",       lambda p: (p.recipe.lower(), p.n_points)),
-    ("측정 포인트 수",           lambda p: (p.n_points, p.recipe.lower())),
-    ("이름",                    lambda p: p.name.lower()),
-    ("최근 사용 (최신 우선)",    lambda p: p.last_used),
-    ("최초 저장 (최신 우선)",    lambda p: p.created_at),
-]
-
-
 class CoordLibraryTab(QWidget):
     def __init__(self, settings: dict[str, Any], parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -531,12 +553,6 @@ class CoordLibraryTab(QWidget):
         self._count_label = QLabel()
         top.addWidget(self._count_label)
         top.addStretch(1)
-        top.addWidget(QLabel("정렬:"))
-        self._cb_sort = _limit_width(QComboBox())
-        for label, _ in SORT_OPTIONS:
-            self._cb_sort.addItem(label)
-        self._cb_sort.currentIndexChanged.connect(self._refresh_table)
-        top.addWidget(self._cb_sort)
         lay.addLayout(top)
 
         self._table = QTableWidget(0, 5)
@@ -548,8 +564,13 @@ class CoordLibraryTab(QWidget):
         self._table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self._table.verticalHeader().hide()
         hdr = self._table.horizontalHeader()
-        hdr.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-        hdr.setStretchLastSection(True)
+        # Interactive + content 기준 폭 계산 후 여유분 전 컬럼에 균등 분배
+        # (ResizeToContents는 마지막 stretch만 가능, Stretch는 content 짤림)
+        hdr.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        hdr.setStretchLastSection(False)
+        # 헤더 클릭 → 오름/내림 토글 정렬 (n은 정수 정렬, 날짜는 ISO 문자열로 자연 정렬)
+        self._table.setSortingEnabled(True)
+        self._natural_widths: list[int] = []
         lay.addWidget(self._table, stretch=1)
 
         btn_row = QHBoxLayout()
@@ -588,29 +609,58 @@ class CoordLibraryTab(QWidget):
 
         self._refresh_table()
 
-    def _sorted_presets(self) -> list[CoordPreset]:
-        idx = self._cb_sort.currentIndex()
-        label, key_fn = SORT_OPTIONS[idx]
-        reverse = "최신 우선" in label
-        return sorted(self._library.presets, key=key_fn, reverse=reverse)
-
     def _refresh_table(self) -> None:
-        presets = self._sorted_presets()
+        presets = self._library.presets
         self._count_label.setText(f"저장된 좌표: {len(presets)}개")
+        # 정렬은 사용자 헤더 클릭으로 제어. populate 중엔 잠시 OFF (item 추가마다
+        # 재정렬되는 비효율 방지)
+        self._table.setSortingEnabled(False)
         self._table.setUpdatesEnabled(False)
         try:
             self._table.setRowCount(len(presets))
             for r, p in enumerate(presets):
-                vals = (p.name, p.recipe, str(p.n_points), p.created_at, p.last_used)
-                for c, text in enumerate(vals):
-                    item = QTableWidgetItem(text)
-                    if c == 2:
-                        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                    if c == 0:
-                        item.setData(Qt.ItemDataRole.UserRole, p)
-                    self._table.setItem(r, c, item)
+                # 이름
+                name_item = QTableWidgetItem(p.name)
+                name_item.setData(Qt.ItemDataRole.UserRole, p)
+                self._table.setItem(r, 0, name_item)
+                # RECIPE
+                self._table.setItem(r, 1, QTableWidgetItem(p.recipe))
+                # n — int로 setData하면 숫자 정렬됨
+                n_item = QTableWidgetItem()
+                n_item.setData(Qt.ItemDataRole.DisplayRole, p.n_points)
+                n_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self._table.setItem(r, 2, n_item)
+                # 최초 저장 / 마지막 사용 — ISO 문자열이라 사전순 = 시간순
+                self._table.setItem(r, 3, QTableWidgetItem(p.created_at))
+                self._table.setItem(r, 4, QTableWidgetItem(p.last_used))
         finally:
             self._table.setUpdatesEnabled(True)
+            self._table.setSortingEnabled(True)
+        # content 기준 natural 폭 계산 + 여유분 분배
+        self._table.resizeColumnsToContents()
+        self._natural_widths = [
+            self._table.columnWidth(i) for i in range(self._table.columnCount())
+        ]
+        self._distribute_extra_width()
+
+    def _distribute_extra_width(self) -> None:
+        """viewport 폭이 natural 합보다 크면 차이를 전 컬럼에 균등 분배."""
+        if not self._natural_widths:
+            return
+        cols = len(self._natural_widths)
+        vp = self._table.viewport().width()
+        total = sum(self._natural_widths)
+        if vp > total:
+            extra = (vp - total) // cols
+            for i in range(cols):
+                self._table.setColumnWidth(i, self._natural_widths[i] + extra)
+        else:
+            for i in range(cols):
+                self._table.setColumnWidth(i, self._natural_widths[i])
+
+    def resizeEvent(self, event) -> None:  # noqa: D401
+        super().resizeEvent(event)
+        self._distribute_extra_width()
 
     def _selected_presets(self) -> list[CoordPreset]:
         rows = sorted({i.row() for i in self._table.selectedIndexes()})
@@ -680,8 +730,11 @@ class CoordLibraryTab(QWidget):
     def gather(self) -> dict[str, Any]:
         mc = int(self._sb_max_count.value())
         md = int(self._sb_max_days.value())
-        self._library.enforce_limits(max_count=mc, max_days=md, save=True)
-        self._refresh_table()
+        removed = self._library.enforce_limits(max_count=mc, max_days=md, save=True)
+        # 실제 삭제가 있을 때만 refresh — 그래야 사용자의 헤더 정렬 상태가
+        # 불필요하게 재적용(stable sort secondary가 populate 순서로 고정)되지 않음
+        if removed:
+            self._refresh_table()
         return {"coord_library": {"max_count": mc, "max_days": md}}
 
     def revert_on_cancel(self) -> None:
@@ -704,6 +757,16 @@ class SettingsDialog(QDialog):
         self.setWindowTitle("Settings")
         self.resize(780, 700)
         self.setModal(False)
+        # QDialog 기본은 Qt.Dialog (parent에 transient로 묶여 항상 위). Window로 완전 대체해야
+        # 메인 윈도우 뒤로 갈 수 있음. 최소화·닫기 버튼 포함.
+        self.setWindowFlags(
+            Qt.WindowType.Window
+            | Qt.WindowType.WindowTitleHint
+            | Qt.WindowType.WindowSystemMenuHint
+            | Qt.WindowType.WindowMinimizeButtonHint
+            | Qt.WindowType.WindowCloseButtonHint
+        )
+        self._main_window: QWidget | None = None  # setMainWindow로 주입
 
         settings = settings_io.load_settings()
         self._initial = dict(settings)
@@ -724,25 +787,16 @@ class SettingsDialog(QDialog):
         self.btn_save.clicked.connect(self._on_save)
         self.btn_close.clicked.connect(self._on_close)
 
-        # 하단 좌측 Default — 디자인 탭 4개 카드를 DEFAULT_SETTINGS로 리셋
-        self.btn_default = QPushButton("Default")
-        self.btn_default.clicked.connect(self._design.reset_to_defaults)
-
-        # 모든 버튼 폭 통일 + default/auto-default 해제 (엔터로 dialog 닫힘 방지)
+        # 버튼 폭 통일 + default/auto-default 해제 (엔터로 dialog 닫힘 방지)
         from widgets.paste_area import HEADER_BUTTON_WIDTH
-        for b in (self.btn_save, self.btn_close, self.btn_default):
+        for b in (self.btn_save, self.btn_close):
             b.setFixedWidth(HEADER_BUTTON_WIDTH)
             b.setDefault(False)
             b.setAutoDefault(False)
 
-        bottom = QHBoxLayout()
-        bottom.addWidget(self.btn_default)
-        bottom.addStretch(1)
-        bottom.addWidget(btns)
-
         lay = QVBoxLayout(self)
         lay.addWidget(self._tabs, stretch=1)
-        lay.addLayout(bottom)
+        lay.addWidget(btns)
 
     # ── 현재 다이얼로그의 설정 전체를 모아 반환 ──
     def _collect(self) -> dict[str, Any]:
@@ -768,9 +822,13 @@ class SettingsDialog(QDialog):
         """
         merged = self._collect()
         settings_io.set_runtime(merged)
-        main = self.parent()
+        main = self._main_window or self.parent()
         if main is not None and hasattr(main, "refresh_graph"):
             main.refresh_graph()
+
+    def setMainWindow(self, w: QWidget) -> None:
+        """parent=None 으로 생성된 경우에도 메인 윈도우 참조 유지."""
+        self._main_window = w
 
     # ── Enter 키로 dialog가 닫히지 않게 (QSpinBox 등 자식 입력란용) ──
     def keyPressEvent(self, event) -> None:

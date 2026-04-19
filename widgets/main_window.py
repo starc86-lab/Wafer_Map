@@ -33,6 +33,14 @@ from widgets.result_panel import ResultPanel
 from widgets.wafer_cell import WaferDisplay
 
 
+def _pad_slot(slot: str) -> str:
+    """Slot ID 두 자릿수 zero-pad. 숫자 아닌 경우 원본 유지."""
+    try:
+        return f"{int(slot):02d}"
+    except (ValueError, TypeError):
+        return str(slot)
+
+
 PRESET_BUTTON_DEFAULT_TEXT = "좌표 불러오기"
 
 
@@ -43,12 +51,17 @@ class MainWindow(QMainWindow):
 
         # 저장된 윈도우 크기가 있으면 우선, 없으면 해상도 티어 기반
         s = load_settings()
-        saved_main = (s.get("window", {}) or {}).get("main")
+        win_cfg = s.get("window", {}) or {}
+        saved_main = win_cfg.get("main")
         if isinstance(saved_main, (list, tuple)) and len(saved_main) == 2:
             self.resize(int(saved_main[0]), int(saved_main[1]))
         else:
             w, h = runtime.default_window_size("main")
             self.resize(w, h)
+        # 최대화 상태 복원 — resize()로 normal 크기를 먼저 넣고 최대화 플래그만 얹어야
+        # 복원 버튼 / 엣지 드래그가 정상 동작 (window.main에 스크린 크기가 박히는 문제 해결)
+        if win_cfg.get("maximized"):
+            self.setWindowState(Qt.WindowState.WindowMaximized)
 
         self._result_a: ParseResult | None = None
         self._result_b: ParseResult | None = None
@@ -77,7 +90,15 @@ class MainWindow(QMainWindow):
         s = load_settings()
         if s.get("window_save_enabled", True):
             s.setdefault("window", {})
-            s["window"]["main"] = [self.width(), self.height()]
+            # 최대화 상태면 pre-maximize 크기(normalGeometry)를 저장 —
+            # 다음 실행 시 복원 버튼으로 돌아갈 크기
+            if self.isMaximized():
+                ng = self.normalGeometry()
+                s["window"]["main"] = [ng.width(), ng.height()]
+                s["window"]["maximized"] = True
+            else:
+                s["window"]["main"] = [self.width(), self.height()]
+                s["window"]["maximized"] = False
             s["window"]["splitter_sizes"] = list(self._main_splitter.sizes())
             from core import settings as settings_io
             settings_io.save_settings(s)
@@ -192,8 +213,12 @@ class MainWindow(QMainWindow):
         self.btn_visualize.setEnabled(False)
         self.btn_visualize.clicked.connect(self._on_visualize)
 
-        # X 콤보 변경 시 Y suffix 동기화
+        # X 콤보 변경 시 Y suffix 동기화 + VALUE 리스트 재필터
         self.cb_x.currentTextChanged.connect(self._on_x_changed)
+        # Y 변경 시 VALUE 리스트 재필터 (새 Y 제외)
+        self.cb_y.currentTextChanged.connect(self._on_y_changed)
+        # VALUE 변경 시 이미 그려진 상태면 즉시 재-Run
+        self.cb_value.currentTextChanged.connect(self._on_value_changed)
         # View(2D/3D) 변경 — cell 재생성 없이 stack 인덱스만 토글 (캐시 활용)
         self.cb_view.currentTextChanged.connect(self._on_view_toggle)
         # Z scale 변경 — z_range만 갈아끼우고 3D 캐시 무효화 (2D 캐시 유지)
@@ -246,6 +271,13 @@ class MainWindow(QMainWindow):
         value_sel, value_ordered = select_value(available_ns, vpat, data_cols_n)
         x_sel, x_ordered = select_value(available_ns, xpat, data_cols_n)
         y_sel, y_ordered = select_y_with_suffix(x_sel, available_ns, ypat, data_cols_n)
+
+        # VALUE 리스트에서 현재 선택된 X/Y(좌표 PARAMETER)만 제외 —
+        # x_ordered/y_ordered에는 '나머지 전부'가 포함되어 있어 그걸로 필터하면 VALUE가 빔
+        exclude = {x_sel, y_sel} - {None}
+        value_ordered = [n for n in value_ordered if n not in exclude]
+        if value_sel in exclude:
+            value_sel = value_ordered[0] if value_ordered else None
 
         self._fill_combo(self.cb_value, value_ordered, value_sel)
         self._fill_combo(self.cb_x, x_ordered, x_sel)
@@ -310,6 +342,35 @@ class MainWindow(QMainWindow):
         ypat = load_settings().get("auto_select", {}).get("y_patterns", ["Y", "Y*"])
         y_sel, y_ordered = select_y_with_suffix(new_x, available_ns, ypat, data_cols_n)
         self._fill_combo(self.cb_y, y_ordered, y_sel)
+        self._refilter_value_combo()
+
+    def _on_y_changed(self, new_y: str) -> None:
+        """Y 변경 시 VALUE 리스트에서 새 Y 제외 (사용자가 비대칭 suffix 의도 선택 허용)."""
+        if not new_y:
+            return
+        self._reset_preset_override()
+        self._refilter_value_combo()
+
+    def _on_value_changed(self, new_v: str) -> None:
+        """이미 그래프가 그려진 상태에서 VALUE 콤보만 바꾸면 즉시 재-Run."""
+        if not new_v:
+            return
+        if self._result_panel.cells:
+            self._on_visualize()
+
+    def _refilter_value_combo(self) -> None:
+        """현재 **선택된** X/Y를 VALUE 목록에서 제외 — 좌표 PARAMETER는 VALUE 후보가 될 수 없음."""
+        available_ns, data_cols_n = self._build_selection_context()
+        if not available_ns:
+            return
+        auto = load_settings().get("auto_select", {})
+        vpat = auto.get("value_patterns", ["T*"])
+        value_sel, value_ordered = select_value(available_ns, vpat, data_cols_n)
+        exclude = {self.cb_x.currentText(), self.cb_y.currentText()} - {""}
+        value_ordered = [n for n in value_ordered if n not in exclude]
+        if value_sel in exclude:
+            value_sel = value_ordered[0] if value_ordered else None
+        self._fill_combo(self.cb_value, value_ordered, value_sel)
 
     # ── 프리셋 override ───────────────────────────────
     def _open_preset_dialog(self) -> None:
@@ -415,16 +476,16 @@ class MainWindow(QMainWindow):
                 except ValueError:
                     pass
 
-            title = f"{w.wafer_id}  —  {v}"
+            title = f"{w.lot_id}.{_pad_slot(w.slot_id)} – {v}"
             if from_preset or from_lib:
                 title += "  📁"
             displays.append(WaferDisplay(
                 title=title,
-                meta_label=f"{w.lot_id} / {w.slot_id}",
+                meta_label=f"{w.lot_id} / {_pad_slot(w.slot_id)}",
                 x_mm=x_mm, y_mm=y_mm, values=val_n,
             ))
 
-        library.save()
+        self._enforce_library_limits(library)
         self._apply_z_scale_mode(displays, view_mode)
         self._result_panel.set_displays(displays, v, view_mode=view_mode, summary_line="")
 
@@ -450,7 +511,7 @@ class MainWindow(QMainWindow):
                         )
                     except ValueError:
                         pass
-            library.save()
+            self._enforce_library_limits(library)
 
         dr = compute_delta(a, b, v, x, y, tolerance_mm=1e-3)
         if dr.matched == 0:
@@ -465,8 +526,8 @@ class MainWindow(QMainWindow):
 
         displays = [
             WaferDisplay(
-                title=f"{d.wafer_id}  —  Δ {v}",
-                meta_label=f"{d.lot_a} / {d.slot_a}  ←  {d.lot_b} / {d.slot_b}",
+                title=f"{d.lot_a}.{_pad_slot(d.slot_a)} – Δ {v}",
+                meta_label=f"{d.lot_a} / {_pad_slot(d.slot_a)}  ←  {d.lot_b} / {_pad_slot(d.slot_b)}",
                 x_mm=d.x_mm, y_mm=d.y_mm, values=d.delta_v,
             )
             for d in dr.deltas
@@ -478,6 +539,22 @@ class MainWindow(QMainWindow):
         view_mode = self.cb_view.currentText() or "2D"
         self._apply_z_scale_mode(displays, view_mode)
         self._result_panel.set_displays(displays, v, view_mode=view_mode, summary_line=summary)
+
+    def _enforce_library_limits(self, library: CoordLibrary) -> None:
+        """Settings의 coord_library.max_count / max_days로 purge + save.
+
+        - max_count 초과: last_used 오래된 순으로 삭제
+        - max_days 초과: last_used 기준 오래 방치된 레코드 삭제
+        - 각 값 0 이면 해당 제한 무시
+        - 둘 다 0이어도 save는 수행 (add_or_touch 결과 반영)
+        """
+        cl = (load_settings().get("coord_library") or {})
+        mc = int(cl.get("max_count", 0) or 0)
+        md = int(cl.get("max_days", 0) or 0)
+        if mc > 0 or md > 0:
+            library.enforce_limits(max_count=mc, max_days=md, save=True)
+        else:
+            library.save()
 
     def _apply_z_scale_mode(self, displays: list[WaferDisplay], view_mode: str) -> None:
         """cb_zscale을 ground truth로 모든 display의 z_range 세팅.
@@ -505,10 +582,12 @@ class MainWindow(QMainWindow):
 
     def _open_settings(self) -> None:
         from widgets.settings_dialog import SettingsDialog
-        # 논모달 — 한 인스턴스만 유지, 이미 열려있으면 앞으로 가져오기
+        # 논모달 + parent=None — Windows의 transient owner 관계 끊어 메인 뒤로 갈 수 있게.
+        # 파이썬 참조는 self._settings_dialog에 보관해 GC 방지.
         dlg = getattr(self, "_settings_dialog", None)
         if dlg is None or not dlg.isVisible():
-            dlg = SettingsDialog(parent=self)
+            dlg = SettingsDialog(parent=None)
+            dlg.setMainWindow(self)
             self._settings_dialog = dlg
         dlg.show()
         dlg.raise_()

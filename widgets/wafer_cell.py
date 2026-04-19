@@ -123,7 +123,20 @@ def _compute_smooth_vertex_normals(vertexes: np.ndarray, faces: np.ndarray) -> n
 
 
 class _LockedGLView(gl.GLViewWidget):
-    """휠 줌 차단 GLViewWidget — chart 크기 고정을 위함. 드래그 회전/팬은 허용."""
+    """휠 줌 차단 GLViewWidget — chart 크기 고정을 위함. 드래그 회전/팬은 허용.
+
+    4x MSAA — surface edge·GLLinePlotItem(경계원·grid) 계단 제거 +
+    grabFramebuffer() 시 resolve된 이미지를 반환해 Copy Graph 품질 개선.
+    app.py의 setDefaultFormat만으로 pyqtgraph가 안 먹는 케이스가 있어
+    위젯 인스턴스에도 명시 set.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        from PySide6.QtGui import QSurfaceFormat
+        fmt = self.format()
+        fmt.setSamples(4)
+        self.setFormat(fmt)
 
     def wheelEvent(self, ev):
         ev.ignore()
@@ -137,7 +150,7 @@ class _ColorBar(QWidget):
     """
 
     _BAR_RIGHT = 5  # 색상바 우측 margin (bar는 우측, 라벨은 좌측)
-    _BAR_W = 14     # 색상바 폭
+    _BAR_W = 17     # 색상바 폭 (14 × 1.2)
     _LABEL_GAP = 4  # bar와 라벨 사이 간격
     _MARGIN_V = 12  # 상하 여유 (라벨 잘림 방지)
     _N_STOPS = 20   # QLinearGradient stop 수
@@ -184,9 +197,19 @@ class _ColorBar(QWidget):
                 idx = self._N_STOPS - 1 - i     # top=LUT 마지막(max)
                 rgb = lut[idx]
                 grad.setColorAt(t, QColor(int(rgb[0]), int(rgb[1]), int(rgb[2])))
-            p.fillRect(QRect(bar_x, bar_top, self._BAR_W, bar_h), grad)
+            bar_rect = QRect(bar_x, bar_top, self._BAR_W, bar_h)
+            p.fillRect(bar_rect, grad)
+            # White 계열 컬러맵일 때 배경과 안 구분되는 것 방지 — 연한 회색 테두리
+            p.setPen(QPen(QColor(220, 220, 220)))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawRect(bar_rect)
             # tick 라벨 (5개, top=max) — bar 좌측에 우측 정렬
-            fmt = "{:.0f}" if (self._vmax - self._vmin) >= 20 else "{:.1f}"
+            # tick 간격(range / (N-1))에 맞춰 decimals 동적 결정 —
+            # 예: range 0.02 → tick_step 0.005 → 3 decimals, range 20 → 5 → 0
+            import math
+            tick_step = (self._vmax - self._vmin) / (self._N_TICKS - 1)
+            decimals = max(0, -int(math.floor(math.log10(tick_step))))
+            fmt = f"{{:.{decimals}f}}"
             font = QFont("Arial", 8)
             p.setFont(font)
             p.setPen(QPen(QColor(40, 40, 40)))
@@ -272,7 +295,13 @@ class WaferCell(QFrame):
 
         self._title = QLabel(display.title)
         self._title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._title.setStyleSheet("font-weight: bold;")
+        # 전역 QSS의 QWidget { font-size } 가 setFont()를 이기므로 인라인 CSS로 강제.
+        # FONT_SIZES['body']는 font_scale 반영된 값이라 +4도 스케일 따라감.
+        from core.themes import FONT_SIZES
+        title_px = FONT_SIZES.get("body", 13) + 4
+        self._title.setStyleSheet(
+            f"font-weight: bold; color: #444; font-size: {title_px}px;"
+        )
         lay.addWidget(self._title)
 
         # 차트 컨테이너 — [stacked(2D/3D)] + [colorbar] 좌우 배치. 하나의 패널로 통합.
@@ -327,14 +356,23 @@ class WaferCell(QFrame):
 
         self._chart_widget: QWidget = self._plot_2d  # 활성 위젯 추적
 
-        self._table = QTableWidget(4, 2)
+        self._table = QTableWidget(3, 2)
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._table.horizontalHeader().hide()
         self._table.verticalHeader().hide()
         self._table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.Stretch,
         )
-        self._table.setFixedHeight(4 * 28 + 4)
+        # 스크롤바 항상 OFF — 높이는 populate 후 content 기반으로 동적 계산
+        self._table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # 테마 영향 차단 — 흰색 배경 + 짙은 회색 텍스트 고정 (PPT 호환)
+        self._table.setStyleSheet(
+            "QTableWidget { background-color: white; color: #222;"
+            " gridline-color: #cccccc; border: 1px solid #bfbfbf; }"
+            "QTableWidget::item { background-color: white; color: #222; }"
+            "QHeaderView::section { background-color: white; color: #222; }"
+        )
         lay.addWidget(self._table)
 
         self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -383,7 +421,7 @@ class WaferCell(QFrame):
             return
         settings = settings_io.load_settings()
         self._apply_chart_size(settings.get("chart_common", {}))
-        self._update_table(self._v_in, settings.get("table", {}))
+        self._update_table(self._v_in, settings)
         self._activate_current_view()
         self._deferred = False
 
@@ -772,8 +810,11 @@ class WaferCell(QFrame):
         cmap = resolve_colormap(common.get("colormap", "Turbo"))
         self._colorbar.update_bar(cmap, vmin, vmax)
 
-    def _update_table(self, v: np.ndarray, tbl_cfg: dict) -> None:
-        decimals = int(tbl_cfg.get("decimals", 3))
+    def _update_table(self, v: np.ndarray, settings: dict) -> None:
+        # 소수점은 chart_common.decimals (사용자 요청: 공통 항목). 없으면 기존 table.decimals fallback.
+        common = settings.get("chart_common", {})
+        tbl_cfg = settings.get("table", {})
+        decimals = int(common.get("decimals", tbl_cfg.get("decimals", 2)))
         percent_suffix = bool(tbl_cfg.get("nu_percent_suffix", True))
         m = summary_metrics(v)
 
@@ -781,19 +822,25 @@ class WaferCell(QFrame):
         if np.isnan(nu):
             nu_s = "—"
         elif percent_suffix:
-            nu_s = f"{nu:.2f}%"
+            nu_s = f"{nu:.{decimals}f}%"
         else:
-            nu_s = f"{nu / 100.0:.4f}"
+            nu_s = f"{nu / 100.0:.{decimals + 2}f}"
 
         rows = [
-            ("LOT ID / SLOT", self._display.meta_label),
-            ("AVG / NU",      f"{_fmt(m['avg'], decimals)} / {nu_s}"),
-            ("MIN ~ MAX",     f"{_fmt(m['min'], decimals)} ~ {_fmt(m['max'], decimals)}"),
-            ("RANGE / 3SIG",  f"{_fmt(m['range'], decimals)} / {_fmt(m['sig3'], decimals)}"),
+            ("Average",      _fmt(m['avg'], decimals)),
+            ("Non Unif.",    nu_s),
+            ("Range, 3Sig",  f"{_fmt(m['range'], decimals)}, {_fmt(m['sig3'], decimals)}"),
         ]
         for r, (label, value) in enumerate(rows):
             self._set_cell(r, 0, label)
             self._set_cell(r, 1, value)
+        # content 기반 높이 자동 계산 — 스크롤바 안 뜨게
+        self._table.resizeRowsToContents()
+        total_h = sum(self._table.rowHeight(r) for r in range(self._table.rowCount()))
+        frame = 2 * self._table.frameWidth()
+        self._table.setFixedHeight(total_h + frame)
+        # 테이블 높이가 바뀌었으니 cell 전체 크기도 재계산 (chart_area는 그대로, 전체 높이만)
+        self._apply_chart_size(settings.get("chart_common", {}))
 
     def _set_cell(self, row: int, col: int, text: str) -> None:
         item = QTableWidgetItem(text)
@@ -806,13 +853,19 @@ class WaferCell(QFrame):
         if chart is None:
             return
         menu = QMenu(self)
-        a_reset = menu.addAction("Reset Zoom")
+        a_reset = menu.addAction("Reset")
         a_graph = menu.addAction("Copy Graph")
         a_data = menu.addAction("Copy Data")
         chosen = menu.exec(chart.mapToGlobal(pos))
         if chosen is a_reset:
             if isinstance(chart, pg.PlotWidget):
-                chart.getPlotItem().enableAutoRange()
+                # enableAutoRange는 content 기반 padding 재계산이라 초기 setRange와
+                # 미묘하게 달라짐. 초기와 동일한 범위로 재설정 → 크기 변화 없음
+                chart.setRange(
+                    xRange=(-WAFER_RADIUS_MM, WAFER_RADIUS_MM),
+                    yRange=(-WAFER_RADIUS_MM, WAFER_RADIUS_MM),
+                    padding=0.05,
+                )
             elif isinstance(chart, gl.GLViewWidget):
                 s = settings_io.load_settings().get("chart_3d", {})
                 chart.setCameraPosition(
@@ -835,27 +888,29 @@ class WaferCell(QFrame):
 
     # ── Copy ──────────────────────────────────────
     def _copy_graph(self) -> None:
-        """MAP + Summary 표 합성 이미지를 클립보드에 PNG 로.
+        """WaferCell 영역을 화면에서 직접 픽셀 캡처해 클립보드로.
 
-        3D(GLViewWidget)는 일반 grab 시 OpenGL 영역이 검게 나올 수 있으므로,
-        framebuffer 를 별도로 떠서 동일 위치에 합성한다.
+        `QScreen.grabWindow`는 OS 합성 결과를 그대로 가져와서 Qt 일반 grab의
+        GL-transparent 이슈(검은 fb)와 grabFramebuffer의 alpha/jaggies 이슈를
+        모두 우회. 화면에 보이는 픽셀 그대로 = paste 결과.
         """
-        chart = self._chart_widget
-        if isinstance(chart, gl.GLViewWidget):
-            base = self.grab()
-            try:
-                fb_img: QImage = chart.grabFramebuffer()
-            except Exception:
-                fb_img = None
-            if fb_img is not None and not fb_img.isNull():
-                pixmap = QPixmap(base)
-                pos = chart.mapTo(self, chart.rect().topLeft())
-                painter = QPainter(pixmap)
-                painter.drawImage(pos, fb_img)
-                painter.end()
-                QApplication.clipboard().setPixmap(pixmap)
-                return
-        QApplication.clipboard().setPixmap(self.grab())
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is None:
+            QApplication.clipboard().setPixmap(self.grab())
+            return
+
+        # 전체 스크린을 grab한 뒤 WaferCell 영역만 crop (device pixel ratio 반영)
+        full_pm = screen.grabWindow(0)
+        dpr = full_pm.devicePixelRatio()
+        tl_global = self.mapToGlobal(QPoint(0, 0))
+        screen_tl = screen.geometry().topLeft()
+        x = int((tl_global.x() - screen_tl.x()) * dpr)
+        y = int((tl_global.y() - screen_tl.y()) * dpr)
+        w = int(self.width() * dpr)
+        h = int(self.height() * dpr)
+        cropped = full_pm.copy(x, y, w, h)
+        cropped.setDevicePixelRatio(dpr)
+        QApplication.clipboard().setPixmap(cropped)
 
     def _copy_data(self) -> None:
         lines = [f"X\tY\t{self._value_name}"]

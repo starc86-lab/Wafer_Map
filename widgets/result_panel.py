@@ -116,9 +116,10 @@ class ResultPanel(QWidget):
             for c in new_cells:
                 c.render_initial()
 
-            # layout에 add
+            # layout에 add — AlignTop 없으면 scroll viewport > content 높이일 때
+            # QHBoxLayout 기본(세로 중앙)이라, 윈도우 리사이즈 시 셀들이 중앙으로 내려감
             for c in new_cells:
-                self._layout.addWidget(c)
+                self._layout.addWidget(c, 0, Qt.AlignmentFlag.AlignTop)
             self._layout.addStretch(1)
 
             # hidden 상태에서 layout을 강제 activate → 자식 geometry 확정

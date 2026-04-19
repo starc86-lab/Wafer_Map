@@ -176,8 +176,19 @@ class CoordLibrary:
                 self.save()
             return existing, False
 
+        # 이름 충돌 방지 — 같은 base name이 이미 있으면 (2), (3)... suffix
+        # (동일 recipe+동일 n에 좌표만 살짝 다른 레코드가 여럿일 때 구분용)
+        base_name = f"{recipe}_{len(x)}P" if recipe else f"{len(x)}P"
+        existing_names = {p.name for p in self.presets}
+        name = base_name
+        if name in existing_names:
+            i = 2
+            while f"{base_name} ({i})" in existing_names:
+                i += 1
+            name = f"{base_name} ({i})"
+
         preset = CoordPreset(
-            name=f"{recipe}_{len(x)}P" if recipe else f"{len(x)}P",
+            name=name,
             recipe=recipe,
             n_points=len(x),
             x_mm=[float(v) for v in x],
@@ -226,7 +237,8 @@ class CoordLibrary:
         """최대 개수·보관 일수 초과 레코드 삭제. 삭제된 목록 반환.
 
         - `max_count > 0`: `last_used` 오래된 순으로 초과분 삭제 (가장 최근 `max_count`개 유지)
-        - `max_days > 0`:  `created_at` 이 `max_days` 일 이전 레코드 삭제
+        - `max_days > 0`:  `last_used` 가 `max_days` 일 이전인 레코드 삭제
+          (사용된 적 없이 오래 방치된 것만 정리 — 최근 사용 레코드는 created_at 무관 유지)
         - 둘 다 0 이면 no-op
         """
         removed: list[CoordPreset] = []
@@ -236,10 +248,10 @@ class CoordLibrary:
             keep: list[CoordPreset] = []
             for p in self.presets:
                 try:
-                    created = datetime.fromisoformat(p.created_at)
+                    last = datetime.fromisoformat(p.last_used)
                 except Exception:
                     keep.append(p); continue
-                if created >= cutoff:
+                if last >= cutoff:
                     keep.append(p)
                 else:
                     removed.append(p)

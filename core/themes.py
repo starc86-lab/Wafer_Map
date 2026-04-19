@@ -304,6 +304,7 @@ DEFAULT_SETTINGS = {
         "grid_resolution": 150,    # 보간 격자 해상도 (격자 한 변)
         # 보간 방법 — core/interp.py 참고
         "interp_method": "RBF-ThinPlate",
+        "decimals": 2,             # 테이블 값 소수점 자릿수 (0/1/2/3, 컬러바는 별도 동적)
     },
 
     # 2D MAP 전용 (공통은 chart_common 참조)
