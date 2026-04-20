@@ -291,11 +291,12 @@ class CoordLibrary:
         *,
         save: bool = True,
     ) -> list[CoordPreset]:
-        """최대 개수·보관 일수 초과 레코드 삭제. 삭제된 목록 반환.
+        """최대 레시피 그룹 수·보관 일수 초과 레코드 삭제. 삭제된 pair 목록 반환.
 
-        - `max_count > 0`: `last_used` 오래된 순으로 초과분 삭제 (가장 최근 `max_count`개 유지)
-        - `max_days > 0`:  `last_used` 가 `max_days` 일 이전인 레코드 삭제
-          (사용된 적 없이 오래 방치된 것만 정리 — 최근 사용 레코드는 created_at 무관 유지)
+        - `max_count > 0`: **레시피 그룹 기준**. 그룹의 최신 last_used 로 정렬,
+           상위 `max_count` 그룹만 유지. 삭제되는 그룹의 모든 pair 삭제.
+        - `max_days > 0`:  pair 단위 — `last_used` 가 `max_days` 일 이전인 pair 삭제
+          (그룹 내 다른 pair 가 최근 쓰였으면 그 pair 만 유지)
         - 둘 다 0 이면 no-op
         """
         removed: list[CoordPreset] = []
@@ -314,11 +315,23 @@ class CoordLibrary:
                     removed.append(p)
             self.presets = keep
 
-        if max_count > 0 and len(self.presets) > max_count:
-            # last_used 내림차순으로 정렬 → 상위 max_count만 유지
-            ordered = sorted(self.presets, key=lambda p: p.last_used, reverse=True)
-            self.presets = ordered[:max_count]
-            removed.extend(ordered[max_count:])
+        if max_count > 0:
+            # 레시피(대소문자 무시) 기준 그룹화 → 그룹의 최신 last_used 로 정렬
+            groups: dict[str, list[CoordPreset]] = {}
+            for p in self.presets:
+                groups.setdefault(p.recipe.lower(), []).append(p)
+            if len(groups) > max_count:
+                sorted_groups = sorted(
+                    groups.values(),
+                    key=lambda g: max(p.last_used for p in g),
+                    reverse=True,
+                )
+                keep_pairs: list[CoordPreset] = []
+                for g in sorted_groups[:max_count]:
+                    keep_pairs.extend(g)
+                for g in sorted_groups[max_count:]:
+                    removed.extend(g)
+                self.presets = keep_pairs
 
         if removed and save:
             self.save()

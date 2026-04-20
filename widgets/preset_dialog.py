@@ -33,13 +33,17 @@ class PresetSelectDialog(QDialog):
 
         # n_points 필터
         filtered = library.filter_by_n(current_n)
-        # 좌표 배열 기준 병합
-        groups = library.group_by_coords(filtered)
-        # RECIPE 유사도 + last_used 기준 정렬 (둘 다 내림차순)
+        # **레시피 기준** 그룹핑 — 같은 recipe 의 모든 pair 를 1 행으로 표시
+        from collections import defaultdict
+        recipe_groups: dict[str, list[CoordPreset]] = defaultdict(list)
+        for p in filtered:
+            recipe_groups[p.recipe.lower()].append(p)
+        groups = list(recipe_groups.values())
+        # RECIPE 유사도 + 그룹 내 last_used 최신 기준 정렬 (내림차순)
         groups.sort(
             key=lambda g: (
                 recipe_similarity(g[0].recipe, current_recipe),
-                g[0].last_used,
+                max(p.last_used for p in g),
             ),
             reverse=True,
         )
@@ -50,7 +54,7 @@ class PresetSelectDialog(QDialog):
         info = QLabel(
             f"현재 입력: n_points = {current_n}  ·  "
             f"recipe = \"{current_recipe or '-'}\""
-            f"   →   {len(groups)}개 후보 (좌표 기준 병합)"
+            f"   →   {len(groups)}개 레시피 후보"
         )
         info.setStyleSheet("color: #495057; padding: 4px 0;")
         lay.addWidget(info)
@@ -69,19 +73,30 @@ class PresetSelectDialog(QDialog):
         hdr.setStretchLastSection(True)
         self._table.doubleClicked.connect(self.accept)
 
+        from core.auto_select import _has_group_suffix
+        def pick_primary(pairs: list[CoordPreset]) -> CoordPreset:
+            """그룹 내 대표 — non-suffix 우선, 같으면 last_used 최신."""
+            return max(
+                pairs,
+                key=lambda p: (0 if not _has_group_suffix(p.x_name) else -1, p.last_used),
+            )
+
         for i, grp in enumerate(groups):
-            rep = grp[0]
-            recipe_text = rep.recipe + (f"   외 {len(grp) - 1}" if len(grp) > 1 else "")
+            rep = pick_primary(grp)
+            extra = len(grp) - 1
             xy_text = f"{rep.x_name} / {rep.y_name}"
+            if extra > 0:
+                xy_text += f"   외 {extra}개"
             sim = recipe_similarity(rep.recipe, current_recipe)
             sim_text = self._format_similarity(sim, rep.recipe, current_recipe)
+            latest_used = max(p.last_used for p in grp)
 
             for col, text in enumerate([
-                recipe_text,
+                rep.recipe,
                 xy_text,
                 sim_text,
                 str(rep.n_points),
-                format_dt_display(rep.last_used),
+                format_dt_display(latest_used),
             ]):
                 item = QTableWidgetItem(text)
                 if col in (2, 3):
@@ -117,4 +132,11 @@ class PresetSelectDialog(QDialog):
         row = self._table.currentRow()
         if row < 0 or row >= len(self._groups):
             return None
-        return self._groups[row][0]
+        from core.auto_select import _has_group_suffix
+        grp = self._groups[row]
+        # primary = non-suffix 우선 + last_used 최신 — 이걸 override 로 반환
+        # (main_window 의 _apply_preset_indicator 가 recipe 의 모든 pair 를 콤보에 표시)
+        return max(
+            grp,
+            key=lambda p: (0 if not _has_group_suffix(p.x_name) else -1, p.last_used),
+        )

@@ -622,28 +622,43 @@ class CoordLibraryTab(QWidget):
 
     def _refresh_table(self) -> None:
         presets = self._library.presets
-        self._count_label.setText(f"저장된 좌표: {len(presets)}개")
-        # 정렬은 사용자 헤더 클릭으로 제어. populate 중엔 잠시 OFF (item 추가마다
-        # 재정렬되는 비효율 방지)
+        # 레시피별 그룹핑 (대소문자 무시) — recipe 단위 1 행 표시
+        groups: dict[str, list[CoordPreset]] = {}
+        for p in presets:
+            key = p.recipe.lower()
+            groups.setdefault(key, []).append(p)
+
+        self._count_label.setText(f"저장된 레시피: {len(groups)}개")
         self._table.setSortingEnabled(False)
         self._table.setUpdatesEnabled(False)
         try:
-            self._table.setRowCount(len(presets))
-            for r, p in enumerate(presets):
-                # RECIPE — UserRole 에 CoordPreset 참조 저장
-                rec_item = QTableWidgetItem(p.recipe)
-                rec_item.setData(Qt.ItemDataRole.UserRole, p)
+            self._table.setRowCount(len(groups))
+            for r, pairs in enumerate(groups.values()):
+                # 대표 pair — non-suffix 우선, 없으면 last_used 최신
+                primary = self._pick_primary(pairs)
+                extra = len(pairs) - 1
+                # RECIPE — UserRole 에 그룹의 대표 preset 저장
+                rec_item = QTableWidgetItem(primary.recipe)
+                rec_item.setData(Qt.ItemDataRole.UserRole, primary)
+                # 그룹의 모든 pair 도 보조 data 로 저장 (삭제/변경 시 사용)
+                rec_item.setData(Qt.ItemDataRole.UserRole + 1, pairs)
                 self._table.setItem(r, 0, rec_item)
-                # X / Y pair
-                self._table.setItem(r, 1, QTableWidgetItem(f"{p.x_name} / {p.y_name}"))
-                # Point — int로 setData하면 숫자 정렬됨
+                # X / Y pair — 대표 + "외 N개"
+                xy_text = f"{primary.x_name} / {primary.y_name}"
+                if extra > 0:
+                    xy_text += f"   외 {extra}개"
+                self._table.setItem(r, 1, QTableWidgetItem(xy_text))
+                # Point (대표 기준)
                 n_item = QTableWidgetItem()
-                n_item.setData(Qt.ItemDataRole.DisplayRole, p.n_points)
+                n_item.setData(Qt.ItemDataRole.DisplayRole, primary.n_points)
                 n_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self._table.setItem(r, 2, n_item)
-                # 최초 저장 / 마지막 사용
-                self._table.setItem(r, 3, QTableWidgetItem(format_dt_display(p.created_at)))
-                self._table.setItem(r, 4, QTableWidgetItem(format_dt_display(p.last_used)))
+                # 최초 저장 = 그룹 내 created_at 가장 오래된 것
+                oldest_created = min(p.created_at for p in pairs)
+                # 마지막 사용 = 그룹 내 last_used 가장 최신
+                latest_used = max(p.last_used for p in pairs)
+                self._table.setItem(r, 3, QTableWidgetItem(format_dt_display(oldest_created)))
+                self._table.setItem(r, 4, QTableWidgetItem(format_dt_display(latest_used)))
         finally:
             self._table.setUpdatesEnabled(True)
             self._table.setSortingEnabled(True)
@@ -683,7 +698,32 @@ class CoordLibraryTab(QWidget):
         from PySide6.QtCore import QTimer
         QTimer.singleShot(0, self._distribute_extra_width)
 
+    @staticmethod
+    def _pick_primary(pairs: list[CoordPreset]) -> CoordPreset:
+        """그룹 내 대표 pair 선택 — non-suffix(X/Y) 우선, 같은 조건이면 last_used 최신."""
+        from core.auto_select import _has_group_suffix
+
+        def score(p: CoordPreset) -> tuple:
+            # (has_suffix(0=False 우선), -last_used) — Python tuple 비교상 작은 값이 우선
+            return (1 if _has_group_suffix(p.x_name) else 0, p.last_used)
+
+        return max(pairs, key=score)
+
+    def _selected_groups(self) -> list[list[CoordPreset]]:
+        """선택된 각 행의 그룹 (해당 recipe 의 모든 pair list) 반환."""
+        rows = sorted({i.row() for i in self._table.selectedIndexes()})
+        out: list[list[CoordPreset]] = []
+        for r in rows:
+            it = self._table.item(r, 0)
+            if it is None:
+                continue
+            pairs = it.data(Qt.ItemDataRole.UserRole + 1)
+            if isinstance(pairs, list) and pairs:
+                out.append(pairs)
+        return out
+
     def _selected_presets(self) -> list[CoordPreset]:
+        """선택된 각 행의 대표 preset (UserRole) 만 반환. 역호환용."""
         rows = sorted({i.row() for i in self._table.selectedIndexes()})
         out: list[CoordPreset] = []
         for r in rows:
@@ -712,28 +752,35 @@ class CoordLibraryTab(QWidget):
         self._refresh_table()
 
     def _on_recipe(self) -> None:
-        sel = self._selected_presets()
-        if len(sel) != 1:
-            QMessageBox.information(self, "RECIPE 변경", "프리셋 한 개를 선택하세요.")
+        groups = self._selected_groups()
+        if len(groups) != 1:
+            QMessageBox.information(self, "RECIPE 변경", "레시피 한 개를 선택하세요.")
             return
-        p = sel[0]
-        new_rcp, ok = QInputDialog.getText(self, "RECIPE 변경", "새 RECIPE:", text=p.recipe)
+        pairs = groups[0]
+        current = pairs[0].recipe
+        new_rcp, ok = QInputDialog.getText(self, "RECIPE 변경", "새 RECIPE:", text=current)
         if ok and new_rcp.strip():
-            self._library.set_recipe(p, new_rcp.strip(), save=True)
+            # 그룹 내 모든 pair 의 recipe 동시 변경
+            for p in pairs:
+                self._library.set_recipe(p, new_rcp.strip(), save=False)
+            self._library.save()
             self._refresh_table()
 
     def _on_delete(self) -> None:
-        sel = self._selected_presets()
-        if not sel:
+        groups = self._selected_groups()
+        if not groups:
             return
+        total_pairs = sum(len(g) for g in groups)
+        recipe_count = len(groups)
         r = QMessageBox.question(
             self, "삭제 확인",
-            f"선택한 {len(sel)}개 프리셋을 삭제하시겠습니까?",
+            f"선택한 {recipe_count}개 레시피 ({total_pairs}개 페어) 를 삭제하시겠습니까?",
         )
         if r != QMessageBox.StandardButton.Yes:
             return
-        for p in sel:
-            self._library.delete(p, save=False)
+        for pairs in groups:
+            for p in pairs:
+                self._library.delete(p, save=False)
         self._library.save()
         self._refresh_table()
 
