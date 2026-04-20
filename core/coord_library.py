@@ -21,7 +21,7 @@ from typing import Iterable
 import numpy as np
 
 LIBRARY_FILE = "coord_library.json"  # 앱 실행 폴더 기준
-COORD_TOLERANCE_MM = 1e-3            # 중복 판정·매칭 tolerance
+COORD_TOLERANCE_MM = 5e-3            # 중복 판정·매칭 tolerance (5μm)
 
 # RECIPE 이름 토큰 분리용 (공백·언더바·하이픈 구분)
 _RECIPE_SPLIT_RE = re.compile(r"[\s_\-]+")
@@ -61,6 +61,8 @@ class CoordPreset:
     y_mm: list[float]
     created_at: str
     last_used: str
+    x_name: str = "X"   # 원본 X PARAMETER 이름 (예: "X", "X_1000", "X_1000_A")
+    y_name: str = "Y"   # 원본 Y PARAMETER 이름
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -75,6 +77,8 @@ class CoordPreset:
             y_mm=list(d.get("y_mm", [])),
             created_at=str(d.get("created_at", "")),
             last_used=str(d.get("last_used", "")),
+            x_name=str(d.get("x_name", "X")),  # 하위 호환 — 기본 "X"/"Y"
+            y_name=str(d.get("y_name", "Y")),
         )
 
 
@@ -133,10 +137,23 @@ class CoordLibrary:
             json.dump(payload, f, ensure_ascii=False, indent=2)
 
     # ── 조회 ─────────────────────────────────────────
+    def find_match_by_names(
+        self, recipe: str, x_name: str, y_name: str,
+    ) -> CoordPreset | None:
+        """(recipe, x_name, y_name) 키 매칭 — per-pair preset 조회.
+
+        대소문자 무시 recipe 매칭. x_name, y_name 은 대소문자 구분.
+        """
+        rec_lower = recipe.lower() if recipe else ""
+        for p in self.presets:
+            if p.recipe.lower() == rec_lower and p.x_name == x_name and p.y_name == y_name:
+                return p
+        return None
+
     def find_match(
         self, recipe: str, x_mm: np.ndarray, y_mm: np.ndarray,
     ) -> CoordPreset | None:
-        """(recipe, 좌표) 셋 다 일치하는 레코드 — 있으면 반환."""
+        """legacy — (recipe, 좌표) 일치. 신규 경로는 find_match_by_names 사용."""
         x = np.asarray(x_mm, dtype=float)
         y = np.asarray(y_mm, dtype=float)
         for p in self.presets:
@@ -190,12 +207,19 @@ class CoordLibrary:
         x_mm: np.ndarray,
         y_mm: np.ndarray,
         *,
+        x_name: str = "X",
+        y_name: str = "Y",
         save: bool = True,
     ) -> tuple[CoordPreset, bool]:
-        """중복 없으면 추가, 있으면 `last_used` 갱신.
+        """`(recipe, x_name, y_name)` 키 기반 저장 — Option B (overwrite).
+
+        - 동일 키 레코드 있음:
+          * 좌표가 tolerance 내 동일 → `last_used` 만 갱신
+          * 좌표 다름 → **기존 레코드의 좌표를 새 좌표로 덮어쓰기** (페어당 1 레코드)
+        - 동일 키 레코드 없음 → 신규 추가
 
         Returns:
-            (preset, added). `added=True` 면 새 레코드, `False` 면 기존.
+            (preset, added). `added=True` 면 새 레코드, `False` 면 기존 (touch/overwrite).
         """
         x = np.asarray(x_mm, dtype=float)
         y = np.asarray(y_mm, dtype=float)
@@ -203,16 +227,25 @@ class CoordLibrary:
             raise ValueError(f"invalid coord lengths: x={len(x)}, y={len(y)}")
 
         now = _iso_now()
-        existing = self.find_match(recipe, x, y)
+        existing = self.find_match_by_names(recipe, x_name, y_name)
         if existing is not None:
+            # 좌표 동일 (tolerance 내) 이면 touch 만, 다르면 overwrite
+            same_coords = (
+                len(existing.x_mm) == len(x)
+                and _arrays_close(np.asarray(existing.x_mm, dtype=float), x)
+                and _arrays_close(np.asarray(existing.y_mm, dtype=float), y)
+            )
+            if not same_coords:
+                existing.x_mm = [float(v) for v in x]
+                existing.y_mm = [float(v) for v in y]
+                existing.n_points = len(x)
             existing.last_used = now
             if save:
                 self.save()
             return existing, False
 
-        # 이름 충돌 방지 — 같은 base name이 이미 있으면 (2), (3)... suffix
-        # (동일 recipe+동일 n에 좌표만 살짝 다른 레코드가 여럿일 때 구분용)
-        base_name = f"{recipe}_{len(x)}P" if recipe else f"{len(x)}P"
+        # 신규 추가 — 이름은 설명적으로 구성
+        base_name = f"{recipe}_{x_name}-{y_name}_{len(x)}P" if recipe else f"{x_name}-{y_name}_{len(x)}P"
         existing_names = {p.name for p in self.presets}
         name = base_name
         if name in existing_names:
@@ -225,6 +258,8 @@ class CoordLibrary:
             name=name,
             recipe=recipe,
             n_points=len(x),
+            x_name=x_name,
+            y_name=y_name,
             x_mm=[float(v) for v in x],
             y_mm=[float(v) for v in y],
             created_at=now,
