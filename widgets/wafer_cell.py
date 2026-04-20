@@ -630,7 +630,7 @@ class WaferCell(QFrame):
         G = int(common.get("grid_resolution", 100))
         show_notch = bool(common.get("show_notch", True))
         depth = float(common.get("notch_depth_mm", _NOTCH_DEFAULT_DEPTH_MM))
-        edge_cut = float(common.get("radial_edge_cut_mm", 0.0))
+        edge_cut = float(common.get("edge_cut_mm", 0.0))
         # edge_cut 은 radial 경로에서만 유효하지만 일반 캐시 key 에도 포함 — 바뀌면 무효화
         interp_key = (method, G, edge_cut)
         mask_key = (G, show_notch, depth)
@@ -642,7 +642,9 @@ class WaferCell(QFrame):
             XG, YG = np.meshgrid(xg, yg, indexing="ij")
             ZG = interpolate_wafer(
                 x_in, y_in, v_in, XG, YG,
-                method=method, radial_edge_cut_mm=edge_cut,
+                method=method,
+                edge_cut_mm=edge_cut,
+                wafer_radius_mm=float(WAFER_RADIUS_MM),
             )
             self._interp_cache = (XG, YG, ZG, xg, yg)
             self._interp_key = interp_key

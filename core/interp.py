@@ -55,22 +55,21 @@ def _estimate_noise_1d(v_u: np.ndarray) -> float:
     return float(np.std(d) / np.sqrt(2.0))
 
 
-def interpolate_radial(x, y, v, XG, YG, *, edge_cut_mm: float = 0.0) -> np.ndarray:
+def interpolate_radial(x, y, v, XG, YG) -> np.ndarray:
     """1D 라인 스캔 → 웨이퍼 중심 기준 radial symmetric 2D surface.
 
-    가정: 측정 라인이 **웨이퍼 중심(원점)을 지남**. -150~+150 양방향 스캔이면
-    같은 |r| 값에 두 개 측정이 존재 → 평균 사용.
+    가정: 측정 라인이 **웨이퍼 중심(원점)을 지남**.
 
-    알고리즘:
+    알고리즘 (2D RBF 와 동일한 "웨이퍼 경계까지 꽉 채우기" 스타일):
       1. r_i = √(x_i² + y_i²) — 방향 무관, 반경만
       2. 1μm 양자화 후 같은 r 값끼리 평균 (float 노이즈 + ± 대칭 통합)
       3. 노이즈 자동 추정 → smoothing spline (cubic overshoot 링 방지)
-      4. 격자 R = √(X² + Y²) → v(R) 매핑
-      5. 안쪽 (R < r_min): 센터값으로 채움
-      6. 바깥 (R > r_max - edge_cut_mm): NaN
+      4. 격자 R = √(X² + Y²) → v(R) 매핑, 전 구간(0~WAFER_R) 빈틈 없이 채움
+      5. R < r_min (센터 방향 미측정): 센터값 (v_u[0])
+      6. R > r_max (데이터 바깥): edge 값 (v_u[-1]) 으로 constant extrapolate
+      → 서피스 끝이 웨이퍼 원 경계에 도달 = 2D RBF 맵과 동일한 "바닥 연결" 외관
 
-    `edge_cut_mm`: 데이터 r_max 에서 안쪽으로 cut 할 mm. 0 = cut 없음 (기존 동작).
-    양수면 최외각 cut_mm 영역이 NaN → 톱니/extrapolation 가시 영역 제거.
+    edge cut 은 별도로 `interpolate_wafer` 경로에서 wafer 경계 기준 mask 로 적용.
     """
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
@@ -89,32 +88,28 @@ def interpolate_radial(x, y, v, XG, YG, *, edge_cut_mm: float = 0.0) -> np.ndarr
 
     RG = np.sqrt(XG.astype(float) ** 2 + YG.astype(float) ** 2)
 
-    # 데이터 r_max 에서 edge_cut_mm 만큼 안쪽까지만 그림
-    r_outer = max(r_u[-1] - max(float(edge_cut_mm), 0.0), r_u[0])
-
     # 점이 너무 적으면 smoothing 불안정 → linear
     if r_u.size < 4:
         f = interp1d(r_u, v_u, kind="linear", bounds_error=False,
-                     fill_value=(float(v_u[0]), np.nan))
+                     fill_value=(float(v_u[0]), float(v_u[-1])))
         Z = f(RG).astype(float)
-        Z = np.where(RG > r_outer, np.nan, Z)
         return Z
 
     # 노이즈 자동 추정 → smoothing 파라미터
     noise = _estimate_noise_1d(v_u)
-    s_val = float(r_u.size) * (noise ** 2)  # scipy default s heuristic
+    s_val = float(r_u.size) * (noise ** 2)
     try:
+        # ext=3: 범위 밖은 boundary 값으로 constant (r_max 바깥도 edge 값 유지)
         sp = UnivariateSpline(r_u, v_u, k=3, s=s_val, ext=3)
         Z = sp(RG)
     except Exception:
-        # smoothing spline 실패 시 cubic interp 폴백
         f = interp1d(r_u, v_u, kind="cubic", bounds_error=False,
-                     fill_value=(float(v_u[0]), np.nan))
+                     fill_value=(float(v_u[0]), float(v_u[-1])))
         Z = f(RG)
 
-    # 범위 처리 — 내부는 센터값, 바깥(edge_cut 반영)은 NaN
-    Z = np.where(RG > r_outer, np.nan, Z)
+    # 센터 방향 (R < r_min) 은 센터값으로 명시 (ext=3 가 이미 처리하지만 안전)
     Z = np.where(RG < r_u[0], float(v_u[0]), Z)
+    # R > r_max 는 ext=3 로 이미 v_u[-1] 상수, NaN 없음
     return Z.astype(float)
 
 
@@ -127,12 +122,16 @@ def interpolate_wafer(
     method: str = "RBF-ThinPlate",
     *,
     rbf_smoothing: float = 0.0,
-    radial_edge_cut_mm: float = 0.0,
+    edge_cut_mm: float = 0.0,
+    wafer_radius_mm: float = 150.0,
 ) -> np.ndarray:
     """(x, y, v) 측정점으로 (XG, YG) 격자 값 보간.
 
     `x, y, v` 는 1D 동일 길이. `XG, YG` 는 meshgrid 결과.
     반환: `ZG` (XG 형상). 측정점 부족하거나 RBF 실패 시 NaN.
+
+    `edge_cut_mm`: **웨이퍼 경계에서 안쪽으로** cut 할 mm. radial / RBF 양쪽 공통.
+      양수면 R > (wafer_radius_mm - edge_cut_mm) 영역을 NaN.
     """
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
@@ -141,46 +140,48 @@ def interpolate_wafer(
         return np.full(XG.shape, np.nan, dtype=float)
 
     # 1D 라인 스캔 자동 감지 → radial symmetric 경로
-    # (RBF thin_plate 는 collinear 데이터에서 polynomial augmentation 랭크 부족으로 실패)
     if is_collinear(x, y):
         import sys
         sys.stderr.write(
-            f"[interp] Radial 모드 (1D 라인 스캔 감지, n_pts={x.size}, "
-            f"edge_cut={radial_edge_cut_mm}mm)\n"
+            f"[interp] Radial 모드 (1D 라인 스캔 감지, n_pts={x.size})\n"
         )
         sys.stderr.flush()
-        return interpolate_radial(x, y, v, XG, YG, edge_cut_mm=radial_edge_cut_mm)
+        ZG = interpolate_radial(x, y, v, XG, YG)
+    else:
+        # RBF 계열
+        kernel = _RBF_KERNELS.get(method, "thin_plate_spline")
+        try:
+            pts = np.column_stack([x, y])
+            kw: dict = {"kernel": kernel, "smoothing": rbf_smoothing}
+            if kernel in ("multiquadric", "gaussian", "inverse_multiquadric"):
+                from scipy.spatial import cKDTree
+                tree = cKDTree(pts)
+                d, _ = tree.query(pts, k=min(2, len(pts)))
+                median_dist = float(np.median(d[:, 1])) if d.ndim > 1 else 10.0
+                kw["epsilon"] = 1.0 / max(median_dist, 1e-3)
+            rbf = RBFInterpolator(pts, v, **kw)
+            grid_pts = np.column_stack([XG.ravel(), YG.ravel()])
+            ZG = rbf(grid_pts).reshape(XG.shape)
+        except Exception as _e:
+            import sys
+            n_nan_v = int(np.isnan(v).sum()) if v.size else 0
+            n_nan_xy = int((np.isnan(x) | np.isnan(y)).sum()) if x.size else 0
+            x_std = float(np.nanstd(x)) if x.size else 0.0
+            y_std = float(np.nanstd(y)) if y.size else 0.0
+            v_rng = (float(np.nanmin(v)), float(np.nanmax(v))) if v.size else (0.0, 0.0)
+            sys.stderr.write(
+                f"[interp] RBF 실패: kernel={kernel}  n_pts={x.size}  "
+                f"v_nan={n_nan_v}  xy_nan={n_nan_xy}  "
+                f"x_std={x_std:.4g}  y_std={y_std:.4g}  v_range={v_rng}  "
+                f"err={type(_e).__name__}: {_e}\n"
+            )
+            sys.stderr.flush()
+            return np.full(XG.shape, np.nan, dtype=float)
 
-    # RBF 계열 — method 이름에 따라 kernel 선택 (unknown 이름은 thin_plate로 fallback)
-    kernel = _RBF_KERNELS.get(method, "thin_plate_spline")
-    try:
-        pts = np.column_stack([x, y])
-        kw: dict = {"kernel": kernel, "smoothing": rbf_smoothing}
-        # multiquadric/gaussian/inverse_multiquadric는 epsilon 필수.
-        # scipy RBF는 kernel(ε·r) 형태 → epsilon은 거리의 역수.
-        # 측정점 간 평균 최근접 거리가 kernel의 "1 단위"가 되도록 역수로 설정.
-        if kernel in ("multiquadric", "gaussian", "inverse_multiquadric"):
-            from scipy.spatial import cKDTree
-            tree = cKDTree(pts)
-            d, _ = tree.query(pts, k=min(2, len(pts)))
-            median_dist = float(np.median(d[:, 1])) if d.ndim > 1 else 10.0
-            kw["epsilon"] = 1.0 / max(median_dist, 1e-3)
-        rbf = RBFInterpolator(pts, v, **kw)
-        grid_pts = np.column_stack([XG.ravel(), YG.ravel()])
-        return rbf(grid_pts).reshape(XG.shape)
-    except Exception as _e:
-        # 진단용 — RBF 실패 원인 파악
-        import sys
-        n_nan_v = int(np.isnan(v).sum()) if v.size else 0
-        n_nan_xy = int((np.isnan(x) | np.isnan(y)).sum()) if x.size else 0
-        x_std = float(np.nanstd(x)) if x.size else 0.0
-        y_std = float(np.nanstd(y)) if y.size else 0.0
-        v_rng = (float(np.nanmin(v)), float(np.nanmax(v))) if v.size else (0.0, 0.0)
-        sys.stderr.write(
-            f"[interp] RBF 실패: kernel={kernel}  n_pts={x.size}  "
-            f"v_nan={n_nan_v}  xy_nan={n_nan_xy}  "
-            f"x_std={x_std:.4g}  y_std={y_std:.4g}  v_range={v_rng}  "
-            f"err={type(_e).__name__}: {_e}\n"
-        )
-        sys.stderr.flush()
-        return np.full(XG.shape, np.nan, dtype=float)
+    # Edge cut — 웨이퍼 경계 기준 안쪽으로 cut_mm (radial/RBF 공통)
+    if edge_cut_mm > 0:
+        RG = np.sqrt(XG.astype(float) ** 2 + YG.astype(float) ** 2)
+        cut_r = max(wafer_radius_mm - edge_cut_mm, 0.0)
+        ZG = np.where(RG > cut_r, np.nan, ZG)
+
+    return ZG

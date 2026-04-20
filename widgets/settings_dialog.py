@@ -243,14 +243,14 @@ class ChartCommonGroup(QGroupBox):
         idx = self.cb_decimals.findData(int(cfg.get("decimals", 2)))
         self.cb_decimals.setCurrentIndex(idx if idx >= 0 else 2)
 
-        # Radial edge cut (1D 스캔 전용) — 0=cut 없음
-        self.sb_radial_edge_cut = QDoubleSpinBox()
-        self.sb_radial_edge_cut.setRange(0.0, 10.0)
-        self.sb_radial_edge_cut.setSingleStep(0.5)
-        self.sb_radial_edge_cut.setDecimals(1)
-        self.sb_radial_edge_cut.setSuffix(" mm")
-        self.sb_radial_edge_cut.setValue(float(cfg.get("radial_edge_cut_mm", 3.0)))
-        _limit_width(self.sb_radial_edge_cut)
+        # Edge cut — 웨이퍼 경계에서 안쪽으로 cut. 0=cut 없음. radial/RBF 양쪽 공통
+        self.sb_edge_cut = QDoubleSpinBox()
+        self.sb_edge_cut.setRange(0.0, 10.0)
+        self.sb_edge_cut.setSingleStep(0.5)
+        self.sb_edge_cut.setDecimals(1)
+        self.sb_edge_cut.setSuffix(" mm")
+        self.sb_edge_cut.setValue(float(cfg.get("edge_cut_mm", 0.0)))
+        _limit_width(self.sb_edge_cut)
 
         self.chk_circle = _fix_width(QCheckBox())
         self.chk_circle.setChecked(bool(cfg.get("show_circle", True)))
@@ -298,7 +298,7 @@ class ChartCommonGroup(QGroupBox):
             ("스케일바 표시", self.chk_scale_bar),
             ("그래프 크기", self.cb_chart_size),
             ("소수점 자릿수", self.cb_decimals),
-            ("Radial edge cut", self.sb_radial_edge_cut),
+            ("Edge cut", self.sb_edge_cut),
         ])
 
         self.cb_cmap.currentIndexChanged.connect(self.changed)
@@ -310,7 +310,7 @@ class ChartCommonGroup(QGroupBox):
         self.chk_scale_bar.toggled.connect(self.changed)
         self.cb_chart_size.currentIndexChanged.connect(self.changed)
         self.cb_decimals.currentIndexChanged.connect(self.changed)
-        self.sb_radial_edge_cut.valueChanged.connect(self.changed)
+        self.sb_edge_cut.valueChanged.connect(self.changed)
 
     def gather(self) -> dict[str, Any]:
         w, h = self.cb_chart_size.currentData()
@@ -325,13 +325,13 @@ class ChartCommonGroup(QGroupBox):
             "chart_width": int(w),
             "chart_height": int(h),
             "decimals": int(self.cb_decimals.currentData()),
-            "radial_edge_cut_mm": float(self.sb_radial_edge_cut.value()),
+            "edge_cut_mm": float(self.sb_edge_cut.value()),
         }
 
     def reload(self, cfg: dict[str, Any]) -> None:
         widgets = (self.cb_cmap, self.cb_interp, self.cb_grid, self.chk_circle,
                    self.chk_notch, self.cb_notch_depth, self.chk_scale_bar,
-                   self.cb_chart_size, self.cb_decimals, self.sb_radial_edge_cut)
+                   self.cb_chart_size, self.cb_decimals, self.sb_edge_cut)
         for w in widgets:
             w.blockSignals(True)
         try:
@@ -356,7 +356,7 @@ class ChartCommonGroup(QGroupBox):
             idx = self.cb_decimals.findData(int(cfg.get("decimals", 2)))
             if idx >= 0:
                 self.cb_decimals.setCurrentIndex(idx)
-            self.sb_radial_edge_cut.setValue(float(cfg.get("radial_edge_cut_mm", 3.0)))
+            self.sb_edge_cut.setValue(float(cfg.get("edge_cut_mm", 0.0)))
         finally:
             for w in widgets:
                 w.blockSignals(False)

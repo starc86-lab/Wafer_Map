@@ -305,7 +305,7 @@ DEFAULT_SETTINGS = {
         # 보간 방법 — core/interp.py 참고
         "interp_method": "RBF-ThinPlate",
         "decimals": 2,             # 테이블 값 소수점 자릿수 (0/1/2/3, 컬러바는 별도 동적)
-        "radial_edge_cut_mm": 3.0, # 1D 라인 스캔 radial 변환 시 외각 cut (mm). 0=cut 없음
+        "edge_cut_mm": 0.0,        # 웨이퍼 경계에서 안쪽으로 cut (mm). 0=cut 없음. radial/RBF 양쪽 공통
     },
 
     # 2D MAP 전용 (공통은 chart_common 참조)
