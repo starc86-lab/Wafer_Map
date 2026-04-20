@@ -20,7 +20,9 @@ from PySide6.QtWidgets import (
 import numpy as np
 
 from core import runtime
-from core.auto_select import select_value, select_y_with_suffix
+from core.auto_select import (
+    select_value, select_value_by_variability, select_y_with_suffix,
+)
 from core.coord_library import CoordLibrary, CoordPreset
 from core.coords import normalize_to_mm
 from core.delta import compute_delta
@@ -261,24 +263,28 @@ class MainWindow(QMainWindow):
         self._refresh_controls()
 
     def _refresh_controls(self) -> None:
-        """입력 결과를 바탕으로 콤보 리스트·기본값 갱신."""
-        available_ns, data_cols_n = self._build_selection_context()
+        """입력 결과를 바탕으로 콤보 리스트·기본값 갱신.
+
+        순서: X/Y 먼저 결정 → X 의 n 으로 VALUE 의 required_n 확정 →
+        VALUE 는 |3σ/AVG| 최대 휴리스틱으로 선택 (단일값·저변동 파라 자동 후순위).
+        """
+        available_ns, params, data_cols_n = self._build_selection_context()
 
         auto = load_settings().get("auto_select", {})
         vpat = auto.get("value_patterns", ["T*"])
         xpat = auto.get("x_patterns", ["X", "X*"])
         ypat = auto.get("y_patterns", ["Y", "Y*"])
 
-        value_sel, value_ordered = select_value(available_ns, vpat, data_cols_n)
+        # 1) X → 2) Y (기존 이름 패턴 기반)
         x_sel, x_ordered = select_value(available_ns, xpat, data_cols_n)
         y_sel, y_ordered = select_y_with_suffix(x_sel, available_ns, ypat, data_cols_n)
 
-        # VALUE 리스트에서 현재 선택된 X/Y(좌표 PARAMETER)만 제외 —
-        # x_ordered/y_ordered에는 '나머지 전부'가 포함되어 있어 그걸로 필터하면 VALUE가 빔
+        # 3) VALUE — X 의 n (좌표 개수) 기준으로 3σ/AVG 휴리스틱
+        n_coords = int(available_ns.get(x_sel, data_cols_n)) if x_sel else int(data_cols_n)
         exclude = {x_sel, y_sel} - {None}
-        value_ordered = [n for n in value_ordered if n not in exclude]
-        if value_sel in exclude:
-            value_sel = value_ordered[0] if value_ordered else None
+        value_sel, value_ordered = select_value_by_variability(
+            params, n_coords, vpat, exclude_names=exclude,
+        )
 
         self._fill_combo(self.cb_value, value_ordered, value_sel)
         self._fill_combo(self.cb_x, x_ordered, x_sel)
@@ -295,16 +301,17 @@ class MainWindow(QMainWindow):
         # 프리셋 active 상태면 콤보 상단에 X_Preset / Y_Preset 합성 아이템 삽입
         self._apply_preset_indicator()
 
-    def _build_selection_context(self) -> tuple[dict[str, int], int]:
-        """현재 양측 결과로부터 (available_ns, data_cols_n) 계산.
+    def _build_selection_context(self) -> tuple[dict[str, int], dict, int]:
+        """현재 양측 결과로부터 (available_ns, first_wafer_parameters, data_cols_n).
 
         available_ns: 모든 웨이퍼에 공통 존재하는 PARAMETER → 대표 n (첫 웨이퍼 기준).
-        data_cols_n: DATA 컬럼 총 개수. 양쪽 모두 있으면 A 기준(동일해야 정상).
+        first_wafer_parameters: {name: WaferRecord} — VALUE 자동선택 (3σ/AVG) 계산에 필요.
+        data_cols_n: DATA 컬럼 총 개수. 양쪽 모두 있으면 A 기준.
         """
         a, b = self._result_a, self._result_b
         results = [r for r in (a, b) if r is not None]
         if not results:
-            return {}, 0
+            return {}, {}, 0
 
         # 공통 PARAMETER 집합
         param_sets: list[set[str]] = []
@@ -314,16 +321,19 @@ class MainWindow(QMainWindow):
                 param_sets.append(set.intersection(*per_result))
         common = set.intersection(*param_sets) if param_sets else set()
 
-        # 대표 n (첫 웨이퍼 기준)
         first_result = results[0]
         first_wafer = next(iter(first_result.wafers.values())) if first_result.wafers else None
         if first_wafer is None:
-            return {}, 0
+            return {}, {}, 0
         available_ns = {
             name: first_wafer.parameters[name].n
             for name in common if name in first_wafer.parameters
         }
-        return available_ns, len(first_result.data_columns)
+        params = {
+            name: first_wafer.parameters[name]
+            for name in common if name in first_wafer.parameters
+        }
+        return available_ns, params, len(first_result.data_columns)
 
     def _fill_combo(
         self, combo: QComboBox, items: list[str], selected: str | None,
@@ -344,7 +354,7 @@ class MainWindow(QMainWindow):
         if not new_x:
             return
         self._reset_preset_override()
-        available_ns, data_cols_n = self._build_selection_context()
+        available_ns, _params, data_cols_n = self._build_selection_context()
         if not available_ns:
             return
         ypat = load_settings().get("auto_select", {}).get("y_patterns", ["Y", "Y*"])
@@ -367,17 +377,19 @@ class MainWindow(QMainWindow):
             self._on_visualize()
 
     def _refilter_value_combo(self) -> None:
-        """현재 **선택된** X/Y를 VALUE 목록에서 제외 — 좌표 PARAMETER는 VALUE 후보가 될 수 없음."""
-        available_ns, data_cols_n = self._build_selection_context()
+        """X/Y 변경 후 VALUE 콤보 재계산 — 3σ/AVG 휴리스틱, X 의 n 기준."""
+        available_ns, params, data_cols_n = self._build_selection_context()
         if not available_ns:
             return
         auto = load_settings().get("auto_select", {})
         vpat = auto.get("value_patterns", ["T*"])
-        value_sel, value_ordered = select_value(available_ns, vpat, data_cols_n)
-        exclude = {self.cb_x.currentText(), self.cb_y.currentText()} - {""}
-        value_ordered = [n for n in value_ordered if n not in exclude]
-        if value_sel in exclude:
-            value_sel = value_ordered[0] if value_ordered else None
+        x_cur = self.cb_x.currentText()
+        y_cur = self.cb_y.currentText()
+        n_coords = int(available_ns.get(x_cur, data_cols_n))
+        exclude = {x_cur, y_cur} - {""}
+        value_sel, value_ordered = select_value_by_variability(
+            params, n_coords, vpat, exclude_names=exclude,
+        )
         self._fill_combo(self.cb_value, value_ordered, value_sel)
 
     # ── 프리셋 override ───────────────────────────────

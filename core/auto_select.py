@@ -12,7 +12,9 @@ ex.
 from __future__ import annotations
 
 import fnmatch
-from typing import Iterable
+from typing import Iterable, Mapping
+
+import numpy as np
 
 
 def _matches(name: str, pattern: str) -> bool:
@@ -72,6 +74,81 @@ def select_value(
     if selected is None:
         selected = _fallback_alpha_first(available_ns, required_n)
     return selected, ordered
+
+
+def select_value_by_variability(
+    parameters: Mapping,
+    required_n: int,
+    value_patterns: Iterable[str] = ("T*",),
+    *,
+    exclude_names: set[str] | None = None,
+    valid_ratio: float = 0.8,
+) -> tuple[str | None, list[str]]:
+    """VALUE 자동 선택 — |3σ/AVG| 최대 우선.
+
+    1. `valid_count >= required_n * valid_ratio` (기본 80%) 필터
+       → 단일값 (T1_AVG, T1_Range 등) + 누락 심한 파라 제외
+    2. 후보들 중 |3σ / AVG| 최대 우선 — 공간적 변동 큰 측정이 맵 시각화 가치 높음
+       → GOF, K[633], N[633] 같이 변동 작은 파라 자동 후순위
+    3. Tie-break: `value_patterns` 매치 우선 + 알파벳
+
+    Args:
+        parameters: {name: WaferRecord} — 첫 웨이퍼 기준.
+            WaferRecord 는 `values` (list[float]) 속성 가짐.
+        required_n: 기준 n (보통 X 좌표의 n — coord 개수).
+        value_patterns: fnmatch 패턴. tie-break 용.
+        exclude_names: 후보에서 제외할 이름 (선택된 X, Y 등).
+
+    Returns:
+        (selected, ordered_list) — ordered 는 콤보 리스트.
+        selected 가 None 이면 후보 0개.
+    """
+    excl = exclude_names or set()
+    min_valid = max(int(required_n * valid_ratio), 1)
+    patterns = list(value_patterns)
+
+    qualified: list[tuple[str, float, int]] = []  # (name, metric, pattern_score)
+    for name, rec in parameters.items():
+        if name in excl:
+            continue
+        try:
+            vals = np.asarray(rec.values, dtype=float)
+        except Exception:
+            continue
+        valid = vals[~np.isnan(vals)] if vals.size else vals
+        if valid.size < min_valid:
+            continue
+        avg = float(valid.mean())
+        if valid.size > 1:
+            sig3 = 3.0 * float(valid.std(ddof=1))
+        else:
+            sig3 = 0.0
+        if abs(avg) > 1e-10:
+            metric = abs(sig3 / avg)
+        else:
+            # AVG ≈ 0: |3σ| 자체 사용 (상대적 스케일 확보 위해 작은 상수 배)
+            metric = abs(sig3) * 1e-3
+        # pattern tie-break 점수 (뒤에 있을수록 낮음, 매치 없으면 0)
+        pat_score = 0
+        for i, pat in enumerate(patterns):
+            if _matches(name, pat):
+                pat_score = len(patterns) - i
+                break
+        qualified.append((name, metric, pat_score))
+
+    # 자격 미달 파라 — 콤보 후순위로만 포함 (선택 대상 아님)
+    rest = sorted(
+        name for name in parameters
+        if name not in excl and not any(q[0] == name for q in qualified)
+    )
+
+    if not qualified:
+        # 최후 폴백: 자격 파라 0 개 → 아무거나 (excluded 제외, 알파벳 첫)
+        return (rest[0] if rest else None), rest
+
+    qualified.sort(key=lambda t: (-t[1], -t[2], t[0]))
+    ordered = [t[0] for t in qualified] + rest
+    return qualified[0][0], ordered
 
 
 def select_y_with_suffix(
