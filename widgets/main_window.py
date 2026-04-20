@@ -204,8 +204,10 @@ class MainWindow(QMainWindow):
         lay.setSpacing(8)
 
         self.cb_value = QComboBox(); self.cb_value.setFixedWidth(84)
-        self.cb_x = QComboBox();     self.cb_x.setFixedWidth(84)
-        self.cb_y = QComboBox();     self.cb_y.setFixedWidth(84)
+        # 통합 좌표 콤보 — "X / Y" 페어 단위 선택. 사용자가 X, Y 별도 선택하지
+        # 않아도 되고 suffix 불일치(X_1000/Y_A) 조합 실수 원천 차단.
+        self.cb_coord = QComboBox()
+        self.cb_coord.setMinimumWidth(170)   # "X_1000_A / Y_1000_A" 전체 보일 폭
 
         self.btn_load_preset = QPushButton(PRESET_BUTTON_DEFAULT_TEXT)
         self.btn_load_preset.setEnabled(False)
@@ -225,10 +227,8 @@ class MainWindow(QMainWindow):
         self.btn_visualize.setEnabled(False)
         self.btn_visualize.clicked.connect(self._on_visualize)
 
-        # X 콤보 변경 시 Y suffix 동기화 + VALUE 리스트 재필터
-        self.cb_x.currentTextChanged.connect(self._on_x_changed)
-        # Y 변경 시 VALUE 리스트 재필터 (새 Y 제외)
-        self.cb_y.currentTextChanged.connect(self._on_y_changed)
+        # 좌표 콤보 변경 시 pair 기반 로직 + VALUE 리스트 재필터
+        self.cb_coord.currentIndexChanged.connect(self._on_coord_changed)
         # VALUE 변경 시 이미 그려진 상태면 즉시 재-Run
         self.cb_value.currentTextChanged.connect(self._on_value_changed)
         # View(2D/3D) 변경 — cell 재생성 없이 stack 인덱스만 토글 (캐시 활용)
@@ -238,8 +238,7 @@ class MainWindow(QMainWindow):
 
         for label, widget in [
             ("VALUE:", self.cb_value),
-            ("X:", self.cb_x),
-            ("Y:", self.cb_y),
+            ("좌표:", self.cb_coord),
         ]:
             lay.addWidget(QLabel(label))
             lay.addWidget(widget)
@@ -297,8 +296,9 @@ class MainWindow(QMainWindow):
         )
 
         self._fill_combo(self.cb_value, value_ordered, value_sel)
-        self._fill_combo(self.cb_x, x_ordered, x_sel)
-        self._fill_combo(self.cb_y, y_ordered, y_sel)
+        # 좌표 콤보: pair 단위 — "x / y" 표시, itemData = (x, y) 튜플
+        pairs = list(zip(x_ordered, y_ordered))
+        self._fill_coord_combo(pairs, (x_sel, y_sel) if x_sel and y_sel else None)
 
         any_input = bool(self._result_a or self._result_b)
         self.btn_visualize.setEnabled(any_input and bool(available_ns))
@@ -345,6 +345,36 @@ class MainWindow(QMainWindow):
         }
         return available_ns, params, len(first_result.data_columns)
 
+    def _fill_coord_combo(
+        self,
+        pairs: list[tuple[str, str]],
+        selected: tuple[str, str] | None,
+    ) -> None:
+        """cb_coord 를 (x, y) pair 리스트로 채움.
+
+        각 아이템 표시: "x / y", UserRole: (x, y) 튜플.
+        preset 소스는 별도 UserRole+1 에 "preset" 마킹하여 스타일 구분.
+        """
+        prev = self._current_xy()
+        self.cb_coord.blockSignals(True)
+        self.cb_coord.clear()
+        for x, y in pairs:
+            self.cb_coord.addItem(f"{x} / {y}", (x, y))
+        target = selected if selected else prev
+        if target:
+            for i in range(self.cb_coord.count()):
+                if self.cb_coord.itemData(i) == target:
+                    self.cb_coord.setCurrentIndex(i)
+                    break
+        self.cb_coord.blockSignals(False)
+
+    def _current_xy(self) -> tuple[str, str] | None:
+        """cb_coord 현재 선택의 (x_name, y_name) 튜플. 선택 없으면 None."""
+        data = self.cb_coord.currentData()
+        if isinstance(data, tuple) and len(data) == 2:
+            return data
+        return None
+
     def _fill_combo(
         self, combo: QComboBox, items: list[str], selected: str | None,
     ) -> None:
@@ -359,43 +389,28 @@ class MainWindow(QMainWindow):
                 combo.setCurrentIndex(idx)
         combo.blockSignals(False)
 
-    def _on_x_changed(self, new_x: str) -> None:
-        """X 변경 시 Y 자동 동기화. preset 소스 ↔ 입력 소스 전환 모두 처리."""
-        if not new_x:
+    def _on_coord_changed(self, idx: int) -> None:
+        """좌표 pair 변경 — preset 소스면 override 유지·재매핑, 아니면 해제. VALUE 재필터."""
+        if idx < 0:
             return
-        idx = self.cb_x.findText(new_x)
-        is_preset = idx >= 0 and self.cb_x.itemData(idx, Qt.ItemDataRole.UserRole) == "preset"
+        is_preset = self.cb_coord.itemData(idx, Qt.ItemDataRole.UserRole) == "preset"
 
         if is_preset and self._preset_override is not None:
-            # preset 소스 → 같은 recipe 에서 x_name=new_x 인 pair 찾아 override 교체
-            library = CoordLibrary()
-            recipe = self._preset_override.recipe
-            candidates = [p for p in library.find_by_recipe(recipe) if p.x_name == new_x]
-            if candidates:
-                candidates.sort(key=lambda p: p.last_used, reverse=True)
-                self._preset_override = candidates[0]
-                self.btn_load_preset.setText(f"프리셋: {candidates[0].display_name}")
-                self._apply_preset_indicator()  # cb_y 도 매칭 pair 의 y_name 으로 리셋
-                self._refilter_value_combo()
-                return
+            xy = self.cb_coord.itemData(idx)
+            if isinstance(xy, tuple) and len(xy) == 2:
+                xn, yn = xy
+                library = CoordLibrary()
+                matched = library.find_match_by_names(
+                    self._preset_override.recipe, xn, yn,
+                )
+                if matched is not None:
+                    self._preset_override = matched
+                    self.btn_load_preset.setText(f"프리셋: {matched.display_name}")
+                    self._refilter_value_combo()
+                    return
 
-        # 비-preset 경로 — override 해제 + 기존 로직
+        # 비-preset 경로 — override 해제 + VALUE 재필터
         self._reset_preset_override()
-        available_ns, _params, data_cols_n = self._build_selection_context()
-        if not available_ns:
-            return
-        ypat = load_settings().get("auto_select", {}).get("y_patterns", ["Y", "Y*"])
-        y_sel, y_ordered = select_y_with_suffix(new_x, available_ns, ypat, data_cols_n)
-        self._fill_combo(self.cb_y, y_ordered, y_sel)
-        self._refilter_value_combo()
-
-    def _on_y_changed(self, new_y: str) -> None:
-        """Y 변경 시 VALUE 리스트에서 새 Y 제외. preset 소스 이동 시 override 유지."""
-        if not new_y:
-            return
-        idx = self.cb_y.findText(new_y)
-        if idx < 0 or self.cb_y.itemData(idx, Qt.ItemDataRole.UserRole) != "preset":
-            self._reset_preset_override()
         self._refilter_value_combo()
 
     def _on_value_changed(self, new_v: str) -> None:
@@ -406,14 +421,14 @@ class MainWindow(QMainWindow):
             self._on_visualize()
 
     def _refilter_value_combo(self) -> None:
-        """X/Y 변경 후 VALUE 콤보 재계산 — 3σ/AVG 휴리스틱, X 의 n 기준."""
+        """좌표 pair 변경 후 VALUE 콤보 재계산 — 3σ/AVG 휴리스틱."""
         available_ns, params, data_cols_n = self._build_selection_context()
         if not available_ns:
             return
         auto = load_settings().get("auto_select", {})
         vpat = auto.get("value_patterns", ["T*"])
-        x_cur = self.cb_x.currentText()
-        y_cur = self.cb_y.currentText()
+        xy = self._current_xy() or ("", "")
+        x_cur, y_cur = xy
         n_coords = int(available_ns.get(x_cur, data_cols_n))
         exclude = {x_cur, y_cur} - {""}
         value_sel, value_ordered = select_value_by_variability(
@@ -486,65 +501,60 @@ class MainWindow(QMainWindow):
             self.btn_load_preset.setText(f"프리셋: {preset.display_name}")
 
     def _apply_preset_indicator(self):
-        """preset 활성 시 X/Y 콤보에 해당 recipe 의 모든 pair (원본 이름) 표시.
+        """preset 활성 시 cb_coord 에 해당 recipe 의 모든 pair 를 "x / y" 로 상단 삽입.
 
-        - 이전에 넣었던 preset 소스 아이템은 제거
-        - 각 pair 의 x_name / y_name 을 상단에 굵은 글씨 + 파란색으로 삽입
-        - 같은 이름이 입력 기반 콤보에 이미 있으면 중복 항목 제거
+        - preset 소스 아이템은 UserRole 에 "preset" 표시 + 굵은 파란색 스타일
+        - 같은 pair 가 이미 있으면 중복 제거 (preset 버전이 대체)
         - 기본 선택: self._preset_override 의 pair
         """
         from PySide6.QtGui import QBrush, QColor, QFont
-        # 기존 preset 소스 아이템 제거 (UserRole 에 "preset" 표시된 것)
-        for combo in (self.cb_x, self.cb_y):
-            combo.blockSignals(True)
+        combo = self.cb_coord
+        combo.blockSignals(True)
+        try:
+            # 기존 preset 소스 아이템 제거
             for i in range(combo.count() - 1, -1, -1):
                 if combo.itemData(i, Qt.ItemDataRole.UserRole) == "preset":
                     combo.removeItem(i)
+
+            if self._preset_override is None:
+                return
+
+            # 현재 recipe 의 모든 preset pair (dedupe by (x, y), 최신 선호)
+            library = CoordLibrary()
+            recipe = self._preset_override.recipe
+            by_key: dict[tuple[str, str], CoordPreset] = {}
+            for p in library.find_by_recipe(recipe):
+                key = (p.x_name, p.y_name)
+                if key not in by_key or p.last_used > by_key[key].last_used:
+                    by_key[key] = p
+            primary = self._preset_override
+            primary_key = (primary.x_name, primary.y_name)
+            rest = [p for p in by_key.values() if (p.x_name, p.y_name) != primary_key]
+            rest.sort(key=lambda p: p.last_used, reverse=True)
+            pairs_ordered = [primary] + rest
+
+            for i, p in enumerate(pairs_ordered):
+                label = f"{p.x_name} / {p.y_name}"
+                # 동일 label 입력 아이템 있으면 제거 (preset 버전이 대체)
+                for j in range(combo.count() - 1, -1, -1):
+                    if combo.itemText(j) == label:
+                        combo.removeItem(j)
+                combo.insertItem(i, label, (p.x_name, p.y_name))
+                combo.setItemData(i, "preset", Qt.ItemDataRole.UserRole)
+                f = QFont(combo.font())
+                f.setBold(True)
+                combo.setItemData(i, f, Qt.ItemDataRole.FontRole)
+                combo.setItemData(i, QBrush(QColor("#4361ee")),
+                                  Qt.ItemDataRole.ForegroundRole)
+            combo.setCurrentIndex(0)
+        finally:
             combo.blockSignals(False)
-
-        if self._preset_override is None:
-            return
-
-        # 현재 recipe 의 모든 preset pair 찾기 (deduplicate by (x_name, y_name) → 최신만)
-        library = CoordLibrary()
-        recipe = self._preset_override.recipe
-        by_key: dict[tuple[str, str], CoordPreset] = {}
-        for p in library.find_by_recipe(recipe):
-            key = (p.x_name, p.y_name)
-            if key not in by_key or p.last_used > by_key[key].last_used:
-                by_key[key] = p
-        # primary (현재 override) 를 맨 앞, 나머지는 last_used 내림차순
-        primary = self._preset_override
-        primary_key = (primary.x_name, primary.y_name)
-        rest = [p for p in by_key.values() if (p.x_name, p.y_name) != primary_key]
-        rest.sort(key=lambda p: p.last_used, reverse=True)
-        # primary 가 by_key 에 없을 수도 있음 (방어적) — override 직접 사용
-        pairs = [primary] + rest
-
-        for combo, attr in [(self.cb_x, "x_name"), (self.cb_y, "y_name")]:
-            combo.blockSignals(True)
-            try:
-                for i, p in enumerate(pairs):
-                    name = getattr(p, attr)
-                    # 같은 이름이 입력 기반 콤보에 이미 있으면 제거 (preset 버전이 대체)
-                    for j in range(combo.count() - 1, -1, -1):
-                        if combo.itemText(j) == name:
-                            combo.removeItem(j)
-                    combo.insertItem(i, name)
-                    combo.setItemData(i, "preset", Qt.ItemDataRole.UserRole)
-                    f = QFont(combo.font())
-                    f.setBold(True)
-                    combo.setItemData(i, f, Qt.ItemDataRole.FontRole)
-                    combo.setItemData(i, QBrush(QColor("#4361ee")),
-                                      Qt.ItemDataRole.ForegroundRole)
-                combo.setCurrentIndex(0)  # primary pair
-            finally:
-                combo.blockSignals(False)
 
     def _on_visualize(self) -> None:
         v = self.cb_value.currentText()
-        x = self.cb_x.currentText()
-        y = self.cb_y.currentText()
+        xy = self._current_xy()
+        x = xy[0] if xy else ""
+        y = xy[1] if xy else ""
         if not v:
             return
         # 좌표 콤보 비어있음 → 팝업 안내. 입력에 X/Y 없고 라이브러리 매칭도 없는 케이스.
@@ -592,7 +602,7 @@ class MainWindow(QMainWindow):
             from_preset = False
 
             if override is not None:
-                # preset 활성 — 현재 cb_x/cb_y 에 해당하는 pair 를 라이브러리에서 조회
+                # preset 활성 — 현재 cb_coord 에 해당하는 pair 를 라이브러리에서 조회
                 # (사용자가 콤보에서 다른 pair 로 바꿨을 수 있음)
                 matched = library.find_match_by_names(override.recipe, x, y)
                 if matched is not None:
