@@ -45,16 +45,18 @@ def _has_group_suffix(name: str) -> bool:
     return 1 <= len(last) <= 2 and last.isalpha()
 
 
-def _is_integer_valued(values: np.ndarray, tol: float = 1e-3) -> bool:
-    """값이 (잡음 내) 정수로만 구성됐는지 — die index(DIE_ROW/DIE_COL) 감지용.
+def _is_integer_valued(values: np.ndarray, tol: float = 1e-6) -> bool:
+    """값이 **엄밀한 정수** 로만 구성됐는지 — die index(DIE_ROW/DIE_COL) 감지용.
 
-    측정치는 부동소수(예: T1=1000.5) 라 `values - round(values)` 의 std 가 유의미.
-    die 좌표는 정수 {-5,-4,...,5} 라 residual std ≈ 0.
+    max(|residual|) 기준 — 단 하나라도 정수 아닌 값 섞여있으면 False.
+    (std 기준은 GOF 0.9985 같은 near-1 부동소수를 오탐하기에 tight bound 필요)
+
+    tol=1e-6: 실제 정수 저장 시 float 오차 범위. 측정치 (T1=1000.5) 나 GOF (0.999)
+    는 residual 0 이 아니라 0.5, 0.001 수준이라 확실히 구분.
     """
     if values.size == 0:
         return False
-    resid = values - np.round(values)
-    return float(np.std(resid)) < tol
+    return bool(np.max(np.abs(values - np.round(values))) < tol)
 
 
 def _matches(name: str, pattern: str) -> bool:
@@ -145,7 +147,8 @@ def select_value_by_variability(
     excl = set(exclude_names or ())
     patterns = list(value_patterns)
 
-    qualified: list[tuple[str, float, int]] = []  # (name, metric, pattern_score)
+    # (name, metric, pattern_score, is_int) — is_int 는 자동 선택 후순위 demote 용
+    qualified: list[tuple[str, float, int, bool]] = []
     for name, rec in parameters.items():
         if name in excl:
             continue
@@ -157,13 +160,11 @@ def select_value_by_variability(
         except Exception:
             continue
         valid = vals[~np.isnan(vals)] if vals.size else vals
-        # n=0 또는 n=1 만 제외 — 단일값/빈 파라는 맵 시각화 불가
-        # 상대 threshold (80%) 는 제거 — 사용자 유용 파라 제거 우려
+        # n=0 또는 n=1 만 제외 (단일값/빈 파라는 맵 시각화 불가)
         if valid.size < 2:
             continue
-        # 정수값만 → die index 류 (DIE_ROW, DIE_COL) 자동 제외
-        if _is_integer_valued(valid):
-            continue
+        # 정수값 (DIE_ROW, DIE_COL) 은 **콤보엔 유지**하되 자동 선택 후순위 demote
+        is_int = _is_integer_valued(valid)
         avg = float(valid.mean())
         if valid.size > 1:
             sig3 = 3.0 * float(valid.std(ddof=1))
@@ -178,7 +179,7 @@ def select_value_by_variability(
             if _matches(name, pat):
                 pat_score = len(patterns) - i
                 break
-        qualified.append((name, metric, pat_score))
+        qualified.append((name, metric, pat_score, is_int))
 
     if not qualified:
         return None, []
@@ -187,15 +188,16 @@ def select_value_by_variability(
     main_cand = [q for q in qualified if not _has_group_suffix(q[0])]
     sub_cand = [q for q in qualified if _has_group_suffix(q[0])]
 
-    # 자동 선택 대상: 주 그룹 우선, 없으면 보조에서
+    # 자동 선택 대상: 주 그룹 우선, 없으면 보조
     primary = main_cand if main_cand else sub_cand
-    primary.sort(key=lambda t: (-t[1], -t[2], t[0]))
+    # 정렬: is_int (정수/die index) 는 후순위로 밀기 → metric 내림차순 → pattern → 알파벳
+    primary.sort(key=lambda t: (t[3], -t[1], -t[2], t[0]))
     selected = primary[0][0]
 
     # 콤보:
     #   1) 선택된 것
-    #   2) 나머지 주 그룹 (알파벳)
-    #   3) 보조 그룹 (알파벳) — n 작아도 유지 (사용자가 분석하려 할 수 있음)
+    #   2) 나머지 주 그룹 (알파벳) — DIE_ROW 등 정수값도 포함
+    #   3) 보조 그룹 (알파벳)
     rem_main = sorted(t[0] for t in main_cand if t[0] != selected)
     sub_alpha = sorted(t[0] for t in sub_cand)
     ordered = [selected] + rem_main + sub_alpha
