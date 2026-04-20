@@ -210,6 +210,15 @@ gl_view.paintGL = patched
 
 ### 4.1 보간 품질
 - [ ] Kriging 보간 추가 검토 (v0.1.0 에서 보류). 속도 vs 품질 절충이 RBF 보다 나은지.
+- [ ] **1D 데이터 Radial Symmetric 변환** — Y 값 변동이 threshold(~2mm) 이하면
+  1D 라인 스캔으로 판정 → `|X|` 를 반경 r 로 취급 → 같은 r 값 평균 → `scipy.interp1d`
+  로 v(r) 구한 뒤 웨이퍼 격자 각 점 `R=√(X²+Y²)` 에 매핑.
+  - 장점: Center/Edge/Mid High 같은 전형적인 반도체 profile 시각화 자연스러움.
+    RBF 대비 빠르고 extrapolation 문제 없음.
+  - 단점: 실제 비대칭 profile 이면 거짓 대칭 표시. 양측 X 값 차이 큰 경우 평균으로
+    정보 손실.
+  - UX: 자동 감지 후 적용 + 타이틀에 `(Radial)` 뱃지. Settings 에서 on/off 토글.
+  - 구현량: interp.py 에 `interpolate_radial` 함수 추가(~50줄) + wafer_cell 감지 분기.
 
 ### 4.2 UX
 - [ ] VALUE 변경 시 즉시 재-Run — 다중 VALUE 스위칭 캐싱 (메모리 부담 100-250MB 수준, 현재 미적용)
@@ -230,6 +239,10 @@ gl_view.paintGL = patched
 - [ ] 페이스트 시 RECIPE 가 공백만 있을 때 `find_by_recipe` 가 빈 문자열 매칭해서 엉뚱한 프리셋 주입할 위험 — 공백 체크 강화
 - [ ] `SettingsDialog(parent=None)` 로 인해 Settings 창이 실수로 메인 창보다 먼저 닫히면 refresh_graph 콜백이 안 갈 수 있는지 검증
 - [ ] 다크 테마 + PPT paste 에서 title/table 글자 색이 진한 회색(#444)/진한 회색(#222) 으로 괜찮은지 사용자 피드백 수집
+- [ ] **"데이터 0개인 파라미터가 1로 표시되는 케이스" 예외처리** — 실제 장비 데이터에서 흔함. `_row_values` 가 빈 셀만 있는 행에서도 한 개로 세거나 `MAX_DATA_ID=1` 등으로 표기되는 경우. 대응:
+  - `n_actual == 0` (유효 값 없음) 또는 유효 값이 전부 NaN 이면 해당 PARAMETER 를 스킵하고 경고 누적
+  - VALUE 콤보에서도 후보 제외 (선택해도 시각화 실패하니)
+  - 구현: `main.py::_group_by_waferid` 에서 `values` 가 전부 NaN/빈 이면 `wafer.parameters[name]` 에 아예 넣지 말고 warning 추가
 
 ---
 

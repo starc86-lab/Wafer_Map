@@ -1,0 +1,600 @@
+================================================================
+Wafer Map v0.1.0 후속 작업 문서 통합본
+================================================================
+
+생성: 2026-04-20
+파일: docs/homework_combined.txt
+구성:
+  [1] v0.1.0 렌더링 성능 측정 (docs/v0.1.0_perf.md)
+  [2] 3D Copy Graph 이슈 분석 + 후속 작업 (TODO.md)
+  [3] 파서 Edge Case 정리 (docs/parser_edge_cases.md)
+
+
+################################################################
+# [1] v0.1.0 렌더링 성능 측정
+################################################################
+
+# v0.1.0 렌더링 성능 측정
+
+입력: `case10_delta_A_preEtch_6wafers.csv` — 6 웨이퍼 × 70 pt
+측정 시각: 2026-04-20 00:55:14
+환경: Python 3.14.3, Windows
+
+각 액션은 Qt event loop에서 `processEvents()` 까지 포함한 end-to-end 체감 시간.
+
+| 액션 | 시간 (ms) | 비고 |
+|---|---:|---|
+| `paste_parse` | 36.1 | 텍스트 set → `parse_wafer_csv` 자동 호출까지 |
+| `first_run_2d` | 775.1 | 6 cell 생성 + 보간 (병렬 RBF) + 2D render + layout |
+| `view_2d_to_3d_first` | 15.0 | GL 컨텍스트 init + meshdata 생성 (cell당) + 6 cell paint |
+| `view_3d_to_2d_cached` | 11.4 | QStackedLayout setCurrentIndex — 캐시 활용 |
+| `view_2d_to_3d_cached` | 7.4 | 캐시 적중 — setCurrentIndex만 |
+| `value_change_gof` | 713.7 | 재-Run (셀 재생성, 새 보간) |
+| `value_change_t1_back` | 721.6 | 동일 — VALUE 캐시 없음 |
+| `zscale_common` | 134.9 | display.z_range 주입 + refresh_all (2D/3D 둘 다) |
+| `zscale_individual` | 67.3 | z_range None reset + refresh_all |
+| `colormap_change` | 17.1 | z_sig skip path — setData(colors=only) + meshDataChanged 명시 |
+| `colormap_back` | 18.6 |  |
+| `interp_multiquadric` | 90.1 | RBF 재실행 (cell당 ~80-130ms, 병렬) |
+| `interp_back` | 120.3 |  |
+| `grid_200` | 215.4 | 격자 150² → 200² (1.78x 증가) — RBF + mesh 전면 재생성 |
+| `grid_150_back` | 125.3 |  |
+| `notch_off` | 66.1 | mask cache 재생성 (G×G bool) |
+| `notch_on` | 66.6 |  |
+| `circle_off` | 12.8 | boundary line setVisible toggle |
+| `circle_on` | 14.4 |  |
+| `chart_size_large` | 19.8 | `_apply_chart_size` — setFixedSize만, 재렌더 없음 |
+| `chart_size_back` | 42.5 |  |
+| `z_exaggeration_2x` | 68.0 | GL mesh transform scale 업데이트 |
+| `z_exaggeration_back` | 65.4 |  |
+| `smooth_off` | 50.4 | MeshData flat/smooth 재계산 (normals 바뀜) |
+| `smooth_on` | 75.4 |  |
+| `decimals_3` | 15.4 | Summary 표 문자열만 재생성 — 그래프 영향 없음 |
+| `decimals_2` | 14.7 |  |
+| `copy_graph_2d` | 75.7 | `QScreen.grabWindow` + crop |
+| `copy_graph_3d` | 64.8 | 동일 — 화면 캡처 방식이라 2D/3D 동일 비용 |
+| `second_run_2d` | 752.4 | 첫 Run과 동일 경로 — 셀 재생성 (이전 셀 deleteLater) |
+| `shift_drag_broadcast` | 19.9 | 5 개 셀 `opts.update` + `update()` 호출만 |
+
+## 관찰 사항
+
+- **값이 작을수록 좋은 액션**: colormap 변경, view 토글(캐시), circle/decimals toggle — 50ms 이하 목표.
+- **값이 클 수밖에 없는 액션**: 첫 Run, 보간/격자 변경, VALUE 변경 — 병렬 RBF + mesh 생성 불가피.
+- **캐시 효과 확인**: view 토글의 first vs cached 격차가 크면 첫 3D 전환 비용이 큼 → prefetch 검토.
+
+## 주의
+
+- 각 수치는 1회 측정이라 ±20% 노이즈 포함. 안정치 필요하면 N회 평균 필요.
+- OpenGL 드라이버·GPU에 따라 3D 관련 수치는 유의미하게 바뀔 수 있음.
+- Windows 백그라운드 프로세스 영향 있음.
+
+################################################################
+# [2] TODO — v0.1.0 후속 작업 (3D Copy 이슈 분석 중심)
+################################################################
+
+# TODO — Wafer Map 후속 작업
+
+이 문서는 v0.1.0 배포 후 남아있는 기술 부채와 미해결 이슈를 정리한다. 큰 항목부터 작은 항목 순.
+
+---
+
+## 1. 3D Copy Graph 품질 이슈 (최우선)
+
+### 1.1 현상 두 가지
+
+**A. Jaggies (계단 모양)**
+- 3D surface edge, GLLinePlotItem 경계 원, 바닥 사각형 grid 에서 대각선이 계단식으로 표시됨.
+- 화면에서는 선명하다가 Copy Graph → PPT paste 시 확대해 보면 특히 두드러짐.
+
+**B. 프로그램 ↔ paste 이미지 색/구성 불일치**
+- 프로그램에서 보이는 3D 렌더와 paste 결과가 다름.
+- 변주:
+  - **테마 색 leak**: 다크 테마일 때 3D widget 코너(투명 영역)에 테마 배경이 비쳐 검은 삼각형으로 표시됨.
+  - **floor / boundary 누락**: supersample·offscreen 방식 시도 시 grid·boundary line 이 렌더 누락됨.
+  - **조명/normal 이상**: 특정 shading 경로에서 색감 차이.
+
+---
+
+### 1.2 근본 원인 분석
+
+**OpenGL 렌더링 특성**
+- pyqtgraph `GLViewWidget` 은 `QOpenGLWidget` 기반. 화면 표시용 framebuffer 에 렌더.
+- Anti-Aliasing 은 두 레이어:
+  1. **MSAA (Multi-Sample Anti-Aliasing)**: 하드웨어 레벨 — `QSurfaceFormat.setSamples(4)` 로 요청. 드라이버/GPU 의존. 적용되면 line·edge 모두 smooth.
+  2. **`GL_LINE_SMOOTH`**: 구형 OpenGL fixed-pipeline 기능. 최근 드라이버에선 deprecated 되어 무시되는 경우 많음. pyqtgraph `GLLinePlotItem(antialias=True)` 가 이걸 쓰려고 시도.
+- Windows + Intel/AMD 내장 GPU 조합에서 MSAA 가 무시되는 사례 다수 보고됨.
+
+**grabFramebuffer의 한계**
+- `QOpenGLWidget.grabFramebuffer()` 는 widget 자체 FBO 의 resolve 된 이미지를 반환.
+- 알파 채널이 `Format_RGBA8888_Premultiplied` 형식이라 투명 픽셀이 검정으로 나타날 수 있음.
+- pyqtgraph `setBackgroundColor("w")` 는 clear alpha=1 로 하지만, 중간 draw 과정에서 alpha 채널을 훼손하는 경우가 있음 (특히 alpha-blended grid 렌더 후).
+
+**Qt의 QWidget.grab() vs GL 특성**
+- 일반 widget 은 `grab()` 으로 바로 이미지화 가능.
+- `QOpenGLWidget` 자식이 있으면 부모의 `grab()` 은 GL 영역을 검게 남김. 별도로 `grabFramebuffer` 합성해야.
+
+**pyqtgraph `renderToArray` 한계**
+- 내부적으로 FBO 를 타일 단위로 순회하며 렌더 (대용량 이미지 출력용).
+- GLLinePlotItem / GLGridItem 일부가 특정 타일 경계에서 잘리거나 아예 누락되는 버그 있음.
+
+**화면 캡처의 한계 (현재 v0.1.0 방식)**
+- `QScreen.grabWindow(0)` + crop — WYSIWYG 보장.
+- 단점:
+  - widget 이 화면에 실제로 보여야 하고, 다른 창이 위에 있으면 그 내용이 찍힘.
+  - 이 한계 때문에 SettingsDialog 를 `parent=None` + `Qt.Window` 플래그로 우회 처리 (tech debt).
+
+---
+
+### 1.3 실패한 접근들 (반복 금지)
+
+| # | 시도 | 결과 | 실패 이유 |
+|---|---|---|---|
+| 1 | `QSurfaceFormat.setDefaultFormat(samples=4)` at app start | 적용 안 됨 | pyqtgraph 의 ShareWidget / 드라이버 조합에서 무시 |
+| 2 | `_LockedGLView.setFormat(samples=4)` per widget | 적용 안 됨 | ShareWidget 이 먼저 생성되어 format 전파 안 됨 |
+| 3 | 위젯 temp resize(2x) → grabFramebuffer → 다운스케일 | 일부 item 누락 + 색 이상 | resize 중 grid/boundary 재렌더 타이밍 문제, alpha 채널 이상 |
+| 4 | `chart.renderToArray((w*2, h*2))` | floor/boundary 완전 누락 | 타일 기반 렌더 버그 |
+| 5 | `grabFramebuffer` + `convertToFormat(RGB32)` | 투명 영역 검정 | premultiplied 알파를 drop alpha 로 처리 → 검정 고정 |
+| 6 | `convertToFormat(ARGB32)` + fillRect(white) | 전체 투명으로 보임 | grid/boundary 의 alpha 가 정상 write 되지 않아 바닥 전체 알파 0 |
+
+**교훈**: GL framebuffer 기반 접근은 pyqtgraph 의 alpha blending 동작과 맞물려 계속 함정. 현재 v0.1.0 은 **화면 캡처 방식**으로 회피.
+
+---
+
+### 1.4 제안 해결 방향 (시나리오별)
+
+#### 시나리오 A — 직접 FBO 관리 (추천, 장기)
+
+**접근**: `QOpenGLFramebufferObject` 를 2x 크기로 직접 만들어 pyqtgraph 의 paintGL 을 binding 된 상태에서 호출 → resolve → QImage 변환 → 다운스케일.
+
+```python
+# 개략 pseudocode
+from PySide6.QtOpenGL import QOpenGLFramebufferObject, QOpenGLFramebufferObjectFormat
+
+def capture_3d_hires(gl_view, scale=2):
+    gl_view.makeCurrent()
+    fmt = QOpenGLFramebufferObjectFormat()
+    fmt.setSamples(4)  # MSAA
+    fmt.setAttachment(QOpenGLFramebufferObject.Attachment.CombinedDepthStencil)
+    size = gl_view.size() * scale
+    fbo = QOpenGLFramebufferObject(size, fmt)
+    fbo.bind()
+    # viewport 조정
+    gl.glViewport(0, 0, size.width(), size.height())
+    # pyqtgraph 의 paintGL 로직을 여기서 직접 호출
+    gl_view.paintGL()
+    fbo.release()
+    qimg = fbo.toImage()  # MSAA resolve 포함
+    gl_view.doneCurrent()
+    return qimg.scaled(..., SmoothTransformation)
+```
+
+**장점**
+- 화면 상태와 완전 독립 → Settings 창이 위에 있어도 OK
+- MSAA 4x 강제 적용 (FBO format 에서 보장)
+- resolution 자유 (2x, 4x 원하는 대로)
+- 모든 GL item (surface/boundary/grid) 정상 렌더
+
+**단점**
+- pyqtgraph 의 `paintGL` 은 viewport/projection 설정에 widget.size() 의존 → 직접 호출 시 viewport를 FBO 사이즈로 오버라이드 필요
+- pyqtgraph 내부 코드 의존성 (버전에 따라 paintGL 시그니처 변할 수 있음)
+- 약 30-80ms 추가 비용 예상
+
+**검증 필요 사항**
+- pyqtgraph 0.13.x / 0.14.x 에서 `paintGL` 호출 시 `opts` 의 `viewport` 를 임시 override 가능한지
+- MSAA FBO 의 resolve 자동 처리 되는지 (`toImage()` 가 multi-sample 를 single-sample 로 blit)
+
+#### 시나리오 B — pyqtgraph 의 `QOpenGLContext` 에 hook
+
+**접근**: `GLViewWidget.paintGL` 내부에서 GL 명령 실행 전에 FBO 를 binding 하도록 monkey-patch. 렌더 후 resolve.
+
+```python
+orig_paintGL = gl_view.paintGL
+
+def patched():
+    if self._capture_target_fbo:
+        self._capture_target_fbo.bind()
+    orig_paintGL()
+    if self._capture_target_fbo:
+        self._capture_target_fbo.release()
+
+gl_view.paintGL = patched
+```
+
+**장점**: pyqtgraph 내부 동작 그대로 활용, paintGL 호출 타이밍·상태 동일.
+
+**단점**: monkey-patch → pyqtgraph 내부 구조 변경에 취약.
+
+#### 시나리오 C — Windows WM_PRINT 메시지 활용
+
+**접근**: Windows 네이티브 `WM_PRINT` 메시지로 창 내용을 비트맵으로 받아옴. 가려져 있어도 작동하는 경우 있음 (DWM composition 상태에 따라 다름).
+
+**장점**: 플랫폼 네이티브, 안정적.
+
+**단점**: Windows-only, DWM 에 의존. 한국 사내 환경에서만 테스트 가능.
+
+#### 시나리오 D — matplotlib 3D 로 별도 렌더
+
+**접근**: Copy Graph 시 **별도로** matplotlib Axes3D 로 같은 데이터를 다시 렌더 → 이미지 반환.
+
+**장점**: 완전히 독립된 렌더 파이프라인, 품질 최고 (벡터 포함 가능).
+
+**단점**
+- Copy 1회당 수백 ms 추가 (matplotlib 렌더 무거움)
+- 시각적으로 pyqtgraph 결과와 미묘하게 다를 수 있음 — "WYSIWYG" 깨짐
+- 이미 배포에서 matplotlib 13MB 만큼 용량 증가
+
+#### 시나리오 E — 화면 캡처 유지 + Settings 독립성 개선 (현 상태)
+
+**접근**: 현재 v0.1.0 방식 유지하되, Settings 창 외에도 **가려질 가능성 있는 모든 창**을 독립 윈도우로.
+
+**장점**: 최소 변경, 동작 보증.
+
+**단점**: 근본 해결 아님. 윈도우 해상도·배율에 따라 품질 제한.
+
+---
+
+### 1.5 권장 경로
+
+**단기** (v0.2.0): 시나리오 A (직접 FBO) 검증 후 적용. 실패 시 시나리오 E 유지.
+
+**검증 플랜**
+1. Qt OpenGL 예제로 `QOpenGLFramebufferObject` + MSAA + pyqtgraph 호출 가능한지 최소 PoC
+2. PoC 성공 시 `WaferCell._copy_graph` 경로에 통합
+3. 테마 leak / floor 누락 / jaggies 모두 해결되면 `SettingsDialog(parent=self)` 로 **원복** (tech debt 소거)
+
+**긴급 patch 필요 시**: 시나리오 B (monkey-patch) — pyqtgraph 버전 고정하고 사용.
+
+---
+
+## 2. 용량 최적화 (125MB → 목표 70-80MB)
+
+### 현재 구성 (dist/Wafer Map/ — 271MB, zipped 125MB)
+| 모듈 | 크기 | 필수 여부 |
+|---|---|---|
+| PySide6 (Qt) | 104MB | 필수 — 일부 plugin 제외 가능 |
+| scipy | 50MB | RBF 만 씀 — 대부분 submodule 불필요 |
+| matplotlib | 13MB | **완전 불필요** — transitively 포함 |
+| pandas | 14MB | CSV 파싱용 — 필수 |
+| numpy | 5.9MB | 필수 |
+| OpenGL | 1.8MB | 필수 |
+| pyqtgraph | 1.6MB | 필수 |
+
+### 작업 항목
+- [ ] `--exclude-module matplotlib` 추가 → -13MB
+- [ ] scipy submodule 정리 (`signal`, `stats`, `sparse`, `optimize` 등 제외) → -20~30MB
+- [ ] PySide6 Qt plugins 정리 (WebEngine, Multimedia 등) → -20MB
+- [ ] UPX 압축 시도 (실패 시 삭제) → -20~30%
+- [ ] PyInstaller spec 파일 작성 (명령어 길어지므로)
+
+목표: zipped 70-80MB, unpacked <150MB.
+
+---
+
+## 3. 3D MSAA 작동 확인
+
+현재 `app.py::setDefaultFormat(samples=4)` + `_LockedGLView.setFormat(samples=4)` 로 설정해도 일부 환경에서 적용 안 됨. 진단 필요:
+
+- [ ] Windows + Intel UHD/Iris / AMD Vega / NVIDIA GeForce 각 환경 실제 `format().samples()` 값 확인
+- [ ] 안 먹히면 pyqtgraph ShareWidget 을 먼저 setFormat 한 뒤 생성하는 방법 검토
+- [ ] 드라이버 레벨 강제 (NVIDIA Control Panel 의 AA Override) 로 차이 있는지 확인
+
+---
+
+## 4. 기타 수집된 아이디어
+
+### 4.1 보간 품질
+- [ ] Kriging 보간 추가 검토 (v0.1.0 에서 보류). 속도 vs 품질 절충이 RBF 보다 나은지.
+
+### 4.2 UX
+- [ ] VALUE 변경 시 즉시 재-Run — 다중 VALUE 스위칭 캐싱 (메모리 부담 100-250MB 수준, 현재 미적용)
+- [ ] Shift+좌클릭 카메라 sync 의 "rotate 중 sync" 뿐 아니라 "pan/zoom sync" 확인 (이미 `center` 복사해서 될 듯하나 체감 테스트 필요)
+- [ ] 2D MAP 회전 (notch 방향 돌리기) — 보류됨. 필요시 재검토
+
+### 4.3 Copy Graph 개선
+- [ ] 우클릭 메뉴에 "Copy Graph (HiRes)" 옵션 추가 — 화면 캡처 대신 2x/3x 렌더 옵션 (시나리오 A 구현 후)
+
+### 4.4 좌표 프리셋
+- [ ] 이름 수동 편집 시 자동 생성 suffix `(2)` 충돌 처리
+- [ ] 라이브러리 탭에서 좌표 시각화 프리뷰 (선택된 프리셋의 X/Y 산점도)
+
+---
+
+## 5. 알려진 작은 버그 / 개선
+
+- [ ] 페이스트 시 RECIPE 가 공백만 있을 때 `find_by_recipe` 가 빈 문자열 매칭해서 엉뚱한 프리셋 주입할 위험 — 공백 체크 강화
+- [ ] `SettingsDialog(parent=None)` 로 인해 Settings 창이 실수로 메인 창보다 먼저 닫히면 refresh_graph 콜백이 안 갈 수 있는지 검증
+- [ ] 다크 테마 + PPT paste 에서 title/table 글자 색이 진한 회색(#444)/진한 회색(#222) 으로 괜찮은지 사용자 피드백 수집
+
+---
+
+## 참고 파일
+- `docs/rendering_optimizations.md` — 렌더링 최적화 이력·실패 사례 (반드시 참고)
+- `docs/v0.1.0_perf.md` — v0.1.0 성능 측정 기록
+- `docs/parser_edge_cases.md` — 파서 엣지 케이스 (v0.1.0 후 작성)
+- `CHANGELOG.md` — 버전 이력
+- `CLAUDE.md` — 개발자 가이드
+
+
+################################################################
+# [3] 파서 Edge Case 정리
+################################################################
+
+# 파서 Edge Case 정리
+
+`main.py::parse_wafer_csv()` 와 관련 함수(`_normalize`, `_mode_str`, DATA 수집 등)의 실제 동작을 기준으로, 일반 사용자가 **Excel / 계측 장비에서 Ctrl+V 페이스트** 시 마주칠 가능성 높은 엣지 케이스 정리.
+
+상태 표기:
+- ✅ **OK**: 파싱 정상, 사용자 의도대로 동작
+- ⚠️ **Silent Error**: 파싱은 되나 결과가 사용자 의도와 다름, 경고 없음 (가장 위험)
+- ⚠️ **Warning**: 파싱되지만 경고 메시지 표시
+- ❌ **Hard Fail**: `MissingColumnsError` 등 예외 → 컬럼 매핑 다이얼로그 폴백
+
+---
+
+## 1. 헤더(컬럼명) 관련
+
+### 1.1 컬럼 순서 뒤섞임
+- **현재**: 정규화 기반 매칭이라 순서 무관
+- **결과**: ✅ OK
+
+### 1.2 이름 변형 (LOT ID / Lot_ID / lotid)
+- **현재**: `_normalize()` 가 `re.sub(r"[\s_]+", "", name).lower()` 로 공백·언더바·대소문자 무관화
+- **결과**:
+  - ✅ OK — `LOT ID` / `Lot_ID` / `lotid` / `LOT_ID` 모두 매칭
+  - ❌ Hard Fail — **하이픈 포함 시 미매칭** (`Lot-ID` → `lot-id` 는 `lotid` 와 다름)
+- **위험도**: 🟡 Medium (외부 제공 CSV 중 대시 쓰는 경우 드묾)
+- **권장**: `_normalize` 패턴을 `r"[\s_\-]+"` 로 확장 (대시도 제거)
+
+### 1.3 빈 컬럼 (`,,` 연속)
+- **현재**: pandas 가 `Unnamed: N` 으로 자동 명명 → 정규화 미매칭 → 무시
+- **결과**: ✅ OK (조용히 무시)
+
+### 1.4 중복 컬럼명 (같은 이름 2개)
+- **현재**: `norm_to_orig` 딕셔너리가 **마지막 것만 저장** → 첫 번째 데이터 손실
+- **결과**: ⚠️ Silent Error
+- **위험도**: 🔴 High (Excel 에서 실수로 복사 확장 시 흔함)
+- **권장**: 파싱 전 중복 헤더 감지 → 경고
+
+### 1.5 필수 컬럼 누락
+- **현재**: `MissingColumnsError` 발생 → GUI 에서 컬럼 매핑 다이얼로그 팝업
+- **결과**: ❌ Hard Fail + fallback UX
+- **위험도**: 🟢 Low (사용자가 인지 가능)
+
+### 1.6 MAX_DATA_ID 없음
+- **현재**: 선택 컬럼이라 skip. 실제 DATA 셀 수로 대체
+- **결과**: ✅ OK
+
+---
+
+## 2. 값(데이터) 관련
+
+### 2.1 숫자 앞뒤 공백
+- **현재**: pandas 가 자동 strip
+- **결과**: ✅ OK
+
+### 2.2 숫자 내부 공백 (예: `"1 234"`)
+- **현재**: `pd.to_numeric(errors='coerce')` → NaN
+- **결과**: ⚠️ Silent Error — 경고 없이 NaN
+- **위험도**: 🟡 Medium
+
+### 2.3 천단위 쉼표 (`"1,234.56"`)
+- **현재**: `to_numeric` 이 쉼표 인식 못 함 → NaN
+- **결과**: ⚠️ Silent Error
+- **위험도**: 🔴 High (Excel 기본 숫자 포맷에 의도치 않게 포함될 수 있음)
+- **권장**: paste 단계에서 `"(\d),(\d)"` → `$1$2` 치환 옵션
+
+### 2.4 과학 표기법 (`1.23e-5`)
+- **현재**: `to_numeric` 자동 인식
+- **결과**: ✅ OK
+
+### 2.5 NaN / Null / 빈 셀
+- **현재**: 대부분 NaN 으로 변환. 행 말미 NaN 은 자르기, 중간 NaN 은 보존
+- **결과**: ✅ OK (의도한 동작)
+
+### 2.6 극단값 / 음수 / 0
+- **현재**: 특별 처리 없음
+- **결과**: ✅ OK (시각화 단계에서 colormap/Z-Scale 이 알아서 처리)
+
+### 2.7 따옴표로 감싼 숫자 (`"123.45"`)
+- **현재**: `pd.read_csv(quoting=QUOTE_MINIMAL)` 기본 동작으로 제거됨 (Excel CSV 표준)
+- **결과**: ✅ OK
+- **단서**: `quoting` 옵션이 기본값이 아니면 실패 가능 — 현재 코드는 기본값 사용
+
+---
+
+## 3. 구조 관련
+
+### 3.1 빈 행
+- **현재**: WAFERID 가 NaN → `"nan"` 그룹 생성 → PARAMETER 체크로 skip
+- **결과**: ✅ OK (조용히 무시)
+
+### 3.2 행마다 DATA 개수 다름
+- **현재**: 각 행의 말미 NaN 을 자름 → `WaferRecord.n` 이 행마다 다를 수 있음
+- **결과**: ✅ OK (의도한 동작 — `T1` 은 49 개, `GOF` 는 4 개 같은 패턴 지원)
+
+### 3.3 MAX_DATA_ID ≠ 실제 개수
+- **현재**: 경고 추가 후 **실제 개수 사용** (`ParseResult.warnings`)
+- **결과**: ⚠️ Warning
+- **위험도**: 🟢 Low (경고로 알림)
+
+### 3.4 DATA 컬럼 0 개
+- **현재**: `MissingColumnsError`
+- **결과**: ❌ Hard Fail
+
+### 3.5 트레일링 빈 컬럼 (`...,DATA20,,,`)
+- **현재**: pandas 가 Unnamed 로 처리 후 정규화 미매칭 → 무시
+- **결과**: ✅ OK
+
+---
+
+## 4. 붙여넣기 노이즈
+
+### 4.1 헤더 중복 (한 복사본에 헤더 행 2개 이상)
+- **현재**: `pd.read_csv` 는 첫 행만 헤더로 인식. 두 번째 헤더는 데이터 행으로 취급 → `to_numeric` 에서 NaN
+- **결과**: ⚠️ Silent Error — 중복 헤더 행의 DATA 손실
+- **위험도**: 🔴 High (여러 웨이퍼 분할 복사 시 흔함)
+- **권장**: 첫 50 행에서 헤더 재등장 감지 → 해당 행 자동 스킵
+
+### 4.2 상단 메타 텍스트 (제목, 조회 조건 등)
+- **현재**: 첫 행을 헤더로 취급 → 컬럼 대부분 매칭 실패 → `MissingColumnsError`
+- **결과**: ❌ Hard Fail
+- **위험도**: 🟡 Medium
+- **권장**: paste 텍스트에서 `"WAFERID"` 가 포함된 행을 찾아 그 위를 제거하는 전처리
+
+### 4.3 하단 꼬리글 (footer, 통계 요약)
+- **현재**: 데이터 행 뒤 non-numeric 행은 `to_numeric` 에서 NaN → DATA 없음 → 그 웨이퍼 파라미터는 누락
+- **결과**: ⚠️ Silent Error 또는 Warning
+
+### 4.4 탭/쉼표 혼재
+- **현재**: `pd.read_csv` 는 **첫 줄 separator 만** 자동 감지 → 혼재 시 일부 행 파싱 실패
+- **결과**: ⚠️ Partial Fail
+- **위험도**: 🔴 High (Excel 과 일반 텍스트 편집기 혼용 시 발생)
+- **권장**: paste 전 `\t` / `,` 자동 감지 + 균일화
+
+---
+
+## 5. 인코딩 / 특수 문자
+
+### 5.1 UTF-8 BOM (`\ufeff`)
+- **현재**: pandas `read_csv` 는 `utf-8-sig` 엔진이 기본이라 BOM 자동 제거. 클립보드 페이스트 경로는 QClipboard 가 UTF-16 반환이라 BOM 없음
+- **결과**: ✅ OK
+
+### 5.2 한글 PARAMETER (`"두께"`, `"막두께"`)
+- **현재**: PARAMETER 이름은 자유 문자열이라 그대로 보존
+- **결과**: ✅ OK
+- **단서**: `auto_select.py` 의 VALUE/X/Y 패턴 매칭(`"T*"`, `"X"`, `"Y"`)과 안 맞으므로 수동 선택 필요
+
+### 5.3 Non-breaking space / zero-width (Word 복사)
+- **현재**: 파서 단계에서 `_normalize` 에만 적용, 데이터 값은 그대로 → NaN 유발
+- **결과**: ⚠️ Silent Error
+- **위험도**: 🟡 Medium
+
+### 5.4 유니코드 minus (`−`, U+2212)
+- **현재**: `to_numeric` 이 ASCII `-` 만 숫자로 인식 → NaN
+- **결과**: ⚠️ Silent Error
+- **위험도**: 🟡 Medium (PDF / Word 복사 시 흔함)
+- **권장**: paste 전 `\u2212` → `-` 치환
+
+---
+
+## 6. 좌표 특수 케이스
+
+### 6.1 mm / μm 혼재
+- **현재**: 파서는 수치 그대로 보존. 시각화 단계 `normalize_to_mm` 이 `|max|` 기준 휴리스틱 환산 (200~200000 → `/1000`)
+- **결과**: ✅ OK (대부분 케이스), ⚠️ 경계 케이스에서 오판 가능
+- **위험도**: 🟢 Low
+
+### 6.2 `X` / `X_1000` 동시 존재
+- **현재**: 서로 다른 PARAMETER 로 저장. 자동 선택은 `X` 우선
+- **결과**: ✅ OK. 사용자가 수동으로 `X_1000` 선택 가능
+
+### 6.3 X 만 있고 Y 누락
+- **현재**: X 만 저장됨
+- **결과**: ✅ 파싱 OK + ❌ 시각화에서 좌표 부재 → RECIPE 자동 조회로 fallback
+
+---
+
+## 7. WAFERID 변형
+
+### 7.1 앞뒤 공백 (`" RK2A007.01"`)
+- **현재**: `str(wid)` 그대로 저장 → `" RK2A007.01"` ≠ `"RK2A007.01"`
+- **결과**: ⚠️ Silent Error — 같은 웨이퍼가 두 그룹으로 분산
+- **위험도**: 🔴 High (Excel 셀 포맷 문제로 흔함)
+- **권장**: `wid = str(wid).strip()` 추가 (main.py 의 group by 직전)
+
+### 7.2 서로 다른 표기 형식 (`RK2A007.07` vs `RK2A007_07` vs `RK2A007.7`)
+- **현재**: 문자열 그대로 비교 → 각각 별개 그룹
+- **결과**: ⚠️ Silent Error (의도적으로 보존할 수도, 실수일 수도 있음)
+- **위험도**: 🟡 Medium
+
+### 7.3 숫자형 WAFERID (`1`, `2`, ...)
+- **현재**: `str(wid)` 로 문자열화 → `"1"`, `"2"` 등
+- **결과**: ✅ OK
+
+---
+
+## 8. DELTA 매칭 관련
+
+### 8.1 교집합 WAFERID 0 개
+- **현재**: `compute_delta` 가 `matched == 0` 감지 → `main_window::_visualize_delta` 에서 `QMessageBox.warning` + 결과 클리어
+- **결과**: ⚠️ Warning (사용자에게 명시적 안내)
+- **위험도**: 🟢 Low
+
+### 8.2 양측 RECIPE 다름
+- **현재**: 각 입력 내에서 최빈값 RECIPE 채택. 두 입력의 RECIPE 일치 여부는 검증 안 함
+- **결과**: ⚠️ Silent Error (Pre / Post 서로 다른 레시피여도 DELTA 계산됨)
+- **위험도**: 🟡 Medium (사용자가 의도적으로 할 수도 있음)
+- **권장**: RECIPE 불일치 시 안내 배너 (차단 말고 알림만)
+
+### 8.3 좌표는 일치하나 WAFERID 다름
+- **현재**: WAFERID 교집합이 키. 좌표 같아도 WAFERID 다르면 매칭 안 됨
+- **결과**: ⚠️ WAFERID 0 개 → 위 8.1 경고
+- **위험도**: 🟢 Low (의도된 동작)
+
+### 8.4 같은 WAFERID 에서 좌표 집합이 다름
+- **현재**: `compute_delta` 가 tolerance 1μm 로 좌표 매칭 → 일치점만 사용
+- **결과**: ✅ OK (부분 매칭 지원)
+
+---
+
+## 9. 헬퍼 함수의 숨은 한계
+
+### 9.1 `_normalize()` — 대시 미처리
+```python
+def _normalize(name: str) -> str:
+    return re.sub(r"[\s_]+", "", str(name)).lower()
+```
+→ `"Lot-ID"` → `"lot-id"` → alias `"lotid"` 와 불일치.
+**권장**: `r"[\s_\-]+"` 로 확장.
+
+### 9.2 `_mode_str()` — 동률 처리
+```python
+Counter(vals).most_common(1)[0][0]
+```
+- 빈도 동률 시 순서 보장 없음 (파이썬 3.7+ dict 순서는 insertion order 지만 실제로는 첫 출현 유지)
+- **위험도**: 🟡 Medium (사용자 혼란 가능)
+- **권장**: tie-break 규칙 명시 (예: 첫 등장 우선)
+
+---
+
+## 10. 우선순위 요약
+
+| 엣지 케이스 | 위험도 | 개선 난이도 | 권장 버전 |
+|---|---|---|---|
+| **WAFERID 앞뒤 공백** (7.1) | 🔴 High | 쉬움 (1 줄) | 0.1.1 patch |
+| **천단위 쉼표 숫자** (2.3) | 🔴 High | 중간 | 0.2.0 |
+| **탭/쉼표 혼재** (4.4) | 🔴 High | 중간 | 0.2.0 |
+| **헤더 중복** (4.1) | 🔴 High | 쉬움 | 0.1.1 patch |
+| **중복 컬럼명** (1.4) | 🔴 High | 쉬움 | 0.1.1 patch |
+| **NBSP / 유니코드 minus** (5.3, 5.4) | 🟡 Medium | 쉬움 | 0.1.1 patch |
+| **WAFERID 형식 다름** (7.2) | 🟡 Medium | 어려움 (판단 모호) | 검토 |
+| **대시 헤더** (1.2) | 🟡 Medium | 쉬움 (정규식 1 줄) | 0.1.1 patch |
+| **상단 메타 텍스트** (4.2) | 🟡 Medium | 중간 | 0.2.0 |
+| **RECIPE 불일치 DELTA** (8.2) | 🟡 Medium | 쉬움 (안내만) | 0.1.1 patch |
+
+---
+
+## 11. 0.1.1 패치에서 제안하는 최소 변경 (합계 ~10줄)
+
+1. `main.py::_normalize` — 정규식에 대시 포함: `r"[\s_\-]+"`
+2. `main.py` group by 직전 — `wid = str(wid).strip()` 추가
+3. `main.py::parse_wafer_csv` 시작 부분 — text 전처리 헬퍼 추가:
+   ```python
+   def _preclean(text: str) -> str:
+       text = text.replace("\u2212", "-")   # unicode minus → ASCII
+       text = text.replace("\u00a0", " ")   # NBSP → space
+       text = text.replace("\ufeff", "")    # BOM
+       return text
+   ```
+4. 중복 컬럼 감지 시 `ParseResult.warnings` 추가
+5. DELTA 시 A/B RECIPE 불일치면 summary_line 에 경고 문구 포함
+
+천단위 쉼표 / 헤더 중복 / 탭·쉼표 혼재는 UX 영향 크므로 `0.2.0` 에서 paste 단계 전처리기로 통합 대응 권장.
+
+---
+
+## 참고
+
+- 각 케이스는 `main.py` 및 `core/delta.py` 실제 코드 기준으로 검증.
+- 현장 CSV 예시: `samples/cases/case10_delta_A_preEtch_6wafers.csv`.
+- 테스트 확장: `tests/test_parser_edge_cases.py` 작성 권장 (각 케이스를 assertion 으로 고정).

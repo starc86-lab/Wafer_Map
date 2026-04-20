@@ -60,5 +60,19 @@ def interpolate_wafer(
         rbf = RBFInterpolator(pts, v, **kw)
         grid_pts = np.column_stack([XG.ravel(), YG.ravel()])
         return rbf(grid_pts).reshape(XG.shape)
-    except Exception:
+    except Exception as _e:
+        # 진단용 — RBF 실패 원인 파악
+        import sys
+        n_nan_v = int(np.isnan(v).sum()) if v.size else 0
+        n_nan_xy = int((np.isnan(x) | np.isnan(y)).sum()) if x.size else 0
+        x_std = float(np.nanstd(x)) if x.size else 0.0
+        y_std = float(np.nanstd(y)) if y.size else 0.0
+        v_rng = (float(np.nanmin(v)), float(np.nanmax(v))) if v.size else (0.0, 0.0)
+        sys.stderr.write(
+            f"[interp] RBF 실패: kernel={kernel}  n_pts={x.size}  "
+            f"v_nan={n_nan_v}  xy_nan={n_nan_xy}  "
+            f"x_std={x_std:.4g}  y_std={y_std:.4g}  v_range={v_rng}  "
+            f"err={type(_e).__name__}: {_e}\n"
+        )
+        sys.stderr.flush()
         return np.full(XG.shape, np.nan, dtype=float)
