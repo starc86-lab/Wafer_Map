@@ -545,7 +545,18 @@ class MainWindow(QMainWindow):
         v = self.cb_value.currentText()
         x = self.cb_x.currentText()
         y = self.cb_y.currentText()
-        if not (v and x and y):
+        if not v:
+            return
+        # 좌표 콤보 비어있음 → 팝업 안내. 입력에 X/Y 없고 라이브러리 매칭도 없는 케이스.
+        if not (x and y):
+            QMessageBox.warning(
+                self, "좌표 없음",
+                "X / Y 좌표를 확인할 수 없어 시각화할 수 없습니다.\n\n"
+                "다음 중 하나를 시도하세요:\n"
+                "  · 입력 데이터에 X, Y 좌표 PARAMETER 행이 있는지 확인\n"
+                "  · '좌표 불러오기' 로 저장된 프리셋 선택\n"
+                "  · Settings → 좌표 라이브러리 → 수동 추가",
+            )
             return
 
         a, b = self._result_a, self._result_b
