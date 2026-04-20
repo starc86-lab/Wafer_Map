@@ -122,6 +122,67 @@ def _compute_smooth_vertex_normals(vertexes: np.ndarray, faces: np.ndarray) -> n
     return vert_n.astype(np.float32)
 
 
+def _build_cut_wall_mesh(cut_r: float, XG: np.ndarray, YG: np.ndarray,
+                          z_disp: np.ndarray, cmap: pg.ColorMap,
+                          z_disp_max: float, n_seg: int = 72):
+    """edge_cut 경계 원통 벽 — (x,y,0) → (x,y,z_disp(cut_r)).
+
+    서피스 외각을 바닥 Z=0 에 시각적으로 연결 → "떠 있는" 느낌 제거.
+    - z_disp: 화면에 표시되는(scaling 반영된) Z 격자. 벽 top 높이에 사용
+    - z_disp_max: 화면 z 범위 (0~max). color normalize 용
+    - 색: 서피스 가장자리 색과 동일 계통 (같은 LUT, 같은 norm)
+
+    반환: (vertexes, faces, face_colors) 또는 모두 None.
+    """
+    if cut_r <= 0:
+        return None, None, None
+    theta = np.linspace(0.0, 2.0 * np.pi, n_seg, endpoint=False)
+    xg_lin = XG[:, 0]   # meshgrid indexing='ij' 가정
+    yg_lin = YG[0, :]
+    dx = float(abs(xg_lin[1] - xg_lin[0])) if xg_lin.size > 1 else 1.0
+    probe_r_start = max(cut_r - 1.5 * dx, dx * 0.5)
+    zs = np.zeros(n_seg, dtype=np.float32)
+    for i, t in enumerate(theta):
+        z_val = 0.0
+        for k in range(0, 12):
+            pr = probe_r_start - k * dx
+            if pr <= 0:
+                break
+            px = pr * np.cos(t)
+            py = pr * np.sin(t)
+            xi = int(np.clip(np.searchsorted(xg_lin, px), 0, xg_lin.size - 1))
+            yi = int(np.clip(np.searchsorted(yg_lin, py), 0, yg_lin.size - 1))
+            z_val = float(z_disp[xi, yi])
+            if not np.isnan(z_val) and z_val != 0.0:
+                break
+        zs[i] = float(z_val) if not np.isnan(z_val) else 0.0
+
+    cos_t = np.cos(theta).astype(np.float32)
+    sin_t = np.sin(theta).astype(np.float32)
+    cx = (cut_r * cos_t).astype(np.float32)
+    cy = (cut_r * sin_t).astype(np.float32)
+    bot = np.column_stack([cx, cy, np.zeros(n_seg, dtype=np.float32)])
+    top = np.column_stack([cx, cy, zs])
+    verts = np.vstack([bot, top])
+
+    idx = np.arange(n_seg)
+    nxt = (idx + 1) % n_seg
+    face_a = np.stack([idx, nxt, n_seg + idx], axis=1)
+    face_b = np.stack([nxt, n_seg + nxt, n_seg + idx], axis=1)
+    faces = np.concatenate([face_a, face_b], axis=0).astype(np.uint32)
+
+    # face colors — 각 face 는 해당 segment 의 top Z 기준 colormap
+    face_z = np.concatenate([zs, zs])
+    rng = max(float(z_disp_max), 1e-9)
+    norm = np.clip(face_z / rng, 0.0, 1.0)
+    lut = cmap.getLookupTable(0.0, 1.0, 256)
+    lut_idx = np.clip((norm * 255).astype(int), 0, 255)
+    rgb = lut[lut_idx].astype(np.float32) / 255.0
+    alpha = np.ones((rgb.shape[0], 1), dtype=np.float32)
+    face_colors = np.concatenate([rgb, alpha], axis=1)
+    return verts, faces, face_colors
+
+
 class _LockedGLView(gl.GLViewWidget):
     """휠 줌 차단 GLViewWidget — chart 크기 고정을 위함. 드래그 회전/팬은 허용.
 
@@ -436,6 +497,8 @@ class WaferCell(QFrame):
         self._surface_z_sig: tuple | None = None
         self._gl_boundary = None
         self._gl_grid = None
+        self._gl_wall = None       # edge_cut 측벽 (surface edge → Z=0)
+        self._wall_key: tuple | None = None
         # 데이터 필터는 즉시 (가벼움) — 렌더는 defer면 ResultPanel이 병렬 prefetch 후 호출
         self._load_data()
         if not defer_render:
@@ -617,7 +680,7 @@ class WaferCell(QFrame):
         items 자체를 제거하면 GPU buffer 재할당이 발생해 grid=250에서 cell당 수백 ms.
         hide만 해두면 다음 render에서 setData로 즉시 교체.
         """
-        for it in (self._gl_surface, self._gl_boundary, self._gl_grid):
+        for it in (self._gl_surface, self._gl_boundary, self._gl_grid, self._gl_wall):
             if it is not None:
                 it.setVisible(False)
 
@@ -835,6 +898,33 @@ class WaferCell(QFrame):
             self._gl_boundary.setVisible(True)
         elif self._gl_boundary is not None:
             self._gl_boundary.setVisible(False)
+
+        # ── edge_cut 측벽 — 서피스 외각을 Z=0 까지 연결 ──
+        edge_cut_val = float(common.get("edge_cut_mm", 0.0))
+        if edge_cut_val > 0:
+            cut_r = WAFER_RADIUS_MM - edge_cut_val
+            # wall key — Z sig 가 같으면 재사용 (컬러맵 변경도 반영)
+            wall_key = (cut_r, self._surface_z_sig, common.get("colormap", "Turbo"))
+            if self._gl_wall is None or self._wall_key != wall_key:
+                z_disp_max = float(z_range * factor)
+                verts, faces, fcols = _build_cut_wall_mesh(
+                    cut_r, XG, YG, z_disp, cmap, z_disp_max,
+                )
+                if verts is not None:
+                    md = gl.MeshData(vertexes=verts, faces=faces, faceColors=fcols)
+                    if self._gl_wall is None:
+                        self._gl_wall = gl.GLMeshItem(
+                            meshdata=md, smooth=False, shader="shaded",
+                            glOptions="opaque", drawEdges=False,
+                        )
+                        gview.addItem(self._gl_wall)
+                    else:
+                        self._gl_wall.setMeshData(meshdata=md)
+                    self._wall_key = wall_key
+            if self._gl_wall is not None:
+                self._gl_wall.setVisible(True)
+        elif self._gl_wall is not None:
+            self._gl_wall.setVisible(False)
 
         # colorbar 갱신 (3D용 범위 = vmin~vmax. display.z_range가 있으면 그걸 사용)
         self._update_colorbar(common, None, vmin=vmin, vmax=vmax)
