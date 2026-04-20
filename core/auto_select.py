@@ -12,9 +12,19 @@ ex.
 from __future__ import annotations
 
 import fnmatch
+import re
 from typing import Iterable, Mapping
 
 import numpy as np
+
+
+# VALUE 후보에서 자동 제외할 좌표 PARAMETER 패턴.
+# X, Y 정확일치 + X_ / Y_ 로 시작 (예: X_1000, Y_1000_A).
+_COORD_NAME_RE = re.compile(r"^[xyXY](_.*)?$")
+
+
+def _is_coord_name(name: str) -> bool:
+    return bool(_COORD_NAME_RE.match(name.strip()))
 
 
 def _matches(name: str, pattern: str) -> bool:
@@ -103,7 +113,7 @@ def select_value_by_variability(
         (selected, ordered_list) — ordered 는 콤보 리스트.
         selected 가 None 이면 후보 0개.
     """
-    excl = exclude_names or set()
+    excl = set(exclude_names or ())
     min_valid = max(int(required_n * valid_ratio), 1)
     patterns = list(value_patterns)
 
@@ -111,11 +121,15 @@ def select_value_by_variability(
     for name, rec in parameters.items():
         if name in excl:
             continue
+        # 좌표 PARAMETER (X/Y, X_*, Y_*) 는 VALUE 후보에서 아예 제외
+        if _is_coord_name(name):
+            continue
         try:
             vals = np.asarray(rec.values, dtype=float)
         except Exception:
             continue
         valid = vals[~np.isnan(vals)] if vals.size else vals
+        # 단일값 / 심한 누락 파라 (예: T1_AVG) 도 콤보에서 완전 배제
         if valid.size < min_valid:
             continue
         avg = float(valid.mean())
@@ -126,9 +140,7 @@ def select_value_by_variability(
         if abs(avg) > 1e-10:
             metric = abs(sig3 / avg)
         else:
-            # AVG ≈ 0: |3σ| 자체 사용 (상대적 스케일 확보 위해 작은 상수 배)
             metric = abs(sig3) * 1e-3
-        # pattern tie-break 점수 (뒤에 있을수록 낮음, 매치 없으면 0)
         pat_score = 0
         for i, pat in enumerate(patterns):
             if _matches(name, pat):
@@ -136,19 +148,16 @@ def select_value_by_variability(
                 break
         qualified.append((name, metric, pat_score))
 
-    # 자격 미달 파라 — 콤보 후순위로만 포함 (선택 대상 아님)
-    rest = sorted(
-        name for name in parameters
-        if name not in excl and not any(q[0] == name for q in qualified)
-    )
-
     if not qualified:
-        # 최후 폴백: 자격 파라 0 개 → 아무거나 (excluded 제외, 알파벳 첫)
-        return (rest[0] if rest else None), rest
+        return None, []
 
+    # 1순위: metric 최대 → tie-break (pattern, 알파벳)
     qualified.sort(key=lambda t: (-t[1], -t[2], t[0]))
-    ordered = [t[0] for t in qualified] + rest
-    return qualified[0][0], ordered
+    selected = qualified[0][0]
+    # 콤보: 선택된 1 순위 먼저, 나머지 후보는 **알파벳 순** (사용자가 찾기 쉽게)
+    rest_alpha = sorted(t[0] for t in qualified[1:])
+    ordered = [selected] + rest_alpha
+    return selected, ordered
 
 
 def select_y_with_suffix(
