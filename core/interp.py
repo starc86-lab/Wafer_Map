@@ -55,7 +55,7 @@ def _estimate_noise_1d(v_u: np.ndarray) -> float:
     return float(np.std(d) / np.sqrt(2.0))
 
 
-def interpolate_radial(x, y, v, XG, YG) -> np.ndarray:
+def interpolate_radial(x, y, v, XG, YG, *, edge_cut_mm: float = 0.0) -> np.ndarray:
     """1D 라인 스캔 → 웨이퍼 중심 기준 radial symmetric 2D surface.
 
     가정: 측정 라인이 **웨이퍼 중심(원점)을 지남**. -150~+150 양방향 스캔이면
@@ -64,13 +64,13 @@ def interpolate_radial(x, y, v, XG, YG) -> np.ndarray:
     알고리즘:
       1. r_i = √(x_i² + y_i²) — 방향 무관, 반경만
       2. 1μm 양자화 후 같은 r 값끼리 평균 (float 노이즈 + ± 대칭 통합)
-      3. 노이즈 자동 추정 → SNR 낮으면 smoothing spline, 높으면 cubic interp:
-         - 측정값에 노이즈 있으면 cubic 이 점마다 통과하며 overshoot → **나이테 링** 발생
-         - UnivariateSpline with s=n·σ² 로 smoothing → 링 제거, 프로파일 형태 유지
-         - clean 데이터에선 s=0 에 가까워 일반 cubic 과 동등
+      3. 노이즈 자동 추정 → smoothing spline (cubic overshoot 링 방지)
       4. 격자 R = √(X² + Y²) → v(R) 매핑
-      5. 안쪽 (R < r_min): 센터값으로 채움 (scan 시작이 센터 바로 바깥일 때 hole 방지)
-      6. 바깥 (R > r_max): NaN (마스크가 원 밖과 합쳐 자연스레 처리)
+      5. 안쪽 (R < r_min): 센터값으로 채움
+      6. 바깥 (R > r_max - edge_cut_mm): NaN
+
+    `edge_cut_mm`: 데이터 r_max 에서 안쪽으로 cut 할 mm. 0 = cut 없음 (기존 동작).
+    양수면 최외각 cut_mm 영역이 NaN → 톱니/extrapolation 가시 영역 제거.
     """
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
@@ -89,27 +89,31 @@ def interpolate_radial(x, y, v, XG, YG) -> np.ndarray:
 
     RG = np.sqrt(XG.astype(float) ** 2 + YG.astype(float) ** 2)
 
+    # 데이터 r_max 에서 edge_cut_mm 만큼 안쪽까지만 그림
+    r_outer = max(r_u[-1] - max(float(edge_cut_mm), 0.0), r_u[0])
+
     # 점이 너무 적으면 smoothing 불안정 → linear
     if r_u.size < 4:
         f = interp1d(r_u, v_u, kind="linear", bounds_error=False,
                      fill_value=(float(v_u[0]), np.nan))
-        return f(RG).astype(float)
+        Z = f(RG).astype(float)
+        Z = np.where(RG > r_outer, np.nan, Z)
+        return Z
 
     # 노이즈 자동 추정 → smoothing 파라미터
     noise = _estimate_noise_1d(v_u)
     s_val = float(r_u.size) * (noise ** 2)  # scipy default s heuristic
     try:
-        # ext=3: 바깥 상수 외삽, 내부는 수동 처리
         sp = UnivariateSpline(r_u, v_u, k=3, s=s_val, ext=3)
         Z = sp(RG)
     except Exception:
         # smoothing spline 실패 시 cubic interp 폴백
         f = interp1d(r_u, v_u, kind="cubic", bounds_error=False,
                      fill_value=(float(v_u[0]), np.nan))
-        return f(RG).astype(float)
+        Z = f(RG)
 
-    # 범위 밖 처리 — 내부는 센터값, 바깥은 NaN
-    Z = np.where(RG > r_u[-1], np.nan, Z)
+    # 범위 처리 — 내부는 센터값, 바깥(edge_cut 반영)은 NaN
+    Z = np.where(RG > r_outer, np.nan, Z)
     Z = np.where(RG < r_u[0], float(v_u[0]), Z)
     return Z.astype(float)
 
@@ -123,6 +127,7 @@ def interpolate_wafer(
     method: str = "RBF-ThinPlate",
     *,
     rbf_smoothing: float = 0.0,
+    radial_edge_cut_mm: float = 0.0,
 ) -> np.ndarray:
     """(x, y, v) 측정점으로 (XG, YG) 격자 값 보간.
 
@@ -140,10 +145,11 @@ def interpolate_wafer(
     if is_collinear(x, y):
         import sys
         sys.stderr.write(
-            f"[interp] Radial 모드 (1D 라인 스캔 감지, n_pts={x.size})\n"
+            f"[interp] Radial 모드 (1D 라인 스캔 감지, n_pts={x.size}, "
+            f"edge_cut={radial_edge_cut_mm}mm)\n"
         )
         sys.stderr.flush()
-        return interpolate_radial(x, y, v, XG, YG)
+        return interpolate_radial(x, y, v, XG, YG, edge_cut_mm=radial_edge_cut_mm)
 
     # RBF 계열 — method 이름에 따라 kernel 선택 (unknown 이름은 thin_plate로 fallback)
     kernel = _RBF_KERNELS.get(method, "thin_plate_spline")
