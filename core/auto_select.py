@@ -122,7 +122,6 @@ def select_value_by_variability(
     value_patterns: Iterable[str] = ("T*",),
     *,
     exclude_names: set[str] | None = None,
-    valid_ratio: float = 0.8,
 ) -> tuple[str | None, list[str]]:
     """VALUE 자동 선택 — |3σ/AVG| 최대 우선.
 
@@ -144,7 +143,6 @@ def select_value_by_variability(
         selected 가 None 이면 후보 0개.
     """
     excl = set(exclude_names or ())
-    min_valid = max(int(required_n * valid_ratio), 1)
     patterns = list(value_patterns)
 
     qualified: list[tuple[str, float, int]] = []  # (name, metric, pattern_score)
@@ -159,12 +157,9 @@ def select_value_by_variability(
         except Exception:
             continue
         valid = vals[~np.isnan(vals)] if vals.size else vals
-        # 절대 하한 — n=1 단일값(T1_AVG 등)은 어떤 그룹이든 맵 시각화 불가
+        # n=0 또는 n=1 만 제외 — 단일값/빈 파라는 맵 시각화 불가
+        # 상대 threshold (80%) 는 제거 — 사용자 유용 파라 제거 우려
         if valid.size < 2:
-            continue
-        # 상대 threshold 는 주 그룹 (non-suffix) 에만 적용 —
-        # 보조(suffix) 그룹은 주보다 측정점 적어도 그대로 유지 (사용자 선택 허용)
-        if not _has_group_suffix(name) and valid.size < min_valid:
             continue
         # 정수값만 → die index 류 (DIE_ROW, DIE_COL) 자동 제외
         if _is_integer_valued(valid):
@@ -211,8 +206,6 @@ def select_xy_pairs(
     available_ns: dict[str, int],
     x_patterns: Iterable[str] = ("X", "X*"),
     y_patterns: Iterable[str] = ("Y", "Y*"),
-    *,
-    n_threshold_ratio: float = 0.8,
 ) -> tuple[str | None, str | None, list[str], list[str]]:
     """X/Y 좌표 PARAMETER pair 매칭 기반 자동 선택.
 
@@ -278,16 +271,10 @@ def select_xy_pairs(
     if not pairs:
         return None, None, [], []
 
-    # 2-b. 그룹 분리: non-suffix (주) vs suffix (보조)
+    # 그룹 분리: non-suffix (주) vs suffix (보조)
+    # n 상대 threshold 는 제거 — 사용자 유용 파라 제거 우려로 n=0/1 만 걸러냄 (위 단계 이미 처리)
     main_pairs = [p for p in pairs if not _has_group_suffix(p[0])]
     sub_pairs = [p for p in pairs if _has_group_suffix(p[0])]
-
-    # 3. 주 그룹에만 n threshold (80%) 적용. 보조 그룹은 n 작아도 모두 유지 (사용자가
-    # 수동 선택 가능해야 — 보조 그룹은 주보다 측정점 적은 경우 흔함)
-    if main_pairs:
-        max_n = max(p[2] for p in main_pairs)
-        threshold = max(int(max_n * n_threshold_ratio), 2)
-        main_pairs = [p for p in main_pairs if p[2] >= threshold]
 
     # 자동 선택 대상: 주 그룹 우선, 없으면 보조에서
     primary = main_pairs if main_pairs else sub_pairs
