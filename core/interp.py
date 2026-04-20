@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import numpy as np
-from scipy.interpolate import RBFInterpolator, interp1d
+from scipy.interpolate import RBFInterpolator, UnivariateSpline, interp1d
 
 
 # method 이름 → scipy RBFInterpolator kernel 이름
@@ -43,6 +43,18 @@ def is_collinear(x, y, *, rel_tol: float = 0.02) -> bool:
     return float(s[1] / s[0]) < rel_tol
 
 
+def _estimate_noise_1d(v_u: np.ndarray) -> float:
+    """1D 프로파일의 고주파 노이즈 std 추정 — 1차 차분 기반.
+
+    실제 측정 데이터의 high-freq 성분만 분리: σ(diff(v)) / √2.
+    `v_u` 는 r 순 정렬된 평균값.
+    """
+    if v_u.size < 3:
+        return 0.0
+    d = np.diff(v_u)
+    return float(np.std(d) / np.sqrt(2.0))
+
+
 def interpolate_radial(x, y, v, XG, YG) -> np.ndarray:
     """1D 라인 스캔 → 웨이퍼 중심 기준 radial symmetric 2D surface.
 
@@ -51,10 +63,13 @@ def interpolate_radial(x, y, v, XG, YG) -> np.ndarray:
 
     알고리즘:
       1. r_i = √(x_i² + y_i²) — 방향 무관, 반경만
-      2. 1μm 단위 양자화 후 같은 r 값끼리 평균 (float 노이즈 + ± 대칭 통합)
-      3. 4 점 이상이면 cubic, 이하면 linear 1D 보간 → v(r)
+      2. 1μm 양자화 후 같은 r 값끼리 평균 (float 노이즈 + ± 대칭 통합)
+      3. 노이즈 자동 추정 → SNR 낮으면 smoothing spline, 높으면 cubic interp:
+         - 측정값에 노이즈 있으면 cubic 이 점마다 통과하며 overshoot → **나이테 링** 발생
+         - UnivariateSpline with s=n·σ² 로 smoothing → 링 제거, 프로파일 형태 유지
+         - clean 데이터에선 s=0 에 가까워 일반 cubic 과 동등
       4. 격자 R = √(X² + Y²) → v(R) 매핑
-      5. 안쪽 (R < r_min): 센터값으로 채움 (스캔 시작이 센터 바로 바깥일 때 hole 방지)
+      5. 안쪽 (R < r_min): 센터값으로 채움 (scan 시작이 센터 바로 바깥일 때 hole 방지)
       6. 바깥 (R > r_max): NaN (마스크가 원 밖과 합쳐 자연스레 처리)
     """
     x = np.asarray(x, dtype=float)
@@ -71,14 +86,32 @@ def interpolate_radial(x, y, v, XG, YG) -> np.ndarray:
         v_u = v_u / cnt
     if r_u.size < 2:
         return np.full(XG.shape, float(v[0]), dtype=float)
-    kind = "cubic" if r_u.size >= 4 else "linear"
-    f = interp1d(
-        r_u, v_u, kind=kind,
-        bounds_error=False,
-        fill_value=(float(v_u[0]), np.nan),
-    )
+
     RG = np.sqrt(XG.astype(float) ** 2 + YG.astype(float) ** 2)
-    return f(RG).astype(float)
+
+    # 점이 너무 적으면 smoothing 불안정 → linear
+    if r_u.size < 4:
+        f = interp1d(r_u, v_u, kind="linear", bounds_error=False,
+                     fill_value=(float(v_u[0]), np.nan))
+        return f(RG).astype(float)
+
+    # 노이즈 자동 추정 → smoothing 파라미터
+    noise = _estimate_noise_1d(v_u)
+    s_val = float(r_u.size) * (noise ** 2)  # scipy default s heuristic
+    try:
+        # ext=3: 바깥 상수 외삽, 내부는 수동 처리
+        sp = UnivariateSpline(r_u, v_u, k=3, s=s_val, ext=3)
+        Z = sp(RG)
+    except Exception:
+        # smoothing spline 실패 시 cubic interp 폴백
+        f = interp1d(r_u, v_u, kind="cubic", bounds_error=False,
+                     fill_value=(float(v_u[0]), np.nan))
+        return f(RG).astype(float)
+
+    # 범위 밖 처리 — 내부는 센터값, 바깥은 NaN
+    Z = np.where(RG > r_u[-1], np.nan, Z)
+    Z = np.where(RG < r_u[0], float(v_u[0]), Z)
+    return Z.astype(float)
 
 
 def interpolate_wafer(
