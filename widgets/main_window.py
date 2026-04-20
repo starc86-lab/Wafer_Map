@@ -203,11 +203,17 @@ class MainWindow(QMainWindow):
         lay.setContentsMargins(8, 6, 8, 6)
         lay.setSpacing(8)
 
-        self.cb_value = QComboBox(); self.cb_value.setFixedWidth(84)
+        self.cb_value = QComboBox()
         # 통합 좌표 콤보 — "X / Y" 페어 단위 선택. 사용자가 X, Y 별도 선택하지
         # 않아도 되고 suffix 불일치(X_1000/Y_A) 조합 실수 원천 차단.
         self.cb_coord = QComboBox()
-        self.cb_coord.setMinimumWidth(170)   # "X_1000_A / Y_1000_A" 전체 보일 폭
+        # 공용 폭 — `X_1000_A / Y_1000_A [99 pt]` 워스트 케이스 기준 QFontMetrics 계산.
+        # font_scale 대응 버퍼 후 0.9× 축소.
+        from PySide6.QtGui import QFontMetrics
+        fm = QFontMetrics(self.cb_value.font())
+        combo_w = int((fm.horizontalAdvance("X_1000_A / Y_1000_A [99 pt]") * 1.15 + 40) * 0.9)
+        self.cb_value.setFixedWidth(combo_w)
+        self.cb_coord.setFixedWidth(combo_w)
 
         self.btn_load_preset = QPushButton(PRESET_BUTTON_DEFAULT_TEXT)
         self.btn_load_preset.setEnabled(False)
@@ -229,8 +235,8 @@ class MainWindow(QMainWindow):
 
         # 좌표 콤보 변경 시 pair 기반 로직 + VALUE 리스트 재필터
         self.cb_coord.currentIndexChanged.connect(self._on_coord_changed)
-        # VALUE 변경 시 이미 그려진 상태면 즉시 재-Run
-        self.cb_value.currentTextChanged.connect(self._on_value_changed)
+        # VALUE 변경 시 suffix 자동 좌표 매칭 + 이미 그려진 상태면 즉시 재-Run
+        self.cb_value.currentIndexChanged.connect(self._on_value_changed)
         # View(2D/3D) 변경 — cell 재생성 없이 stack 인덱스만 토글 (캐시 활용)
         self.cb_view.currentTextChanged.connect(self._on_view_toggle)
         # Z scale 변경 — z_range만 갈아끼우고 3D 캐시 무효화 (2D 캐시 유지)
@@ -295,7 +301,7 @@ class MainWindow(QMainWindow):
             params, n_coords, vpat, exclude_names=exclude,
         )
 
-        self._fill_combo(self.cb_value, value_ordered, value_sel)
+        self._fill_value_combo(value_ordered, value_sel)
         # 좌표 콤보: pair 단위 — "x / y" 표시, itemData = (x, y) 튜플
         pairs = list(zip(x_ordered, y_ordered))
         self._fill_coord_combo(pairs, (x_sel, y_sel) if x_sel and y_sel else None)
@@ -352,14 +358,17 @@ class MainWindow(QMainWindow):
     ) -> None:
         """cb_coord 를 (x, y) pair 리스트로 채움.
 
-        각 아이템 표시: "x / y", UserRole: (x, y) 튜플.
-        preset 소스는 별도 UserRole+1 에 "preset" 마킹하여 스타일 구분.
+        각 아이템 표시: "x / y   [N pt]", UserRole: (x, y) 튜플.
+        N 은 x 의 좌표 개수 (같은 pair 의 x/y 는 n 동일 전제).
         """
         prev = self._current_xy()
+        available_ns = self._build_selection_context()[0]
         self.cb_coord.blockSignals(True)
         self.cb_coord.clear()
         for x, y in pairs:
-            self.cb_coord.addItem(f"{x} / {y}", (x, y))
+            n = available_ns.get(x)
+            label = f"{x} / {y} [{n} pt]" if n is not None else f"{x} / {y}"
+            self.cb_coord.addItem(label, (x, y))
         target = selected if selected else prev
         if target:
             for i in range(self.cb_coord.count()):
@@ -389,6 +398,37 @@ class MainWindow(QMainWindow):
                 combo.setCurrentIndex(idx)
         combo.blockSignals(False)
 
+    def _fill_value_combo(
+        self, items: list[str], selected: str | None,
+    ) -> None:
+        """cb_value 를 "{name}   [N pt]" 표시로 채움. UserRole data = raw name.
+
+        이름 획득은 _current_value() 로. currentText() 대신 UserRole 읽어야
+        표시 텍스트 ([N pt] 포함) 가 아닌 순수 이름을 얻음.
+        """
+        prev = self._current_value()
+        available_ns = self._build_selection_context()[0]
+        self.cb_value.blockSignals(True)
+        self.cb_value.clear()
+        for name in items:
+            n = available_ns.get(name)
+            label = f"{name} [{n} pt]" if n is not None else name
+            self.cb_value.addItem(label, name)
+        target = selected or prev
+        if target:
+            for i in range(self.cb_value.count()):
+                if self.cb_value.itemData(i) == target:
+                    self.cb_value.setCurrentIndex(i)
+                    break
+        self.cb_value.blockSignals(False)
+
+    def _current_value(self) -> str:
+        """cb_value 현재 선택의 raw 이름 (표시 텍스트의 [N pt] 접미사 제거). 없으면 ''."""
+        data = self.cb_value.currentData()
+        if isinstance(data, str) and data:
+            return data
+        return ""
+
     def _on_coord_changed(self, idx: int) -> None:
         """좌표 pair 변경 — preset 소스면 override 유지·재매핑, 아니면 해제. VALUE 재필터."""
         if idx < 0:
@@ -413,15 +453,75 @@ class MainWindow(QMainWindow):
         self._reset_preset_override()
         self._refilter_value_combo()
 
-    def _on_value_changed(self, new_v: str) -> None:
-        """이미 그래프가 그려진 상태에서 VALUE 콤보만 바꾸면 즉시 재-Run."""
+    def _on_value_changed(self, idx: int) -> None:
+        """VALUE 변경 — 프리셋 중엔 좌표 고정, 일반 모드에선 suffix+n 기반 좌표 자동 매칭.
+
+        매칭 우선순위 (프리셋 아닐 때만):
+          1순위: pair x 의 suffix == VALUE suffix AND pair n == VALUE n
+          2순위: pair n == VALUE n (콤보 등장 순서 첫)
+        매칭 안 되면 좌표 유지.
+        그래프가 이미 그려진 상태면 재-Run.
+        """
+        new_v = self._current_value()
         if not new_v:
             return
+        if self._preset_override is None:
+            self._auto_match_coord_by_value(new_v)
         if self._result_panel.cells:
             self._on_visualize()
 
+    @staticmethod
+    def _name_suffix(name: str) -> str:
+        """이름의 첫 토큰 뒤 suffix. `T1` → '', `T1_A` → '_A', `X_1000` → '_1000', `X` → ''."""
+        if "_" not in name:
+            return ""
+        return "_" + name.split("_", 1)[1]
+
+    def _auto_match_coord_by_value(self, value_name: str) -> None:
+        """VALUE suffix+n 기준으로 cb_coord 항목 자동 이동 (일반 모드 전용).
+
+        signal block 으로 _on_coord_changed 재진입 차단 — VALUE 리스트는 그대로 유지.
+        """
+        available_ns = self._build_selection_context()[0]
+        value_n = available_ns.get(value_name)
+        if value_n is None:
+            return
+        v_suffix = self._name_suffix(value_name)
+
+        candidates: list[tuple[int, int, str]] = []  # (idx, pair_n, x_suffix)
+        for i in range(self.cb_coord.count()):
+            data = self.cb_coord.itemData(i)
+            if not (isinstance(data, tuple) and len(data) == 2):
+                continue
+            x, _ = data
+            pair_n = available_ns.get(x)
+            if pair_n is None:
+                continue
+            candidates.append((i, pair_n, self._name_suffix(x)))
+        if not candidates:
+            return
+
+        primary = [c for c in candidates if c[2] == v_suffix and c[1] == value_n]
+        if primary:
+            target_idx = primary[0][0]
+        else:
+            secondary = [c for c in candidates if c[1] == value_n]
+            if not secondary:
+                return
+            target_idx = secondary[0][0]
+
+        if target_idx == self.cb_coord.currentIndex():
+            return
+        self.cb_coord.blockSignals(True)
+        self.cb_coord.setCurrentIndex(target_idx)
+        self.cb_coord.blockSignals(False)
+
     def _refilter_value_combo(self) -> None:
-        """좌표 pair 변경 후 VALUE 콤보 재계산 — 3σ/AVG 휴리스틱."""
+        """좌표 pair 변경 후 VALUE 콤보 재정렬 — **현재 선택은 보존** (자동 변경 금지).
+
+        `selected=None` 으로 `_fill_value_combo` 내부 `prev` fallback 이 동작 →
+        현재 선택된 VALUE 가 새 리스트에 있으면 그대로 유지. 없으면 공백.
+        """
         available_ns, params, data_cols_n = self._build_selection_context()
         if not available_ns:
             return
@@ -431,17 +531,17 @@ class MainWindow(QMainWindow):
         x_cur, y_cur = xy
         n_coords = int(available_ns.get(x_cur, data_cols_n))
         exclude = {x_cur, y_cur} - {""}
-        value_sel, value_ordered = select_value_by_variability(
+        _, value_ordered = select_value_by_variability(
             params, n_coords, vpat, exclude_names=exclude,
         )
-        self._fill_combo(self.cb_value, value_ordered, value_sel)
+        self._fill_value_combo(value_ordered, None)
 
     # ── 프리셋 override ───────────────────────────────
     def _open_preset_dialog(self) -> None:
         result = self._result_a or self._result_b
         if result is None or not result.wafers:
             return
-        v = self.cb_value.currentText()
+        v = self._current_value()
         if not v:
             return
         first_wafer = next(iter(result.wafers.values()))
@@ -501,17 +601,16 @@ class MainWindow(QMainWindow):
             self.btn_load_preset.setText(f"프리셋: {preset.display_name}")
 
     def _apply_preset_indicator(self):
-        """preset 활성 시 cb_coord 에 해당 recipe 의 모든 pair 를 "x / y" 로 상단 삽입.
+        """preset 활성 시 cb_coord 상단에 해당 preset pair **하나만** "x / y   [N pt]" 로 삽입.
 
-        - preset 소스 아이템은 UserRole 에 "preset" 표시 + 굵은 파란색 스타일
-        - 같은 pair 가 이미 있으면 중복 제거 (preset 버전이 대체)
-        - 기본 선택: self._preset_override 의 pair
+        - 저장 단위가 per-pair 로 바뀐 뒤 프리셋 로드 = pair 하나 → 상단에 그 하나만.
+        - UserRole = "preset" 표시 + 굵은 파란색 스타일.
+        - 입력에 같은 pair 가 있으면 제거 (preset 버전이 대체).
         """
         from PySide6.QtGui import QBrush, QColor, QFont
         combo = self.cb_coord
         combo.blockSignals(True)
         try:
-            # 기존 preset 소스 아이템 제거
             for i in range(combo.count() - 1, -1, -1):
                 if combo.itemData(i, Qt.ItemDataRole.UserRole) == "preset":
                     combo.removeItem(i)
@@ -519,39 +618,26 @@ class MainWindow(QMainWindow):
             if self._preset_override is None:
                 return
 
-            # 현재 recipe 의 모든 preset pair (dedupe by (x, y), 최신 선호)
-            library = CoordLibrary()
-            recipe = self._preset_override.recipe
-            by_key: dict[tuple[str, str], CoordPreset] = {}
-            for p in library.find_by_recipe(recipe):
-                key = (p.x_name, p.y_name)
-                if key not in by_key or p.last_used > by_key[key].last_used:
-                    by_key[key] = p
-            primary = self._preset_override
-            primary_key = (primary.x_name, primary.y_name)
-            rest = [p for p in by_key.values() if (p.x_name, p.y_name) != primary_key]
-            rest.sort(key=lambda p: p.last_used, reverse=True)
-            pairs_ordered = [primary] + rest
-
-            for i, p in enumerate(pairs_ordered):
-                label = f"{p.x_name} / {p.y_name}"
-                # 동일 label 입력 아이템 있으면 제거 (preset 버전이 대체)
-                for j in range(combo.count() - 1, -1, -1):
-                    if combo.itemText(j) == label:
-                        combo.removeItem(j)
-                combo.insertItem(i, label, (p.x_name, p.y_name))
-                combo.setItemData(i, "preset", Qt.ItemDataRole.UserRole)
-                f = QFont(combo.font())
-                f.setBold(True)
-                combo.setItemData(i, f, Qt.ItemDataRole.FontRole)
-                combo.setItemData(i, QBrush(QColor("#4361ee")),
-                                  Qt.ItemDataRole.ForegroundRole)
+            p = self._preset_override
+            n = len(p.x_mm)
+            label = f"{p.x_name} / {p.y_name} [{n} pt]"
+            for j in range(combo.count() - 1, -1, -1):
+                data = combo.itemData(j)
+                if isinstance(data, tuple) and data == (p.x_name, p.y_name):
+                    combo.removeItem(j)
+            combo.insertItem(0, label, (p.x_name, p.y_name))
+            combo.setItemData(0, "preset", Qt.ItemDataRole.UserRole)
+            f = QFont(combo.font())
+            f.setBold(True)
+            combo.setItemData(0, f, Qt.ItemDataRole.FontRole)
+            combo.setItemData(0, QBrush(QColor("#4361ee")),
+                              Qt.ItemDataRole.ForegroundRole)
             combo.setCurrentIndex(0)
         finally:
             combo.blockSignals(False)
 
     def _on_visualize(self) -> None:
-        v = self.cb_value.currentText()
+        v = self._current_value()
         xy = self._current_xy()
         x = xy[0] if xy else ""
         y = xy[1] if xy else ""
@@ -569,6 +655,7 @@ class MainWindow(QMainWindow):
             )
             return
 
+        # 렌더링 먼저 → Qt paint 완료 후 n 불일치 경고 팝업 (QTimer 한 틱 지연)
         a, b = self._result_a, self._result_b
         if a and b:
             self._visualize_delta(a, b, v, x, y)
@@ -576,6 +663,26 @@ class MainWindow(QMainWindow):
             self._visualize_single(a or b, v, x, y)
         else:
             self._result_panel.clear()
+
+        if self._preset_override is None:
+            QTimer.singleShot(0, lambda: self._warn_n_mismatch_once(v, x, y))
+
+    def _warn_n_mismatch_once(self, v: str, x: str, y: str) -> None:
+        """현재 입력에서 VALUE/X/Y n 이 모두 같은지 검사. 다르면 경고 팝업 1회."""
+        available_ns = self._build_selection_context()[0]
+        v_n = available_ns.get(v)
+        x_n = available_ns.get(x)
+        y_n = available_ns.get(y)
+        if v_n is None or x_n is None or y_n is None:
+            return
+        if v_n == x_n == y_n:
+            return
+        QMessageBox.warning(
+            self, "포인트 개수 불일치",
+            f"VALUE와 좌표 포인트 개수가 다릅니다.\n"
+            f"{v}: {v_n} pt\n"
+            f"{x} / {y}: {x_n if x_n == y_n else f'{x_n}/{y_n}'} pt",
+        )
 
     def _visualize_single(
         self, result: ParseResult, v: str, x: str, y: str,
@@ -635,10 +742,9 @@ class MainWindow(QMainWindow):
             x_mm, y_mm, val_n = x_mm[:n], y_mm[:n], val[:n]
 
             # 사용자 콤보 좌표일 때만 저장 (override/library 경로는 이미 touch 됨).
-            # 현재 웨이퍼의 parameters 에서 **발견된 모든 X/Y pair** (suffix 포함) 저장 →
-            # 라이브러리에 페어별 레코드 누적. 원본 이름 (x_name/y_name) 보존.
-            if not (from_preset or from_lib) and w.recipe:
-                self._save_all_pairs_to_library(library, w)
+            # 실제 런에 사용된 (x, y) pair 하나만 저장 — n 유효 조합일 때만.
+            if not (from_preset or from_lib):
+                self._save_used_pair_to_library(library, w, v, x, y)
 
             title = f"{w.lot_id}.{_pad_slot(w.slot_id)} – {v}"
             if is_collinear(x_mm, y_mm):
@@ -670,15 +776,13 @@ class MainWindow(QMainWindow):
     def _visualize_delta(
         self, a: ParseResult, b: ParseResult, v: str, x: str, y: str,
     ) -> None:
-        # DELTA 모드의 자동 저장 — A/B 각 웨이퍼에서 발견된 모든 X/Y pair 저장
+        # DELTA 모드 자동 저장 — A/B 각 웨이퍼에 실제 사용된 (x, y) pair 하나씩 저장
         coord_valid = bool(v and x and y and v != x and v != y and x != y)
         if coord_valid:
             library = CoordLibrary()
             for result in (a, b):
                 for w in result.wafers.values():
-                    if not w.recipe:
-                        continue
-                    self._save_all_pairs_to_library(library, w)
+                    self._save_used_pair_to_library(library, w, v, x, y)
             self._enforce_library_limits(library)
 
         dr = compute_delta(a, b, v, x, y, tolerance_mm=1e-3)
@@ -702,40 +806,58 @@ class MainWindow(QMainWindow):
                 meta_label=f"{d.lot_a} / {_pad_slot(d.slot_a)}  ←  {d.lot_b} / {_pad_slot(d.slot_b)}",
                 x_mm=d.x_mm, y_mm=d.y_mm, values=d.delta_v,
             ))
+        # A/B 의 대표 RECIPE 비교 — 다르면 summary 에 안내 (차단 말고 알림만).
+        # 의도적으로 다른 레시피 DELTA 도 사용자 케이스 있음.
+        recipe_a = self._dominant_recipe(a)
+        recipe_b = self._dominant_recipe(b)
+        recipe_note = ""
+        if recipe_a and recipe_b and recipe_a.strip().lower() != recipe_b.strip().lower():
+            recipe_note = f"  ·  ⚠ RECIPE 불일치: A={recipe_a} / B={recipe_b}"
         summary = (
             f"매칭 {dr.matched} / A {dr.count_a} vs B {dr.count_b}  "
-            f"·  DELTA (A − B)"
+            f"·  DELTA (A − B){recipe_note}"
         )
         view_mode = self.cb_view.currentText() or "2D"
         self._apply_z_scale_mode(displays, view_mode)
         self._result_panel.set_displays(displays, v, view_mode=view_mode, summary_line=summary)
 
-    def _save_all_pairs_to_library(self, library: CoordLibrary, wafer) -> None:
-        """해당 웨이퍼의 parameters 에서 발견된 모든 X/Y pair 를 라이브러리에 저장.
+    @staticmethod
+    def _dominant_recipe(result: ParseResult) -> str:
+        """ParseResult 의 대표 RECIPE — 첫 웨이퍼 것. 없으면 ''."""
+        if not result or not result.wafers:
+            return ""
+        first = next(iter(result.wafers.values()))
+        return first.recipe or ""
 
-        원본 이름 (x_name, y_name) 보존. Option B — 같은 (recipe, x_name, y_name) 이
-        이미 있으면 좌표만 업데이트 (overwrite).
+    def _save_used_pair_to_library(
+        self, library: CoordLibrary, wafer, v_name: str, x_name: str, y_name: str,
+    ) -> None:
+        """실제 런에 사용된 (x_name, y_name) pair 하나만 저장.
+
+        조건:
+          - wafer 에 v/x/y parameter 모두 존재
+          - 좌표 개수 n_x == n_y == n_v (유효 조합만 저장)
+          - wafer.recipe 존재
+        Option B — 같은 (recipe, x_name, y_name) 있으면 좌표 overwrite.
         """
-        wafer_ns = {name: rec.n for name, rec in wafer.parameters.items()}
-        auto = load_settings().get("auto_select", {})
-        xpat = auto.get("x_patterns", ["X", "X*"])
-        ypat = auto.get("y_patterns", ["Y", "Y*"])
-        _, _, x_names, y_names = select_xy_pairs(wafer_ns, xpat, ypat)
-        for xn, yn in zip(x_names, y_names):
-            if xn not in wafer.parameters or yn not in wafer.parameters:
-                continue
-            try:
-                xr, _ = normalize_to_mm(wafer.parameters[xn].values)
-                yr, _ = normalize_to_mm(wafer.parameters[yn].values)
-                nn = min(len(xr), len(yr))
-                if nn == 0:
-                    continue
-                library.add_or_touch(
-                    wafer.recipe, xr[:nn], yr[:nn],
-                    x_name=xn, y_name=yn, save=False,
-                )
-            except (ValueError, KeyError):
-                continue
+        if not wafer.recipe:
+            return
+        if x_name not in wafer.parameters or y_name not in wafer.parameters:
+            return
+        if v_name not in wafer.parameters:
+            return
+        try:
+            xr, _ = normalize_to_mm(wafer.parameters[x_name].values)
+            yr, _ = normalize_to_mm(wafer.parameters[y_name].values)
+        except (ValueError, KeyError):
+            return
+        v_n = int(wafer.parameters[v_name].n)
+        if not (len(xr) == len(yr) == v_n) or v_n == 0:
+            return
+        library.add_or_touch(
+            wafer.recipe, xr, yr,
+            x_name=x_name, y_name=y_name, save=False,
+        )
 
     def _enforce_library_limits(self, library: CoordLibrary) -> None:
         """Settings의 coord_library.max_count / max_days로 purge + save.

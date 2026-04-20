@@ -115,12 +115,13 @@ def parse_wafer_csv(
     if not data_cols:
         raise MissingColumnsError(missing=[r"DATA\d+"], available=list(df.columns))
 
+    dup_warnings = _detect_duplicate_columns(list(df.columns))
     wafers, warnings = _group_by_waferid(df, col_map, data_cols)
     return ParseResult(
         wafers=wafers,
         column_mapping=col_map,
         data_columns=data_cols,
-        warnings=warnings,
+        warnings=dup_warnings + warnings,
     )
 
 
@@ -128,8 +129,11 @@ def parse_wafer_csv(
 # Internals
 # ────────────────────────────────────────────────────────────────
 def _normalize(name: str) -> str:
-    """헤더 정규화: 소문자 + 공백·언더바 제거."""
-    return re.sub(r"[\s_]+", "", str(name)).lower()
+    """헤더 정규화: 소문자 + 공백·언더바·하이픈 제거.
+
+    대시 포함 — `Lot-ID` / `LOT ID` / `lot_id` 모두 `lotid` 로 매칭.
+    """
+    return re.sub(r"[\s_\-]+", "", str(name)).lower()
 
 
 def _merge_aliases(user: dict[str, list[str]] | None) -> dict[str, list[str]]:
@@ -140,6 +144,38 @@ def _merge_aliases(user: dict[str, list[str]] | None) -> dict[str, list[str]]:
     return merged
 
 
+def _preclean(text: str) -> str:
+    """클립보드 / Word / PDF 복사 흔적 정리.
+
+    - 유니코드 minus(`−`, U+2212) → ASCII `-`
+    - Non-breaking space(U+00A0) → 일반 공백
+    - Zero-width space(U+200B) → 제거
+    - UTF-8 BOM 제거
+    - **중복 헤더 행 제거**: 같은 텍스트를 두 번 paste 하면 editor 에 이어붙어
+      헤더 행이 중간에 섞임. 첫 행과 정확히 일치하는 뒤 행들을 모두 스킵.
+    pd.to_numeric 이 ASCII 만 인식하므로 숫자 NaN 화 방지.
+    """
+    text = (
+        text.replace("\u2212", "-")
+        .replace("\u00a0", " ")
+        .replace("\u200b", "")
+        .replace("\ufeff", "")
+    )
+    # 중복 헤더 제거
+    lines = text.splitlines(keepends=True)
+    if len(lines) < 2:
+        return text
+    header = lines[0].strip()
+    if not header:
+        return text
+    cleaned: list[str] = [lines[0]]
+    for line in lines[1:]:
+        if line.strip() == header:
+            continue  # 같은 헤더 행 반복 → skip
+        cleaned.append(line)
+    return "".join(cleaned)
+
+
 def _load_dataframe(source: str | Path | pd.DataFrame) -> pd.DataFrame:
     if isinstance(source, pd.DataFrame):
         return source.copy()
@@ -147,6 +183,7 @@ def _load_dataframe(source: str | Path | pd.DataFrame) -> pd.DataFrame:
         s = str(source)
         # 개행/탭이 있으면 원시 텍스트, 아니면 파일 경로로 해석
         if "\n" in s or "\t" in s:
+            s = _preclean(s)
             first_line = s.splitlines()[0] if s.splitlines() else ""
             sep = "\t" if "\t" in first_line else ","
             return pd.read_csv(io.StringIO(s), sep=sep)
@@ -180,6 +217,27 @@ def _match_columns(
     if missing:
         raise MissingColumnsError(missing=missing, available=columns)
     return col_map
+
+
+def _detect_duplicate_columns(columns: list[str]) -> list[str]:
+    """동일 헤더(정규화 후) 2개 이상 감지 → 경고 문자열 목록.
+
+    pandas 는 동명 컬럼을 `Name`, `Name.1` 로 자동 suffix 처리하지만, 사용자 의도상
+    원본 헤더 중복이면 데이터 손실·혼동 위험. 정규화 후 비교로 `LOT ID` / `Lot_ID`
+    같은 동의어 중복도 잡음.
+    """
+    from collections import Counter
+    warns: list[str] = []
+    # pandas 의 `.N` suffix 는 벗긴 후 정규화 비교
+    raw = [re.sub(r"\.\d+$", "", str(c)) for c in columns]
+    norm_counts = Counter(_normalize(r) for r in raw if r)
+    for norm, cnt in norm_counts.items():
+        if cnt <= 1 or not norm:
+            continue
+        # 정규화 결과가 같은 원본 헤더들 수집
+        origs = sorted({r for r in raw if _normalize(r) == norm})
+        warns.append(f"중복 컬럼 감지: {origs} ({cnt}회) — 마지막 것만 사용됨")
+    return warns
 
 
 def _extract_data_columns(columns: list[str]) -> list[str]:
@@ -230,9 +288,15 @@ def _group_by_waferid(
     recipe_col = col_map["recipe"]
     max_col = col_map.get("max_data_id")
 
-    for wid, subset in df.groupby(wid_col, sort=False):
+    # Excel 셀 포맷 이슈로 WAFERID 앞뒤 공백 섞이면 같은 웨이퍼가 두 그룹으로 분산됨.
+    # groupby 전에 일괄 strip → 같은 WAFERID 로 합쳐지게.
+    df = df.copy()
+    df[wid_col] = df[wid_col].astype(str).str.strip()
+
+    for wid_raw, subset in df.groupby(wid_col, sort=False):
+        wid = str(wid_raw)
         wafer = WaferData(
-            wafer_id=str(wid),
+            wafer_id=wid,
             lot_id=_mode_str(subset[lot_col]),
             slot_id=_mode_str(subset[slot_col]),
             recipe=_mode_str(subset[recipe_col]),
@@ -263,7 +327,9 @@ def _group_by_waferid(
                 values=values, n=n_actual, max_data_id=max_id
             )
 
-        wafers[str(wid)] = wafer
+        # groupby 가 같은 strip 후 wid 를 여러번 넘기면 (공백 섞임) 뒷 것이 덮어쓰게 둠.
+        # 합치고 싶으면 별도 머지 로직 필요하지만, 실사용에서 드문 케이스.
+        wafers[wid] = wafer
 
     return wafers, warnings
 

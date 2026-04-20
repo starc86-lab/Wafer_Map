@@ -172,6 +172,43 @@ gl_view.paintGL = patched
 
 ---
 
+## 1b. 3D 경계 카디널 스트라이프 / 톱니 아티팩트
+
+### 현상
+3D MAP 렌더 시 웨이퍼 경계(r=150) 근처에서 두 종류 아티팩트:
+- **카디널 스트라이프**: 동/서/남/북 4 방향 측벽이 격자축과 정렬되어 **수직 계단 줄무늬**처럼 보임. 45° 대각 방향은 부드러움.
+- **상면 테두리 톱니**: mask 경계(`r<=R`)가 격자 이산화라 상면 윤곽선이 지그재그로 끊김.
+
+두 가지 모두 원본 v0.1.0 이후로 존재. 2026-04-20 확인.
+
+### 시도한 접근과 실패 이유
+
+| # | 시도 | 결과 |
+|---|---|---|
+| 1 | `GRID_MARGIN_MM=5` (격자를 R+5 까지 확장) | 카디널 스트라이프 그대로. 오히려 surface mesh 가 R 밖으로 삐져나와 smooth wall 방법에서 악영향 |
+| 2 | 격자 해상도 G=100 → G=500 | 스트라이프 폭만 좁아질 뿐 존재. 근본 해결 아님. G=500 은 렌더 비용 증가 |
+| 3 | `_build_cut_wall_mesh` 로 r=R 원통 wall 추가 (180 segments) | wall top 위치 부정확(probe 위치 r=R-1.5dx 에서 dome 중심 쪽 값 가져옴 → rim 효과). 격자 wall 의 바깥쪽이 smooth wall 뚫고 나와 톱니 재발 |
+| 4 | `z=0 drop` 제거 (exterior RBF 외삽 유지) + `glOptions="translucent"` | 카디널 스트라이프 사라지지만 **측벽 자체 소실** → 웨이퍼가 공중에 떠 보임. translucent 는 depth ordering 이슈로 뒷면 비침/어두움 (특히 낮은 카메라 각도) |
+
+### 미시도 / 검토 가능한 방향
+
+- **smooth wall 재시도**: `GRID_MARGIN_MM=0` (grid 가 정확히 ±R) + wall 을 r=R+0.5mm (격자 밖) + wall top probe 를 r=R-dx (boundary 에 가장 가까운 interior) 로. z-fighting 피하면서 wall 이 격자 jagged wall 을 앞에서 덮음.
+- **radial (polar) 격자**: 현재 rect 격자 대신 `(r, θ)` 격자로 mesh 구성. 경계가 정확히 원. 구현량 큼 — `GLSurfacePlotItem` 은 rect 전용이라 `GLMeshItem` 수동 구성 필요.
+- **top 경계 alpha soft fade**: r>R-1mm 부터 r=R 까지 alpha 선형 감소 + translucent. 톱니 완화. 단 translucent 의 depth 이슈 남음.
+- **surface mesh 를 inscribed-square (r=R/√2) 까지만** 렌더 + 외곽 고리를 원통/콘 mesh 로. 복잡.
+
+### 현재 상태
+옵션 1 (GRID_MARGIN_MM=5) 만 코드에 남음. 카디널 스트라이프 visible. 사용자는 인지 상태.
+
+### 우선순위
+중간. 첫 사용 가능 배포(v0.1.0)에 포함됐고 기능 동작엔 지장 없음. 품질 개선 과제.
+
+### 참고
+- 디버그 스크립트: [debug/debug_cardinal_wall.py](debug/debug_cardinal_wall.py), [debug/debug_verify_real.py](debug/debug_verify_real.py) — 여러 옵션 비교 PNG 생성
+- 결과 PNG: `debug/cardinal/*.png`, `debug/verify/*.png`
+
+---
+
 ## 2. 용량 최적화 (125MB → 목표 70-80MB)
 
 ### 현재 구성 (dist/Wafer Map/ — 271MB, zipped 125MB)
@@ -224,6 +261,10 @@ gl_view.paintGL = patched
 - [ ] VALUE 변경 시 즉시 재-Run — 다중 VALUE 스위칭 캐싱 (메모리 부담 100-250MB 수준, 현재 미적용)
 - [ ] Shift+좌클릭 카메라 sync 의 "rotate 중 sync" 뿐 아니라 "pan/zoom sync" 확인 (이미 `center` 복사해서 될 듯하나 체감 테스트 필요)
 - [ ] 2D MAP 회전 (notch 방향 돌리기) — 보류됨. 필요시 재검토
+- [ ] **Run Analysis 버튼 always-enabled 로 전환** — 현재 `setEnabled(any_input and bool(available_ns))` 로 조건부 disable. 그런데 `class="primary"` 녹색 스타일은 disabled 여도 회색으로 안 변해서 사용자가 enabled 로 착각 → 클릭 안 되는 버그처럼 느낌 (2026-04-21 사례). 방향:
+  1. `btn_visualize.setEnabled(True)` 고정
+  2. `_on_visualize` 시작부에서 전제조건 검사 실패 시 `QMessageBox.warning` + early return
+  3. 경고 메시지는 구체적 이유 명시 (입력 없음 / VALUE 미선택 / 좌표 미선택 등)
 
 ### 4.3 Copy Graph 개선
 - [ ] 우클릭 메뉴에 "Copy Graph (HiRes)" 옵션 추가 — 화면 캡처 대신 2x/3x 렌더 옵션 (시나리오 A 구현 후)

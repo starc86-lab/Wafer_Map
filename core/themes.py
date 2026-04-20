@@ -301,7 +301,7 @@ DEFAULT_SETTINGS = {
         "show_scale_bar": True,    # 그래프 우측에 컬러맵 스케일바
         "chart_width": 360,        # 그래프 가로 (px) — 360:280 비율 기준 중
         "chart_height": 280,       # 그래프 세로 (px)
-        "grid_resolution": 150,    # 보간 격자 해상도 (격자 한 변)
+        "grid_resolution": 200,    # 보간 격자 해상도 (격자 한 변)
         # 보간 방법 — core/interp.py 참고
         "interp_method": "RBF-ThinPlate",
         "decimals": 2,             # 테이블 값 소수점 자릿수 (0/1/2/3, 컬러바는 별도 동적)

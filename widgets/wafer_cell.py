@@ -28,6 +28,10 @@ from core.metrics import summary_metrics
 
 BOUNDARY_SEGMENTS = 361
 
+# 격자 마진 — RBF 보간 외삽 품질을 위한 약간의 여유. 카디널 "짤림"은 z=0 drop 제거 +
+# translucent 블렌딩으로 해결.
+GRID_MARGIN_MM = 5.0
+
 # 300mm 웨이퍼 notch — 실제 스펙은 ~3mm 폭/~1mm 깊이지만 화면에서 잘 보이도록 과장.
 # 방향은 6시(하단, 3π/2) 고정. 깊이는 settings(chart_common.notch_depth_mm)에서 주입.
 _NOTCH_ANGLE = 3 * np.pi / 2
@@ -183,13 +187,28 @@ def _build_cut_wall_mesh(cut_r: float, XG: np.ndarray, YG: np.ndarray,
     return verts, faces, face_colors
 
 
+class _CtrlPanViewBox(pg.ViewBox):
+    """2D PlotWidget 전용 ViewBox — Ctrl+좌드래그만 pan 허용.
+
+    - 일반 좌드래그: 무시 (실수 이동 방지)
+    - Ctrl+좌드래그: pan (위치 이동) — 3D 의 Ctrl+드래그 pan 과 동일 관례
+    - wheel: 기본 zoom (ViewBox 기본 동작)
+    """
+    def mouseDragEvent(self, ev, axis=None):
+        if ev.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            super().mouseDragEvent(ev, axis)
+        else:
+            ev.ignore()
+
+
 class _LockedGLView(gl.GLViewWidget):
-    """휠 줌 차단 GLViewWidget — chart 크기 고정을 위함. 드래그 회전/팬은 허용.
+    """Shift+드래그 카메라 동기화 지원 GLViewWidget.
 
-    Shift+좌클릭 누르면 클릭 시점에 모든 다른 셀을 자신의 카메라와 동일 각도로 스냅.
-    이어서 Shift 유지하며 드래그하면 회전이 나머지 셀로 실시간 전파.
-
-    4x MSAA — surface edge·GLLinePlotItem(경계원·grid) 계단 제거 시도.
+    - 휠 줌: GLViewWidget 기본 동작 사용 (카메라 distance 조정)
+    - 좌 드래그: orbit (회전)
+    - Ctrl+좌 드래그: pan (위치 이동) — GLViewWidget 기본
+    - Shift+좌클릭: 클릭 순간 전 셀 카메라 스냅 동기. 이어서 Shift 유지 드래그 → 실시간 전파
+    - 4x MSAA — surface edge·GLLinePlotItem(경계원·grid) 계단 제거
     """
     import weakref
     _instances: "weakref.WeakSet[_LockedGLView]" = weakref.WeakSet()
@@ -202,9 +221,6 @@ class _LockedGLView(gl.GLViewWidget):
         self.setFormat(fmt)
         _LockedGLView._instances.add(self)
         self._sync_active: bool = False
-
-    def wheelEvent(self, ev):
-        ev.ignore()
 
     def _broadcast_camera(self) -> None:
         """자신의 카메라 opts를 다른 살아있는 _LockedGLView 인스턴스에 복사 + update."""
@@ -418,15 +434,16 @@ class WaferCell(QFrame):
 
         lay.addWidget(self._chart_box, stretch=1)
 
-        self._plot_2d = pg.PlotWidget()
+        # 커스텀 ViewBox 주입 — Ctrl+드래그 pan + wheel zoom
+        self._plot_2d = pg.PlotWidget(viewBox=_CtrlPanViewBox())
         self._plot_2d.setBackground("w")
         self._plot_2d.setAspectLocked(True)
         self._plot_2d.setFrameShape(QFrame.Shape.NoFrame)
         # 300mm 웨이퍼는 항상 -150~+150 mm이라 축 눈금 불필요
         self._plot_2d.getPlotItem().hideAxis("bottom")
         self._plot_2d.getPlotItem().hideAxis("left")
-        # 마우스 줌/팬/메뉴 차단 + 웨이퍼 전체가 꽉 차도록 range 고정
-        self._plot_2d.setMouseEnabled(False, False)
+        # wheel zoom 활성. 드래그 pan 은 _CtrlPanViewBox 가 Ctrl 시에만 허용.
+        self._plot_2d.setMouseEnabled(True, True)
         self._plot_2d.getPlotItem().setMenuEnabled(False)
         # 좌하단 [A] auto-range 버튼 숨김 — 누르면 enableAutoRange로 크기 바뀜
         self._plot_2d.getPlotItem().hideButtons()
@@ -690,7 +707,7 @@ class WaferCell(QFrame):
         컬러맵·shading 등은 interp 결과에 영향 없으므로 캐시 히트 경로로 수 ms 처리.
         """
         method = common.get("interp_method", "RBF-ThinPlate")
-        G = int(common.get("grid_resolution", 100))
+        G = int(common.get("grid_resolution", 200))
         show_notch = bool(common.get("show_notch", True))
         depth = float(common.get("notch_depth_mm", _NOTCH_DEFAULT_DEPTH_MM))
         edge_cut = float(common.get("edge_cut_mm", 0.0))
@@ -700,8 +717,12 @@ class WaferCell(QFrame):
 
         # 보간(RBF/Radial) — key 그대로면 ZG 재사용
         if self._interp_cache is None or self._interp_key != interp_key:
-            xg = np.linspace(-WAFER_RADIUS_MM, WAFER_RADIUS_MM, G)
-            yg = np.linspace(-WAFER_RADIUS_MM, WAFER_RADIUS_MM, G)
+            # 격자 범위를 wafer 반지름 + margin 으로 확장 → 카디널 접점(±150,0)/(0,±150) 에서
+            # 격자 정점이 원 경계와 정확히 일치해 생기는 3D 삼각형 "짤림" 제거.
+            # 마스크는 그대로 r <= WAFER_RADIUS_MM 이라 시각화 경계는 유지.
+            grid_r = WAFER_RADIUS_MM + GRID_MARGIN_MM
+            xg = np.linspace(-grid_r, grid_r, G)
+            yg = np.linspace(-grid_r, grid_r, G)
             XG, YG = np.meshgrid(xg, yg, indexing="ij")
             ZG = interpolate_wafer(
                 x_in, y_in, v_in, XG, YG,
@@ -732,10 +753,9 @@ class WaferCell(QFrame):
 
         cmap_name = common.get("colormap", "Turbo")
         img = pg.ImageItem(ZG)
-        img.setRect(QRectF(
-            -WAFER_RADIUS_MM, -WAFER_RADIUS_MM,
-            2 * WAFER_RADIUS_MM, 2 * WAFER_RADIUS_MM,
-        ))
+        # 격자 범위와 정합 — _ensure_interp 의 grid_r 과 동일 확장
+        grid_r = WAFER_RADIUS_MM + GRID_MARGIN_MM
+        img.setRect(QRectF(-grid_r, -grid_r, 2 * grid_r, 2 * grid_r))
         cmap = resolve_colormap(cmap_name)
         img.setLookupTable(cmap.getLookupTable())
         # Z-Scale 공통 모드면 display.z_range로 levels 고정 → 2D에도 공통 스케일 반영
@@ -946,9 +966,9 @@ class WaferCell(QFrame):
             nu_s = f"{nu / 100.0:.{decimals + 2}f}"
 
         rows = [
-            ("Average",      _fmt(m['avg'], decimals)),
-            ("Non Unif.",    nu_s),
-            ("Range, 3Sig",  f"{_fmt(m['range'], decimals)}, {_fmt(m['sig3'], decimals)}"),
+            ("Average",   _fmt(m['avg'], decimals)),
+            ("Range",     _fmt(m['range'], decimals)),
+            ("Non Unif.", nu_s),
         ]
         for r, (label, value) in enumerate(rows):
             self._set_cell(r, 0, label)
@@ -987,7 +1007,11 @@ class WaferCell(QFrame):
                 )
             elif isinstance(chart, gl.GLViewWidget):
                 s = settings_io.load_settings().get("chart_3d", {})
+                # Ctrl+드래그 pan 은 opts["center"] 를 변경 → 초기 원점 (0,0,0) 으로 복귀.
+                # setCameraPosition(pos=...) 로 center 도 리셋해야 완전 복구.
+                from pyqtgraph import Vector
                 chart.setCameraPosition(
+                    pos=Vector(0, 0, 0),
                     distance=float(s.get("camera_distance", 500)),
                     elevation=28, azimuth=-135,
                 )

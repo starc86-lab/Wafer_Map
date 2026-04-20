@@ -16,7 +16,6 @@ import re
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterable
 
 import numpy as np
 
@@ -291,12 +290,11 @@ class CoordLibrary:
         *,
         save: bool = True,
     ) -> list[CoordPreset]:
-        """최대 레시피 그룹 수·보관 일수 초과 레코드 삭제. 삭제된 pair 목록 반환.
+        """최대 레코드 수·보관 일수 초과 레코드 삭제. 삭제된 레코드 목록 반환.
 
-        - `max_count > 0`: **레시피 그룹 기준**. 그룹의 최신 last_used 로 정렬,
-           상위 `max_count` 그룹만 유지. 삭제되는 그룹의 모든 pair 삭제.
-        - `max_days > 0`:  pair 단위 — `last_used` 가 `max_days` 일 이전인 pair 삭제
-          (그룹 내 다른 pair 가 최근 쓰였으면 그 pair 만 유지)
+        - `max_count > 0`: **레코드 개수 기준** (표의 행 개수). `last_used` 내림차순
+          정렬 후 상위 `max_count` 레코드만 유지.
+        - `max_days > 0`:  `last_used` 가 `max_days` 일 이전인 레코드 삭제.
         - 둘 다 0 이면 no-op
         """
         removed: list[CoordPreset] = []
@@ -315,86 +313,14 @@ class CoordLibrary:
                     removed.append(p)
             self.presets = keep
 
-        if max_count > 0:
-            # 레시피(대소문자 무시) 기준 그룹화 → 그룹의 최신 last_used 로 정렬
-            groups: dict[str, list[CoordPreset]] = {}
-            for p in self.presets:
-                groups.setdefault(p.recipe.lower(), []).append(p)
-            if len(groups) > max_count:
-                sorted_groups = sorted(
-                    groups.values(),
-                    key=lambda g: max(p.last_used for p in g),
-                    reverse=True,
-                )
-                keep_pairs: list[CoordPreset] = []
-                for g in sorted_groups[:max_count]:
-                    keep_pairs.extend(g)
-                for g in sorted_groups[max_count:]:
-                    removed.extend(g)
-                self.presets = keep_pairs
+        if max_count > 0 and len(self.presets) > max_count:
+            sorted_presets = sorted(
+                self.presets, key=lambda p: p.last_used, reverse=True,
+            )
+            self.presets = sorted_presets[:max_count]
+            removed.extend(sorted_presets[max_count:])
 
         if removed and save:
             self.save()
         return removed
 
-    # ── 그룹핑 (불러오기 UI용 중복 병합 표시) ─────────
-    def group_by_coords(
-        self, presets: Iterable[CoordPreset],
-    ) -> list[list[CoordPreset]]:
-        """좌표 배열이 tolerance 내 동일한 프리셋들을 묶어 리스트 반환.
-
-        성능: 좌표 첫/중간/끝 3점을 tolerance 단위로 양자화한 해시 키로 **선 버킷팅**
-        → 같은 버킷끼리만 정밀 비교 (`np.allclose`). 대부분 서로 다른 좌표일 때
-        사실상 O(N). 같은 해시를 공유하는 프리셋이 많으면 그 버킷 내에서만 O(k²).
-
-        각 그룹은 `last_used` 내림차순 정렬. 대표(첫 원소)는 최신 레코드.
-        """
-        buckets: dict[tuple, list[CoordPreset]] = {}
-        for p in presets:
-            buckets.setdefault(_coord_hash_key(p), []).append(p)
-
-        groups: list[list[CoordPreset]] = []
-        for bucket in buckets.values():
-            remaining = bucket
-            while remaining:
-                pivot = remaining[0]
-                px = np.asarray(pivot.x_mm, dtype=float)
-                py = np.asarray(pivot.y_mm, dtype=float)
-                grp: list[CoordPreset] = [pivot]
-                leftover: list[CoordPreset] = []
-                for p in remaining[1:]:
-                    if _arrays_close(np.asarray(p.x_mm, dtype=float), px) \
-                       and _arrays_close(np.asarray(p.y_mm, dtype=float), py):
-                        grp.append(p)
-                    else:
-                        leftover.append(p)
-                groups.append(grp)
-                remaining = leftover
-
-        for grp in groups:
-            grp.sort(key=lambda p: p.last_used, reverse=True)
-        return groups
-
-
-def _coord_hash_key(
-    preset: CoordPreset,
-    tol: float = COORD_TOLERANCE_MM,
-) -> tuple:
-    """좌표 첫·중간·끝 3점의 tolerance 단위 양자화 튜플.
-
-    이 값이 같은 프리셋끼리만 `np.allclose` 정밀 비교. tolerance 경계에서는
-    같은 좌표가 다른 버킷에 들어갈 수 있으나 (드묾) — 병합이 누락될 뿐
-    "다른 좌표를 같게 판정"하는 오류는 없음.
-    """
-    x = preset.x_mm
-    y = preset.y_mm
-    n = len(x)
-    if n == 0 or len(y) != n:
-        return (n,)
-    q = 1.0 / tol
-    idxs = (0, n // 2, n - 1)
-    parts: list = [n]
-    for i in idxs:
-        parts.append(int(round(float(x[i]) * q)))
-        parts.append(int(round(float(y[i]) * q)))
-    return tuple(parts)

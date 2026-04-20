@@ -2,8 +2,8 @@
 좌표 프리셋 불러오기 다이얼로그.
 
 - 필터: 현재 VALUE PARAMETER의 DATA 개수(`n_points`)가 일치하는 프리셋만
-- 병합 표시: 좌표 배열(tolerance 내)이 같은 프리셋들은 대표 1개 + "외 N" 표기
-- 정렬: RECIPE 유사도 (완전 일치 → 토큰 공유 → 기타) → `last_used` 최근순
+- 개별 레코드 행 표시 (레시피 그룹 병합 없음)
+- 정렬: RECIPE 유사도 → `last_used` 최근순
 - 더블클릭 / Apply → accept
 """
 from __future__ import annotations
@@ -18,7 +18,7 @@ from core.coord_library import CoordLibrary, CoordPreset, format_dt_display, rec
 
 
 class PresetSelectDialog(QDialog):
-    """n_points 필터 + RECIPE 유사도 정렬 + 좌표 중복 병합 표시."""
+    """n_points 필터 + RECIPE 유사도 정렬. 레코드 개별 행 표시."""
 
     def __init__(
         self,
@@ -33,33 +33,24 @@ class PresetSelectDialog(QDialog):
 
         # n_points 필터
         filtered = library.filter_by_n(current_n)
-        # **레시피 기준** 그룹핑 — 같은 recipe 의 모든 pair 를 1 행으로 표시
-        from collections import defaultdict
-        recipe_groups: dict[str, list[CoordPreset]] = defaultdict(list)
-        for p in filtered:
-            recipe_groups[p.recipe.lower()].append(p)
-        groups = list(recipe_groups.values())
-        # RECIPE 유사도 + 그룹 내 last_used 최신 기준 정렬 (내림차순)
-        groups.sort(
-            key=lambda g: (
-                recipe_similarity(g[0].recipe, current_recipe),
-                max(p.last_used for p in g),
-            ),
+        # RECIPE 유사도 → last_used 최신 순
+        filtered.sort(
+            key=lambda p: (recipe_similarity(p.recipe, current_recipe), p.last_used),
             reverse=True,
         )
-        self._groups: list[list[CoordPreset]] = groups
+        self._presets: list[CoordPreset] = filtered
 
         lay = QVBoxLayout(self)
 
         info = QLabel(
             f"현재 입력: n_points = {current_n}  ·  "
             f"recipe = \"{current_recipe or '-'}\""
-            f"   →   {len(groups)}개 레시피 후보"
+            f"   →   {len(filtered)}개 레코드 후보"
         )
         info.setStyleSheet("color: #495057; padding: 4px 0;")
         lay.addWidget(info)
 
-        self._table = QTableWidget(len(groups), 5)
+        self._table = QTableWidget(len(filtered), 5)
         self._table.setHorizontalHeaderLabels(
             ["RECIPE", "X / Y", "유사도", "Point", "마지막 사용"],
         )
@@ -73,37 +64,22 @@ class PresetSelectDialog(QDialog):
         hdr.setStretchLastSection(True)
         self._table.doubleClicked.connect(self.accept)
 
-        from core.auto_select import _has_group_suffix
-        def pick_primary(pairs: list[CoordPreset]) -> CoordPreset:
-            """그룹 내 대표 — non-suffix 우선, 같으면 last_used 최신."""
-            return max(
-                pairs,
-                key=lambda p: (0 if not _has_group_suffix(p.x_name) else -1, p.last_used),
-            )
-
-        for i, grp in enumerate(groups):
-            rep = pick_primary(grp)
-            extra = len(grp) - 1
-            xy_text = f"{rep.x_name} / {rep.y_name}"
-            if extra > 0:
-                xy_text += f"   외 {extra}개"
-            sim = recipe_similarity(rep.recipe, current_recipe)
-            sim_text = self._format_similarity(sim, rep.recipe, current_recipe)
-            latest_used = max(p.last_used for p in grp)
-
+        for i, p in enumerate(filtered):
+            sim = recipe_similarity(p.recipe, current_recipe)
+            sim_text = self._format_similarity(sim, p.recipe, current_recipe)
             for col, text in enumerate([
-                rep.recipe,
-                xy_text,
+                p.recipe,
+                f"{p.x_name} / {p.y_name}",
                 sim_text,
-                str(rep.n_points),
-                format_dt_display(latest_used),
+                str(p.n_points),
+                format_dt_display(p.last_used),
             ]):
                 item = QTableWidgetItem(text)
                 if col in (2, 3):
                     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self._table.setItem(i, col, item)
 
-        if groups:
+        if filtered:
             self._table.selectRow(0)
 
         lay.addWidget(self._table, stretch=1)
@@ -130,13 +106,6 @@ class PresetSelectDialog(QDialog):
 
     def selected_preset(self) -> CoordPreset | None:
         row = self._table.currentRow()
-        if row < 0 or row >= len(self._groups):
+        if row < 0 or row >= len(self._presets):
             return None
-        from core.auto_select import _has_group_suffix
-        grp = self._groups[row]
-        # primary = non-suffix 우선 + last_used 최신 — 이걸 override 로 반환
-        # (main_window 의 _apply_preset_indicator 가 recipe 의 모든 pair 를 콤보에 표시)
-        return max(
-            grp,
-            key=lambda p: (0 if not _has_group_suffix(p.x_name) else -1, p.last_used),
-        )
+        return self._presets[row]
