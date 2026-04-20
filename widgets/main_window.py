@@ -730,18 +730,15 @@ class MainWindow(QMainWindow):
     def _enforce_library_limits(self, library: CoordLibrary) -> None:
         """Settings의 coord_library.max_count / max_days로 purge + save.
 
-        - max_count 초과: last_used 오래된 순으로 삭제
-        - max_days 초과: last_used 기준 오래 방치된 레코드 삭제
-        - 각 값 0 이면 해당 제한 무시
-        - 둘 다 0이어도 save는 수행 (add_or_touch 결과 반영)
+        purge 발생 여부와 무관하게 **항상 save** — `add_or_touch(save=False)` 로
+        메모리에만 추가된 신규 레코드를 파일에 반영해야 함.
         """
         cl = (load_settings().get("coord_library") or {})
         mc = int(cl.get("max_count", 0) or 0)
         md = int(cl.get("max_days", 0) or 0)
         if mc > 0 or md > 0:
-            library.enforce_limits(max_count=mc, max_days=md, save=True)
-        else:
-            library.save()
+            library.enforce_limits(max_count=mc, max_days=md, save=False)
+        library.save()
 
     def _apply_z_scale_mode(self, displays: list[WaferDisplay], view_mode: str) -> None:
         """cb_zscale을 ground truth로 모든 display의 z_range 세팅.
