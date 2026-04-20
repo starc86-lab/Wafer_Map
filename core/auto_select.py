@@ -159,8 +159,12 @@ def select_value_by_variability(
         except Exception:
             continue
         valid = vals[~np.isnan(vals)] if vals.size else vals
-        # 단일값 / 심한 누락 파라 (예: T1_AVG) 도 콤보에서 완전 배제
-        if valid.size < min_valid:
+        # 절대 하한 — n=1 단일값(T1_AVG 등)은 어떤 그룹이든 맵 시각화 불가
+        if valid.size < 2:
+            continue
+        # 상대 threshold 는 주 그룹 (non-suffix) 에만 적용 —
+        # 보조(suffix) 그룹은 주보다 측정점 적어도 그대로 유지 (사용자 선택 허용)
+        if not _has_group_suffix(name) and valid.size < min_valid:
             continue
         # 정수값만 → die index 류 (DIE_ROW, DIE_COL) 자동 제외
         if _is_integer_valued(valid):
@@ -184,17 +188,22 @@ def select_value_by_variability(
     if not qualified:
         return None, []
 
-    # Non-suffix 우선 — 보조 파라 (T1_A 등) 는 non-suffix 후보 있으면 제외
-    non_suffix = [q for q in qualified if not _has_group_suffix(q[0])]
-    if non_suffix:
-        qualified = non_suffix
+    # 그룹 분리: non-suffix (주) vs suffix (보조)
+    main_cand = [q for q in qualified if not _has_group_suffix(q[0])]
+    sub_cand = [q for q in qualified if _has_group_suffix(q[0])]
 
-    # 1순위: metric 최대 → tie-break (pattern, 알파벳)
-    qualified.sort(key=lambda t: (-t[1], -t[2], t[0]))
-    selected = qualified[0][0]
-    # 콤보: 선택된 1 순위 먼저, 나머지 후보는 **알파벳 순** (사용자가 찾기 쉽게)
-    rest_alpha = sorted(t[0] for t in qualified[1:])
-    ordered = [selected] + rest_alpha
+    # 자동 선택 대상: 주 그룹 우선, 없으면 보조에서
+    primary = main_cand if main_cand else sub_cand
+    primary.sort(key=lambda t: (-t[1], -t[2], t[0]))
+    selected = primary[0][0]
+
+    # 콤보:
+    #   1) 선택된 것
+    #   2) 나머지 주 그룹 (알파벳)
+    #   3) 보조 그룹 (알파벳) — n 작아도 유지 (사용자가 분석하려 할 수 있음)
+    rem_main = sorted(t[0] for t in main_cand if t[0] != selected)
+    sub_alpha = sorted(t[0] for t in sub_cand)
+    ordered = [selected] + rem_main + sub_alpha
     return selected, ordered
 
 
@@ -269,25 +278,34 @@ def select_xy_pairs(
     if not pairs:
         return None, None, [], []
 
-    # 2-b. non-suffix 우선 — `X`, `X_1000` 처럼 그룹 접미사 없는 pair 가 있으면
-    # `X_A`, `X_1000_A` 같은 보조 pair 는 제외 (보조 파라 용)
-    non_suffix_pairs = [p for p in pairs if not _has_group_suffix(p[0])]
-    if non_suffix_pairs:
-        pairs = non_suffix_pairs
+    # 2-b. 그룹 분리: non-suffix (주) vs suffix (보조)
+    main_pairs = [p for p in pairs if not _has_group_suffix(p[0])]
+    sub_pairs = [p for p in pairs if _has_group_suffix(p[0])]
 
-    # 3. 최대 pair_n → threshold 로 필터
-    max_n = max(p[2] for p in pairs)
-    threshold = max(int(max_n * n_threshold_ratio), 2)
-    pairs = [p for p in pairs if p[2] >= threshold]
+    # 3. 주 그룹에만 n threshold (80%) 적용. 보조 그룹은 n 작아도 모두 유지 (사용자가
+    # 수동 선택 가능해야 — 보조 그룹은 주보다 측정점 적은 경우 흔함)
+    if main_pairs:
+        max_n = max(p[2] for p in main_pairs)
+        threshold = max(int(max_n * n_threshold_ratio), 2)
+        main_pairs = [p for p in main_pairs if p[2] >= threshold]
 
-    # 4. 정렬: pattern rank 낮을수록 우선 → pair_n 큰 순 → 알파벳
-    pairs.sort(key=lambda p: (p[3], -p[2], p[0]))
-    best_x, best_y, _, _ = pairs[0]
+    # 자동 선택 대상: 주 그룹 우선, 없으면 보조에서
+    primary = main_pairs if main_pairs else sub_pairs
+    if not primary:
+        return None, None, [], []
+    primary.sort(key=lambda p: (p[3], -p[2], p[0]))
+    best_x, best_y, _, _ = primary[0]
 
-    # 5. 콤보 리스트 — best 먼저 + 나머지 알파벳
-    other_x = sorted(p[0] for p in pairs[1:])
-    other_y = sorted(p[1] for p in pairs[1:])
-    return best_x, best_y, [best_x] + other_x, [best_y] + other_y
+    # 콤보 구성:
+    #   1) 선택된 pair
+    #   2) 나머지 주 그룹 (알파벳)
+    #   3) 보조 그룹 (알파벳)
+    remaining_main = sorted((p for p in main_pairs if p[0] != best_x), key=lambda p: p[0])
+    sub_sorted = sorted(sub_pairs, key=lambda p: p[0])
+    ordered_pairs = [primary[0]] + remaining_main + sub_sorted
+    x_ordered = [p[0] for p in ordered_pairs]
+    y_ordered = [p[1] for p in ordered_pairs]
+    return best_x, best_y, x_ordered, y_ordered
 
 
 def select_y_with_suffix(
