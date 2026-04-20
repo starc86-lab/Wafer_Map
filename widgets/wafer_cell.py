@@ -811,20 +811,25 @@ class WaferCell(QFrame):
             base_factor = target_height / z_range
             factor = base_factor * float(z_exag)
 
-        z_disp = (ZG - vmin) * factor
-        z_disp = np.where(inside, z_disp, 0.0)
+        # cut 영역(NaN) + 웨이퍼 밖 은 Z=0 으로 처리 → 경계에서 서피스가
+        # 자연스럽게 떨어지며 자동 "벽" 생성 (cut=0 과 동일 기둥 효과)
+        nan_mask = np.isnan(ZG)
+        valid_cell = inside & ~nan_mask
 
-        # 컬러: 정점마다 RGBA (공통 컬러맵)
+        z_disp = (ZG - vmin) * factor
+        z_disp = np.where(valid_cell, z_disp, 0.0)
+
+        # 컬러: 정점마다 RGBA (공통 컬러맵). 무효 셀 (wafer 밖 OR cut) 은 투명
         cmap_name = common.get("colormap", "Turbo")
         cmap = resolve_colormap(cmap_name)
         lut = cmap.getLookupTable(0.0, 1.0, 256)  # (256, 4) ubyte
         norm = (ZG - vmin) / z_range
-        norm = np.where(inside, norm, 0.0)
+        norm = np.where(valid_cell, norm, 0.0)
         idx_arr = np.clip((norm * 255).astype(int), 0, 255)
         colors = np.empty(ZG.shape + (4,), dtype=np.float32)
         colors[..., :3] = lut[idx_arr, :3] / 255.0
         colors[..., 3] = 1.0
-        colors[~inside] = (1.0, 1.0, 1.0, 0.0)
+        colors[~valid_cell] = (1.0, 1.0, 1.0, 0.0)
 
         gview = self._gl_3d
 
@@ -899,31 +904,9 @@ class WaferCell(QFrame):
         elif self._gl_boundary is not None:
             self._gl_boundary.setVisible(False)
 
-        # ── edge_cut 측벽 — 서피스 외각을 Z=0 까지 연결 ──
-        edge_cut_val = float(common.get("edge_cut_mm", 0.0))
-        if edge_cut_val > 0:
-            cut_r = WAFER_RADIUS_MM - edge_cut_val
-            # wall key — Z sig 가 같으면 재사용 (컬러맵 변경도 반영)
-            wall_key = (cut_r, self._surface_z_sig, common.get("colormap", "Turbo"))
-            if self._gl_wall is None or self._wall_key != wall_key:
-                z_disp_max = float(z_range * factor)
-                verts, faces, fcols = _build_cut_wall_mesh(
-                    cut_r, XG, YG, z_disp, cmap, z_disp_max,
-                )
-                if verts is not None:
-                    md = gl.MeshData(vertexes=verts, faces=faces, faceColors=fcols)
-                    if self._gl_wall is None:
-                        self._gl_wall = gl.GLMeshItem(
-                            meshdata=md, smooth=False, shader="shaded",
-                            glOptions="opaque", drawEdges=False,
-                        )
-                        gview.addItem(self._gl_wall)
-                    else:
-                        self._gl_wall.setMeshData(meshdata=md)
-                    self._wall_key = wall_key
-            if self._gl_wall is not None:
-                self._gl_wall.setVisible(True)
-        elif self._gl_wall is not None:
+        # edge_cut 측벽은 별도 메시 필요 없음 — cut 영역을 z=0 으로 설정해둬서
+        # 서피스 메시가 경계에서 자동으로 떨어지며 벽 생성 (cut=0 과 동일 메커니즘)
+        if self._gl_wall is not None:
             self._gl_wall.setVisible(False)
 
         # colorbar 갱신 (3D용 범위 = vmin~vmax. display.z_range가 있으면 그걸 사용)
