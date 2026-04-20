@@ -27,6 +27,36 @@ def _is_coord_name(name: str) -> bool:
     return bool(_COORD_NAME_RE.match(name.strip()))
 
 
+def _has_group_suffix(name: str) -> bool:
+    """이름이 `_A`, `_B` 식 **1~2자 알파벳 그룹 suffix** 로 끝나는지 판정.
+
+    예:
+      - `T1`           → False
+      - `T1_AVG`       → False (AVG 는 3자, 의미 suffix 로 보기엔 너무 김)
+      - `T1_A`         → True  (그룹 A)
+      - `T3_B`         → True
+      - `X_1000`       → False (1000 은 숫자)
+      - `X_1000_A`     → True  (마지막 토큰 A)
+      - `REV_NIT`      → False (NIT 3자, 그룹 suffix 아님)
+    """
+    if "_" not in name:
+        return False
+    last = name.rsplit("_", 1)[-1]
+    return 1 <= len(last) <= 2 and last.isalpha()
+
+
+def _is_integer_valued(values: np.ndarray, tol: float = 1e-3) -> bool:
+    """값이 (잡음 내) 정수로만 구성됐는지 — die index(DIE_ROW/DIE_COL) 감지용.
+
+    측정치는 부동소수(예: T1=1000.5) 라 `values - round(values)` 의 std 가 유의미.
+    die 좌표는 정수 {-5,-4,...,5} 라 residual std ≈ 0.
+    """
+    if values.size == 0:
+        return False
+    resid = values - np.round(values)
+    return float(np.std(resid)) < tol
+
+
 def _matches(name: str, pattern: str) -> bool:
     """fnmatch 스타일 와일드카드 매칭 (대소문자 무관)."""
     return fnmatch.fnmatchcase(name.casefold(), pattern.casefold())
@@ -132,6 +162,9 @@ def select_value_by_variability(
         # 단일값 / 심한 누락 파라 (예: T1_AVG) 도 콤보에서 완전 배제
         if valid.size < min_valid:
             continue
+        # 정수값만 → die index 류 (DIE_ROW, DIE_COL) 자동 제외
+        if _is_integer_valued(valid):
+            continue
         avg = float(valid.mean())
         if valid.size > 1:
             sig3 = 3.0 * float(valid.std(ddof=1))
@@ -150,6 +183,11 @@ def select_value_by_variability(
 
     if not qualified:
         return None, []
+
+    # Non-suffix 우선 — 보조 파라 (T1_A 등) 는 non-suffix 후보 있으면 제외
+    non_suffix = [q for q in qualified if not _has_group_suffix(q[0])]
+    if non_suffix:
+        qualified = non_suffix
 
     # 1순위: metric 최대 → tie-break (pattern, 알파벳)
     qualified.sort(key=lambda t: (-t[1], -t[2], t[0]))
@@ -230,6 +268,12 @@ def select_xy_pairs(
 
     if not pairs:
         return None, None, [], []
+
+    # 2-b. non-suffix 우선 — `X`, `X_1000` 처럼 그룹 접미사 없는 pair 가 있으면
+    # `X_A`, `X_1000_A` 같은 보조 pair 는 제외 (보조 파라 용)
+    non_suffix_pairs = [p for p in pairs if not _has_group_suffix(p[0])]
+    if non_suffix_pairs:
+        pairs = non_suffix_pairs
 
     # 3. 최대 pair_n → threshold 로 필터
     max_n = max(p[2] for p in pairs)
