@@ -24,6 +24,7 @@ from core.auto_select import select_value, select_y_with_suffix
 from core.coord_library import CoordLibrary, CoordPreset
 from core.coords import normalize_to_mm
 from core.delta import compute_delta
+from core.interp import is_collinear
 from core.settings import load_settings
 from main import ParseResult
 
@@ -477,6 +478,8 @@ class MainWindow(QMainWindow):
                     pass
 
             title = f"{w.lot_id}.{_pad_slot(w.slot_id)} – {v}"
+            if is_collinear(x_mm, y_mm):
+                title += " (Radial)"
             if from_preset or from_lib:
                 title += "  📁"
             displays.append(WaferDisplay(
@@ -524,14 +527,16 @@ class MainWindow(QMainWindow):
             self._result_panel.clear()
             return
 
-        displays = [
-            WaferDisplay(
-                title=f"{d.lot_a}.{_pad_slot(d.slot_a)} – Δ {v}",
+        displays = []
+        for d in dr.deltas:
+            title = f"{d.lot_a}.{_pad_slot(d.slot_a)} – Δ {v}"
+            if is_collinear(d.x_mm, d.y_mm):
+                title += " (Radial)"
+            displays.append(WaferDisplay(
+                title=title,
                 meta_label=f"{d.lot_a} / {_pad_slot(d.slot_a)}  ←  {d.lot_b} / {_pad_slot(d.slot_b)}",
                 x_mm=d.x_mm, y_mm=d.y_mm, values=d.delta_v,
-            )
-            for d in dr.deltas
-        ]
+            ))
         summary = (
             f"매칭 {dr.matched} / A {dr.count_a} vs B {dr.count_b}  "
             f"·  DELTA (A − B)"

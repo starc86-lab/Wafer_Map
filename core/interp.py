@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import numpy as np
-from scipy.interpolate import RBFInterpolator
+from scipy.interpolate import RBFInterpolator, interp1d
 
 
 # method 이름 → scipy RBFInterpolator kernel 이름
@@ -20,6 +20,65 @@ _RBF_KERNELS = {
     "RBF-Gaussian":    "gaussian",
     "RBF-Quintic":     "quintic",
 }
+
+
+def is_collinear(x, y, *, rel_tol: float = 0.02) -> bool:
+    """측정점이 사실상 1 개 직선 위에 놓여있는지 PCA(SVD) 로 판정.
+
+    `rel_tol` = s[1]/s[0] 임계. 2% 이하면 collinear (직선 방향 변동 대비 수직 방향
+    변동 무시 가능). 수평/수직/대각선/임의 각도 무관 동일 판정.
+    """
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    if x.size < 3:
+        return False
+    pts = np.column_stack([x, y])
+    pts_c = pts - pts.mean(axis=0)
+    try:
+        s = np.linalg.svd(pts_c, compute_uv=False)
+    except Exception:
+        return False
+    if s[0] < 1e-10:
+        return False
+    return float(s[1] / s[0]) < rel_tol
+
+
+def interpolate_radial(x, y, v, XG, YG) -> np.ndarray:
+    """1D 라인 스캔 → 웨이퍼 중심 기준 radial symmetric 2D surface.
+
+    가정: 측정 라인이 **웨이퍼 중심(원점)을 지남**. -150~+150 양방향 스캔이면
+    같은 |r| 값에 두 개 측정이 존재 → 평균 사용.
+
+    알고리즘:
+      1. r_i = √(x_i² + y_i²) — 방향 무관, 반경만
+      2. 1μm 단위 양자화 후 같은 r 값끼리 평균 (float 노이즈 + ± 대칭 통합)
+      3. 4 점 이상이면 cubic, 이하면 linear 1D 보간 → v(r)
+      4. 격자 R = √(X² + Y²) → v(R) 매핑
+      5. 안쪽 (R < r_min): 센터값으로 채움 (스캔 시작이 센터 바로 바깥일 때 hole 방지)
+      6. 바깥 (R > r_max): NaN (마스크가 원 밖과 합쳐 자연스레 처리)
+    """
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    v = np.asarray(v, dtype=float)
+    r = np.sqrt(x * x + y * y)
+    r_round = np.round(r, 3)  # 1μm 양자화
+    r_u, inv = np.unique(r_round, return_inverse=True)
+    v_u = np.zeros_like(r_u, dtype=float)
+    cnt = np.zeros_like(r_u, dtype=float)
+    np.add.at(v_u, inv, v)
+    np.add.at(cnt, inv, 1)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        v_u = v_u / cnt
+    if r_u.size < 2:
+        return np.full(XG.shape, float(v[0]), dtype=float)
+    kind = "cubic" if r_u.size >= 4 else "linear"
+    f = interp1d(
+        r_u, v_u, kind=kind,
+        bounds_error=False,
+        fill_value=(float(v_u[0]), np.nan),
+    )
+    RG = np.sqrt(XG.astype(float) ** 2 + YG.astype(float) ** 2)
+    return f(RG).astype(float)
 
 
 def interpolate_wafer(
@@ -43,6 +102,16 @@ def interpolate_wafer(
     if x.size < 3 or v.size < 3:
         return np.full(XG.shape, np.nan, dtype=float)
 
+    # 1D 라인 스캔 자동 감지 → radial symmetric 경로
+    # (RBF thin_plate 는 collinear 데이터에서 polynomial augmentation 랭크 부족으로 실패)
+    if is_collinear(x, y):
+        import sys
+        sys.stderr.write(
+            f"[interp] Radial 모드 (1D 라인 스캔 감지, n_pts={x.size})\n"
+        )
+        sys.stderr.flush()
+        return interpolate_radial(x, y, v, XG, YG)
+
     # RBF 계열 — method 이름에 따라 kernel 선택 (unknown 이름은 thin_plate로 fallback)
     kernel = _RBF_KERNELS.get(method, "thin_plate_spline")
     try:
@@ -57,18 +126,6 @@ def interpolate_wafer(
             d, _ = tree.query(pts, k=min(2, len(pts)))
             median_dist = float(np.median(d[:, 1])) if d.ndim > 1 else 10.0
             kw["epsilon"] = 1.0 / max(median_dist, 1e-3)
-        # 진단용 — 모든 호출에서 좌표 분산 로그 (성공/실패 비교용)
-        import sys
-        _y_std = float(np.std(y)) if y.size else 0.0
-        _x_std = float(np.std(x)) if x.size else 0.0
-        _v_rng = (float(np.min(v)), float(np.max(v))) if v.size else (0.0, 0.0)
-        sys.stderr.write(
-            f"[interp] 시도: kernel={kernel}  n_pts={x.size}  "
-            f"x_std={_x_std:.6g}  y_std={_y_std:.6g}  "
-            f"v_range={_v_rng}\n"
-        )
-        sys.stderr.flush()
-
         rbf = RBFInterpolator(pts, v, **kw)
         grid_pts = np.column_stack([XG.ravel(), YG.ravel()])
         return rbf(grid_pts).reshape(XG.shape)
