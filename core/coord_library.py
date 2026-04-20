@@ -149,11 +149,33 @@ class CoordLibrary:
                 return p
         return None
 
-    def find_by_recipe(self, recipe: str) -> list[CoordPreset]:
-        """RECIPE 일치 레코드들 — `last_used` 내림차순 (최신 우선)."""
-        hits = [p for p in self.presets if p.recipe == recipe]
-        hits.sort(key=lambda p: p.last_used, reverse=True)
-        return hits
+    def find_by_recipe(self, recipe: str, n_points: int | None = None) -> list[CoordPreset]:
+        """RECIPE 매칭 — 2단계 폴백.
+
+        1단계: 대소문자 무시 완전일치 → `last_used` 내림차순
+        2단계 (1단계 결과 없고 `n_points` 주어졌을 때):
+          recipe_similarity >= 3 AND p.n_points == n_points →
+          (유사도, last_used) 내림차순
+        """
+        if not recipe:
+            return []
+        rec_lower = recipe.lower()
+        exact = [p for p in self.presets if p.recipe.lower() == rec_lower]
+        if exact:
+            exact.sort(key=lambda p: p.last_used, reverse=True)
+            return exact
+        if n_points is None:
+            return []
+        MIN_SHARED_TOKENS = 3
+        partial: list[tuple[CoordPreset, int]] = []
+        for p in self.presets:
+            if p.n_points != n_points:
+                continue
+            sim = recipe_similarity(p.recipe, recipe)
+            if sim >= MIN_SHARED_TOKENS:
+                partial.append((p, sim))
+        partial.sort(key=lambda pair: (pair[1], pair[0].last_used), reverse=True)
+        return [p for p, _ in partial]
 
     def filter_by_n(self, n: int) -> list[CoordPreset]:
         """`n_points == n` 인 프리셋 — `last_used` 내림차순."""

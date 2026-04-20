@@ -288,6 +288,13 @@ class MainWindow(QMainWindow):
         self.btn_visualize.setEnabled(any_input and bool(available_ns))
         self.btn_load_preset.setEnabled(any_input)
 
+        # 자동 프리셋 감지 — 입력에 X/Y 없고 RECIPE 로 라이브러리 매칭 되면 자동 적용.
+        # 사용자 explicit override 가 없을 때만.
+        if self._preset_override is None and any_input:
+            self._try_auto_preset(value_sel, x_sel, y_sel, available_ns)
+        # 프리셋 active 상태면 콤보 상단에 X_Preset / Y_Preset 합성 아이템 삽입
+        self._apply_preset_indicator()
+
     def _build_selection_context(self) -> tuple[dict[str, int], int]:
         """현재 양측 결과로부터 (available_ns, data_cols_n) 계산.
 
@@ -397,12 +404,67 @@ class MainWindow(QMainWindow):
         library.touch(preset)
         self._preset_override = preset
         self.btn_load_preset.setText(f"프리셋: {preset.name}")
+        self._apply_preset_indicator()
 
     def _reset_preset_override(self) -> None:
         if self._preset_override is None:
             return
         self._preset_override = None
         self.btn_load_preset.setText(PRESET_BUTTON_DEFAULT_TEXT)
+        self._apply_preset_indicator()
+
+    def _try_auto_preset(self, value_sel, x_sel, y_sel, available_ns):
+        """입력에 X/Y 좌표 PARAMETER 가 없으면 RECIPE 로 라이브러리 자동 매칭.
+
+        기준: auto_select 가 고른 x_sel/y_sel 이 value_sel 과 같으면 (= 좌표로 쓸
+        유효한 X/Y 가 없음) 또는 x_sel/y_sel 이 None 이면 — 자동 적용 대상.
+        첫 웨이퍼의 RECIPE 로 library.find_by_recipe() 하고 결과 있으면 override 로.
+        """
+        # 유효한 X/Y 가 있는지 검사
+        has_coord = (
+            x_sel is not None and y_sel is not None
+            and x_sel != value_sel and y_sel != value_sel and x_sel != y_sel
+        )
+        if has_coord:
+            return
+        # 첫 웨이퍼 RECIPE 로 조회
+        first_result = self._result_a or self._result_b
+        if first_result is None or not first_result.wafers:
+            return
+        first_wafer = next(iter(first_result.wafers.values()))
+        if not first_wafer.recipe or not value_sel:
+            return
+        if value_sel not in first_wafer.parameters:
+            return
+        n = first_wafer.parameters[value_sel].n
+        library = CoordLibrary()
+        hits = library.find_by_recipe(first_wafer.recipe, n_points=int(n))
+        if hits:
+            preset = hits[0]
+            self._preset_override = preset
+            self.btn_load_preset.setText(f"프리셋: {preset.name}")
+
+    def _apply_preset_indicator(self):
+        """preset_override 활성 시 X/Y 콤보에 X_Preset / Y_Preset 합성 아이템
+        상단 삽입 + 굵은 글씨·강조색. 비활성 시 합성 아이템 제거."""
+        from PySide6.QtGui import QBrush, QColor, QFont
+        active = self._preset_override is not None
+        for combo, label in [(self.cb_x, "X_Preset"), (self.cb_y, "Y_Preset")]:
+            combo.blockSignals(True)
+            try:
+                # 기존 합성 아이템 제거 (index 0 에 있으면)
+                if combo.count() > 0 and combo.itemText(0) in ("X_Preset", "Y_Preset"):
+                    combo.removeItem(0)
+                if active:
+                    combo.insertItem(0, label)
+                    f = QFont(combo.font())
+                    f.setBold(True)
+                    combo.setItemData(0, f, Qt.ItemDataRole.FontRole)
+                    combo.setItemData(0, QBrush(QColor("#4361ee")),
+                                      Qt.ItemDataRole.ForegroundRole)
+                    combo.setCurrentIndex(0)
+            finally:
+                combo.blockSignals(False)
 
     def _on_visualize(self) -> None:
         v = self.cb_value.currentText()
@@ -454,7 +516,7 @@ class MainWindow(QMainWindow):
                     x_mm, y_mm = xr, yr
 
             if x_mm is None and w.recipe:
-                hits = library.find_by_recipe(w.recipe)
+                hits = library.find_by_recipe(w.recipe, n_points=int(len(val)))
                 if hits:
                     preset = hits[0]  # last_used 최신
                     library.touch(preset, save=False)
@@ -480,8 +542,6 @@ class MainWindow(QMainWindow):
             title = f"{w.lot_id}.{_pad_slot(w.slot_id)} – {v}"
             if is_collinear(x_mm, y_mm):
                 title += " (Radial)"
-            if from_preset or from_lib:
-                title += "  📁"
             displays.append(WaferDisplay(
                 title=title,
                 meta_label=f"{w.lot_id} / {_pad_slot(w.slot_id)}",
