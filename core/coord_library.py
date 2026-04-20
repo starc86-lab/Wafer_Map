@@ -54,7 +54,6 @@ def recipe_similarity(a: str, b: str) -> int:
 
 @dataclass
 class CoordPreset:
-    name: str
     recipe: str
     n_points: int
     x_mm: list[float]
@@ -64,20 +63,24 @@ class CoordPreset:
     x_name: str = "X"   # 원본 X PARAMETER 이름 (예: "X", "X_1000", "X_1000_A")
     y_name: str = "Y"   # 원본 Y PARAMETER 이름
 
+    # recipe + pair 로 자동 표시 이름 (UI 전용, 저장 X)
+    @property
+    def display_name(self) -> str:
+        return f"{self.recipe} ({self.x_name}/{self.y_name})"
+
     def to_dict(self) -> dict:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, d: dict) -> CoordPreset:
         return cls(
-            name=str(d.get("name", "")),
             recipe=str(d.get("recipe", "")),
             n_points=int(d.get("n_points", 0)),
             x_mm=list(d.get("x_mm", [])),
             y_mm=list(d.get("y_mm", [])),
             created_at=str(d.get("created_at", "")),
             last_used=str(d.get("last_used", "")),
-            x_name=str(d.get("x_name", "X")),  # 하위 호환 — 기본 "X"/"Y"
+            x_name=str(d.get("x_name", "X")),
             y_name=str(d.get("y_name", "Y")),
         )
 
@@ -244,18 +247,8 @@ class CoordLibrary:
                 self.save()
             return existing, False
 
-        # 신규 추가 — 이름은 설명적으로 구성
-        base_name = f"{recipe}_{x_name}-{y_name}_{len(x)}P" if recipe else f"{x_name}-{y_name}_{len(x)}P"
-        existing_names = {p.name for p in self.presets}
-        name = base_name
-        if name in existing_names:
-            i = 2
-            while f"{base_name} ({i})" in existing_names:
-                i += 1
-            name = f"{base_name} ({i})"
-
+        # 신규 추가 — 페어 단위 overwrite 라 이름 자동생성 불필요
         preset = CoordPreset(
-            name=name,
             recipe=recipe,
             n_points=len(x),
             x_name=x_name,
@@ -284,11 +277,6 @@ class CoordLibrary:
         if save:
             self.save()
         return True
-
-    def rename(self, preset: CoordPreset, new_name: str, *, save: bool = True) -> None:
-        preset.name = new_name
-        if save:
-            self.save()
 
     def set_recipe(self, preset: CoordPreset, new_recipe: str, *, save: bool = True) -> None:
         preset.recipe = new_recipe

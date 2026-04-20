@@ -57,7 +57,7 @@ class PresetSelectDialog(QDialog):
 
         self._table = QTableWidget(len(groups), 5)
         self._table.setHorizontalHeaderLabels(
-            ["이름", "RECIPE", "유사도", "Point", "마지막 사용"],
+            ["RECIPE", "X / Y", "유사도", "Point", "마지막 사용"],
         )
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -71,13 +71,14 @@ class PresetSelectDialog(QDialog):
 
         for i, grp in enumerate(groups):
             rep = grp[0]
-            name_text = rep.name + (f"   외 {len(grp) - 1}" if len(grp) > 1 else "")
+            recipe_text = rep.recipe + (f"   외 {len(grp) - 1}" if len(grp) > 1 else "")
+            xy_text = f"{rep.x_name} / {rep.y_name}"
             sim = recipe_similarity(rep.recipe, current_recipe)
             sim_text = self._format_similarity(sim, rep.recipe, current_recipe)
 
             for col, text in enumerate([
-                name_text,
-                rep.recipe,
+                recipe_text,
+                xy_text,
                 sim_text,
                 str(rep.n_points),
                 format_dt_display(rep.last_used),

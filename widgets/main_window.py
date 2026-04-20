@@ -374,7 +374,7 @@ class MainWindow(QMainWindow):
             if candidates:
                 candidates.sort(key=lambda p: p.last_used, reverse=True)
                 self._preset_override = candidates[0]
-                self.btn_load_preset.setText(f"프리셋: {candidates[0].name}")
+                self.btn_load_preset.setText(f"프리셋: {candidates[0].display_name}")
                 self._apply_preset_indicator()  # cb_y 도 매칭 pair 의 y_name 으로 리셋
                 self._refilter_value_combo()
                 return
@@ -444,7 +444,7 @@ class MainWindow(QMainWindow):
             return
         library.touch(preset)
         self._preset_override = preset
-        self.btn_load_preset.setText(f"프리셋: {preset.name}")
+        self.btn_load_preset.setText(f"프리셋: {preset.display_name}")
         self._apply_preset_indicator()
 
     def _reset_preset_override(self) -> None:
@@ -483,7 +483,7 @@ class MainWindow(QMainWindow):
         if hits:
             preset = hits[0]
             self._preset_override = preset
-            self.btn_load_preset.setText(f"프리셋: {preset.name}")
+            self.btn_load_preset.setText(f"프리셋: {preset.display_name}")
 
     def _apply_preset_indicator(self):
         """preset 활성 시 X/Y 콤보에 해당 recipe 의 모든 pair (원본 이름) 표시.

@@ -570,7 +570,7 @@ class CoordLibraryTab(QWidget):
 
         self._table = QTableWidget(0, 5)
         self._table.setHorizontalHeaderLabels(
-            ["이름", "RECIPE", "Point", "최초 저장", "마지막 사용"],
+            ["RECIPE", "X / Y", "Point", "최초 저장", "마지막 사용"],
         )
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -588,17 +588,15 @@ class CoordLibraryTab(QWidget):
 
         btn_row = QHBoxLayout()
         self.btn_add = QPushButton("수동 추가")
-        self.btn_rename = QPushButton("이름 변경")
         self.btn_recipe = QPushButton("RECIPE 변경")
         self.btn_delete = QPushButton("삭제")
         self.btn_delete.setProperty("class", "danger")
-        for b in (self.btn_add, self.btn_rename, self.btn_recipe, self.btn_delete):
+        for b in (self.btn_add, self.btn_recipe, self.btn_delete):
             btn_row.addWidget(b)
         btn_row.addStretch(1)
         lay.addLayout(btn_row)
 
         self.btn_add.clicked.connect(self._on_add)
-        self.btn_rename.clicked.connect(self._on_rename)
         self.btn_recipe.clicked.connect(self._on_recipe)
         self.btn_delete.clicked.connect(self._on_delete)
 
@@ -632,18 +630,18 @@ class CoordLibraryTab(QWidget):
         try:
             self._table.setRowCount(len(presets))
             for r, p in enumerate(presets):
-                # 이름
-                name_item = QTableWidgetItem(p.name)
-                name_item.setData(Qt.ItemDataRole.UserRole, p)
-                self._table.setItem(r, 0, name_item)
-                # RECIPE
-                self._table.setItem(r, 1, QTableWidgetItem(p.recipe))
-                # n — int로 setData하면 숫자 정렬됨
+                # RECIPE — UserRole 에 CoordPreset 참조 저장
+                rec_item = QTableWidgetItem(p.recipe)
+                rec_item.setData(Qt.ItemDataRole.UserRole, p)
+                self._table.setItem(r, 0, rec_item)
+                # X / Y pair
+                self._table.setItem(r, 1, QTableWidgetItem(f"{p.x_name} / {p.y_name}"))
+                # Point — int로 setData하면 숫자 정렬됨
                 n_item = QTableWidgetItem()
                 n_item.setData(Qt.ItemDataRole.DisplayRole, p.n_points)
                 n_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self._table.setItem(r, 2, n_item)
-                # 최초 저장 / 마지막 사용 — 표시만 짧게 (YYYY-MM-DD HH:MM), 저장 ISO는 그대로
+                # 최초 저장 / 마지막 사용
                 self._table.setItem(r, 3, QTableWidgetItem(format_dt_display(p.created_at)))
                 self._table.setItem(r, 4, QTableWidgetItem(format_dt_display(p.last_used)))
         finally:
@@ -712,17 +710,6 @@ class CoordLibraryTab(QWidget):
             QMessageBox.warning(self, "추가 실패", str(e))
             return
         self._refresh_table()
-
-    def _on_rename(self) -> None:
-        sel = self._selected_presets()
-        if len(sel) != 1:
-            QMessageBox.information(self, "이름 변경", "프리셋 한 개를 선택하세요.")
-            return
-        p = sel[0]
-        new_name, ok = QInputDialog.getText(self, "이름 변경", "새 이름:", text=p.name)
-        if ok and new_name.strip():
-            self._library.rename(p, new_name.strip(), save=True)
-            self._refresh_table()
 
     def _on_recipe(self) -> None:
         sel = self._selected_presets()
