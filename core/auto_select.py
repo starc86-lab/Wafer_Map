@@ -287,11 +287,11 @@ def select_xy_pairs(
 
     # 콤보 구성:
     #   1) 선택된 pair
-    #   2) 나머지 주 그룹 (알파벳)
-    #   3) 보조 그룹 (알파벳)
-    remaining_main = sorted((p for p in main_pairs if p[0] != best_x), key=lambda p: p[0])
-    sub_sorted = sorted(sub_pairs, key=lambda p: p[0])
-    ordered_pairs = [primary[0]] + remaining_main + sub_sorted
+    #   2) 나머지 주 그룹 (알파벳) — 선택이 주에서 왔으면 선택 제외
+    #   3) 나머지 보조 그룹 (알파벳) — 선택이 보조에서 왔으면 선택 제외
+    rem_main = sorted((p for p in main_pairs if p[0] != best_x), key=lambda p: p[0])
+    rem_sub = sorted((p for p in sub_pairs if p[0] != best_x), key=lambda p: p[0])
+    ordered_pairs = [primary[0]] + rem_main + rem_sub
     x_ordered = [p[0] for p in ordered_pairs]
     y_ordered = [p[1] for p in ordered_pairs]
     return best_x, best_y, x_ordered, y_ordered
