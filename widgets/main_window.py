@@ -21,7 +21,8 @@ import numpy as np
 
 from core import runtime
 from core.auto_select import (
-    select_value, select_value_by_variability, select_y_with_suffix,
+    select_value, select_value_by_variability, select_xy_pairs,
+    select_y_with_suffix,
 )
 from core.coord_library import CoordLibrary, CoordPreset
 from core.coords import normalize_to_mm
@@ -90,6 +91,14 @@ class MainWindow(QMainWindow):
         self._main_splitter_restored = True
 
     def closeEvent(self, event) -> None:
+        # Settings 창이 열려 있으면 함께 종료 (parent=None 으로 독립 창이라 수동 처리)
+        dlg = getattr(self, "_settings_dialog", None)
+        if dlg is not None:
+            try:
+                if dlg.isVisible():
+                    dlg.close()
+            except Exception:
+                pass
         s = load_settings()
         if s.get("window_save_enabled", True):
             s.setdefault("window", {})
@@ -275,9 +284,10 @@ class MainWindow(QMainWindow):
         xpat = auto.get("x_patterns", ["X", "X*"])
         ypat = auto.get("y_patterns", ["Y", "Y*"])
 
-        # 1) X → 2) Y (기존 이름 패턴 기반)
-        x_sel, x_ordered = select_value(available_ns, xpat, data_cols_n)
-        y_sel, y_ordered = select_y_with_suffix(x_sel, available_ns, ypat, data_cols_n)
+        # 1-2) X/Y pair 기반 선택 — suffix 매칭·n 필터·페어 없는 이름 제외
+        x_sel, y_sel, x_ordered, y_ordered = select_xy_pairs(
+            available_ns, xpat, ypat,
+        )
 
         # 3) VALUE — X 의 n (좌표 개수) 기준으로 3σ/AVG 휴리스틱
         n_coords = int(available_ns.get(x_sel, data_cols_n)) if x_sel else int(data_cols_n)

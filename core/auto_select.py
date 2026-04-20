@@ -160,6 +160,92 @@ def select_value_by_variability(
     return selected, ordered
 
 
+def select_xy_pairs(
+    available_ns: dict[str, int],
+    x_patterns: Iterable[str] = ("X", "X*"),
+    y_patterns: Iterable[str] = ("Y", "Y*"),
+    *,
+    n_threshold_ratio: float = 0.8,
+) -> tuple[str | None, str | None, list[str], list[str]]:
+    """X/Y 좌표 PARAMETER pair 매칭 기반 자동 선택.
+
+    단계:
+    1. x_patterns/y_patterns 매치 이름 수집. n=1 은 제외.
+    2. **suffix 기반 pair 매칭** — `X`↔`Y`, `X_1000`↔`Y_1000`, `X_A`↔`Y_A`.
+       한쪽만 있는 이름(예: `X_1000_A` 인데 `Y_1000_A` 없음) → 제외.
+    3. pair 의 n = min(n_x, n_y). 최대 pair_n 기준으로
+       `pair_n < max_n × n_threshold_ratio` 는 제외.
+    4. 선택: pattern 순서 → pair_n 큰 순 → 알파벳.
+    5. 콤보: 선택된 pair 가 1순위, 나머지 pair 의 X/Y 각각 알파벳 순.
+
+    Returns:
+        (x_sel, y_sel, x_ordered, y_ordered)
+    """
+    xp = list(x_patterns)
+    yp = list(y_patterns)
+
+    # 1. X / Y 후보 (n>=2, 패턴 매치)
+    def _collect(patterns: list[str]) -> dict[str, int]:
+        """각 이름의 패턴 인덱스(낮을수록 우선)."""
+        out: dict[str, int] = {}
+        for name, n in available_ns.items():
+            if n < 2:
+                continue
+            for i, pat in enumerate(patterns):
+                if _matches(name, pat):
+                    out[name] = i
+                    break
+        return out
+
+    x_cands = _collect(xp)
+    y_cands = _collect(yp)
+    if not x_cands or not y_cands:
+        return None, None, [], []
+
+    # 2. suffix 기반 pair. 'x'/'y' 로 시작해야 — 이름 첫 글자 제거 후 나머지 비교
+    def _suffix(name: str, first_char: str) -> str | None:
+        if not name:
+            return None
+        if name[0].lower() != first_char:
+            return None
+        return name[1:].lower()
+
+    x_by_suffix: dict[str, str] = {}
+    for name in x_cands:
+        sfx = _suffix(name, "x")
+        if sfx is not None and sfx not in x_by_suffix:
+            x_by_suffix[sfx] = name
+    y_by_suffix: dict[str, str] = {}
+    for name in y_cands:
+        sfx = _suffix(name, "y")
+        if sfx is not None and sfx not in y_by_suffix:
+            y_by_suffix[sfx] = name
+
+    pairs: list[tuple[str, str, int, int]] = []   # (x, y, pair_n, x_pattern_rank)
+    for sfx, x_name in x_by_suffix.items():
+        if sfx in y_by_suffix:
+            y_name = y_by_suffix[sfx]
+            pair_n = min(available_ns[x_name], available_ns[y_name])
+            pairs.append((x_name, y_name, pair_n, x_cands.get(x_name, len(xp))))
+
+    if not pairs:
+        return None, None, [], []
+
+    # 3. 최대 pair_n → threshold 로 필터
+    max_n = max(p[2] for p in pairs)
+    threshold = max(int(max_n * n_threshold_ratio), 2)
+    pairs = [p for p in pairs if p[2] >= threshold]
+
+    # 4. 정렬: pattern rank 낮을수록 우선 → pair_n 큰 순 → 알파벳
+    pairs.sort(key=lambda p: (p[3], -p[2], p[0]))
+    best_x, best_y, _, _ = pairs[0]
+
+    # 5. 콤보 리스트 — best 먼저 + 나머지 알파벳
+    other_x = sorted(p[0] for p in pairs[1:])
+    other_y = sorted(p[1] for p in pairs[1:])
+    return best_x, best_y, [best_x] + other_x, [best_y] + other_y
+
+
 def select_y_with_suffix(
     x_name: str | None,
     available_ns: dict[str, int],
