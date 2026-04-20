@@ -57,6 +57,18 @@ def interpolate_wafer(
             d, _ = tree.query(pts, k=min(2, len(pts)))
             median_dist = float(np.median(d[:, 1])) if d.ndim > 1 else 10.0
             kw["epsilon"] = 1.0 / max(median_dist, 1e-3)
+        # 진단용 — 모든 호출에서 좌표 분산 로그 (성공/실패 비교용)
+        import sys
+        _y_std = float(np.std(y)) if y.size else 0.0
+        _x_std = float(np.std(x)) if x.size else 0.0
+        _v_rng = (float(np.min(v)), float(np.max(v))) if v.size else (0.0, 0.0)
+        sys.stderr.write(
+            f"[interp] 시도: kernel={kernel}  n_pts={x.size}  "
+            f"x_std={_x_std:.6g}  y_std={_y_std:.6g}  "
+            f"v_range={_v_rng}\n"
+        )
+        sys.stderr.flush()
+
         rbf = RBFInterpolator(pts, v, **kw)
         grid_pts = np.column_stack([XG.ravel(), YG.ravel()])
         return rbf(grid_pts).reshape(XG.shape)
