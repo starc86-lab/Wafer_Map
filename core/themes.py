@@ -298,6 +298,7 @@ DEFAULT_SETTINGS = {
         "show_circle": True,       # 웨이퍼 경계 원
         "show_notch": True,        # 경계 원에 notch(V자 홈) 표시 — 6시 방향 고정
         "notch_depth_mm": 5.0,     # notch 깊이(mm, 시각적 과장)
+        "boundary_r_mm": 150.0,    # 경계 원 반지름 (웨이퍼 바깥 약간 여유 150~160). notch 는 이 원에만 표시
         "show_scale_bar": True,    # 그래프 우측에 컬러맵 스케일바
         "chart_width": 360,        # 그래프 가로 (px) — 360:280 비율 기준 중
         "chart_height": 280,       # 그래프 세로 (px)

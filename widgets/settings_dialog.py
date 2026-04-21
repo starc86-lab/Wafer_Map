@@ -288,6 +288,15 @@ class ChartCommonGroup(QGroupBox):
         _row.addWidget(QLabel("mm"))
         _row.addStretch(1)
 
+        # 경계 원 반지름 — 150(mesh 와 동일) ~ 160 (mesh 바깥 여유). notch 는 이 원에만 표시
+        self.sb_boundary_r = QDoubleSpinBox()
+        self.sb_boundary_r.setRange(150.0, 160.0)
+        self.sb_boundary_r.setSingleStep(0.5)
+        self.sb_boundary_r.setDecimals(1)
+        self.sb_boundary_r.setSuffix(" mm")
+        self.sb_boundary_r.setValue(float(cfg.get("boundary_r_mm", 150.0)))
+        _limit_width(self.sb_boundary_r)
+
         _populate_two_columns(self, [
             ("컬러맵", self.cb_cmap),
             ("보간 방법", self.cb_interp),
@@ -295,6 +304,7 @@ class ChartCommonGroup(QGroupBox):
             ("경계 원", self.chk_circle),
             ("Notch 표시", self.chk_notch),
             ("Notch Depth", depth_row),
+            ("경계 원 반지름", self.sb_boundary_r),
             ("스케일바 표시", self.chk_scale_bar),
             ("그래프 크기", self.cb_chart_size),
             ("소수점 자릿수", self.cb_decimals),
@@ -307,6 +317,7 @@ class ChartCommonGroup(QGroupBox):
         self.chk_circle.toggled.connect(self.changed)
         self.chk_notch.toggled.connect(self.changed)
         self.cb_notch_depth.currentIndexChanged.connect(self.changed)
+        self.sb_boundary_r.valueChanged.connect(self.changed)
         self.chk_scale_bar.toggled.connect(self.changed)
         self.cb_chart_size.currentIndexChanged.connect(self.changed)
         self.cb_decimals.currentIndexChanged.connect(self.changed)
@@ -321,6 +332,7 @@ class ChartCommonGroup(QGroupBox):
             "show_circle": self.chk_circle.isChecked(),
             "show_notch": self.chk_notch.isChecked(),
             "notch_depth_mm": float(self.cb_notch_depth.currentData()),
+            "boundary_r_mm": float(self.sb_boundary_r.value()),
             "show_scale_bar": self.chk_scale_bar.isChecked(),
             "chart_width": int(w),
             "chart_height": int(h),
@@ -330,8 +342,9 @@ class ChartCommonGroup(QGroupBox):
 
     def reload(self, cfg: dict[str, Any]) -> None:
         widgets = (self.cb_cmap, self.cb_interp, self.cb_grid, self.chk_circle,
-                   self.chk_notch, self.cb_notch_depth, self.chk_scale_bar,
-                   self.cb_chart_size, self.cb_decimals, self.sb_edge_cut)
+                   self.chk_notch, self.cb_notch_depth, self.sb_boundary_r,
+                   self.chk_scale_bar, self.cb_chart_size, self.cb_decimals,
+                   self.sb_edge_cut)
         for w in widgets:
             w.blockSignals(True)
         try:
@@ -345,6 +358,7 @@ class ChartCommonGroup(QGroupBox):
             self.chk_notch.setChecked(bool(cfg.get("show_notch", True)))
             idx = self.cb_notch_depth.findData(float(cfg.get("notch_depth_mm", 5.0)))
             if idx >= 0: self.cb_notch_depth.setCurrentIndex(idx)
+            self.sb_boundary_r.setValue(float(cfg.get("boundary_r_mm", 150.0)))
             self.chk_scale_bar.setChecked(bool(cfg.get("show_scale_bar", True)))
             cur_w = int(cfg.get("chart_width", 360))
             cur_h = int(cfg.get("chart_height", 280))

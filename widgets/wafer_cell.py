@@ -39,14 +39,22 @@ _NOTCH_HALF_RAD = np.radians(3.0)
 _NOTCH_DEFAULT_DEPTH_MM = 5.0
 
 
-def _boundary_xy(show_notch: bool, depth: float = _NOTCH_DEFAULT_DEPTH_MM):
-    """웨이퍼 경계 좌표. notch 옵션 시 6시 방향에 V자 홈 반영."""
+def _boundary_xy(
+    show_notch: bool,
+    depth: float = _NOTCH_DEFAULT_DEPTH_MM,
+    R: float = WAFER_RADIUS_MM,
+):
+    """웨이퍼 경계 좌표. notch 옵션 시 6시 방향에 V자 홈 반영.
+
+    R: 경계 원의 반지름 (기본 WAFER_RADIUS_MM=150). Settings 의 boundary_r_mm
+    로 살짝 확장 가능 (150~160).
+    """
     theta = np.linspace(0, 2 * np.pi, BOUNDARY_SEGMENTS)
-    r = np.full_like(theta, WAFER_RADIUS_MM)
+    r = np.full_like(theta, R)
     if show_notch:
         d = np.abs(((theta - _NOTCH_ANGLE + np.pi) % (2 * np.pi)) - np.pi)
         in_notch = d < _NOTCH_HALF_RAD
-        r[in_notch] = WAFER_RADIUS_MM - depth * (1 - d[in_notch] / _NOTCH_HALF_RAD)
+        r[in_notch] = R - depth * (1 - d[in_notch] / _NOTCH_HALF_RAD)
     return r * np.cos(theta), r * np.sin(theta)
 
 
@@ -870,6 +878,7 @@ class WaferCell(QFrame):
             bx, by = _boundary_xy(
                 common.get("show_notch", True),
                 float(common.get("notch_depth_mm", _NOTCH_DEFAULT_DEPTH_MM)),
+                R=float(common.get("boundary_r_mm", WAFER_RADIUS_MM)),
             )
             plot.plot(bx, by, pen=pg.mkPen("k", width=2))
         if chart.get("show_points", True):
@@ -1024,6 +1033,7 @@ class WaferCell(QFrame):
             bx, by = _boundary_xy(
                 common.get("show_notch", True),
                 float(common.get("notch_depth_mm", _NOTCH_DEFAULT_DEPTH_MM)),
+                R=float(common.get("boundary_r_mm", WAFER_RADIUS_MM)),
             )
             circ = np.column_stack([bx, by, np.zeros_like(bx)])
             if self._gl_boundary is None:
@@ -1139,20 +1149,12 @@ class WaferCell(QFrame):
         elif self._gl_grid is not None:
             self._gl_grid.setVisible(False)
 
-        # ── notch 반영 per-angle effective r 계산 ──
-        # 각 각도 θ_j 마다 유효 최외곽 r: notch 영역은 V 자로 안쪽으로 dip + edge_cut 으로 추가 offset
-        show_notch = bool(common.get("show_notch", True))
-        notch_depth = float(common.get("notch_depth_mm", _NOTCH_DEFAULT_DEPTH_MM))
-        r_bound_seg = np.full(seg, R, dtype=float)
-        if show_notch:
-            d_notch = np.abs(((theta - _NOTCH_ANGLE + np.pi) % (2.0 * np.pi)) - np.pi)
-            in_notch_seg = d_notch < _NOTCH_HALF_RAD
-            r_bound_seg[in_notch_seg] = R - notch_depth * (1.0 - d_notch[in_notch_seg] / _NOTCH_HALF_RAD)
-        # edge_cut 추가 offset — 각 각도별 notched 경계에서 안쪽으로 edge_cut 만큼
-        eff_r_seg = np.maximum(r_bound_seg - (edge_cut_mm if apply_cut else 0.0), 1.0)
+        # radial mode 는 notch 를 mesh 에 반영하지 않음 (반경 분해능 부족으로 계단 모양).
+        # notch 는 boundary line 에만 표시 (아래 _boundary_xy 참고).
+        # per-angle effective r = R (notch 없음) - edge_cut
+        eff_r_seg = np.full(seg, max(R - (edge_cut_mm if apply_cut else 0.0), 1.0), dtype=float)
 
-        # Per-vertex cut mask: 해당 정점의 r 이 그 각도의 eff_r 보다 크면 잘림
-        # 정점 순서 = (ring i, angle j): index = i*seg + j → theta 인덱스 = index % seg
+        # Per-vertex cut mask — edge_cut 만 반영
         vert_theta_idx = np.arange(xs_all.size) % seg
         r_flat = np.sqrt(xs_all ** 2 + ys_all ** 2)
         cut_mask_all = r_flat > eff_r_seg[vert_theta_idx] + 1e-6
@@ -1201,6 +1203,7 @@ class WaferCell(QFrame):
             bx, by = _boundary_xy(
                 common.get("show_notch", True),
                 float(common.get("notch_depth_mm", _NOTCH_DEFAULT_DEPTH_MM)),
+                R=float(common.get("boundary_r_mm", WAFER_RADIUS_MM)),
             )
             circ = np.column_stack([bx, by, np.zeros_like(bx)])
             if self._gl_boundary is None:
