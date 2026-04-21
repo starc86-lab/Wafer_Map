@@ -131,15 +131,27 @@ def _build_radial_surface_mesh(
     rings: int, seg: int,
     vmin: float, z_range: float, factor: float,
     cmap: pg.ColorMap,
+    *, effective_R: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """원형 radial mesh — pre-evaluated (xs, ys, z_raw) 로 정점 구성.
 
     (rings+1) × seg 정점 순서: i*seg + j (ring i, angle j)
     - face: 인접 링 사이 사각형을 2 삼각형으로
     - 외곽 링이 정확히 r=R 이므로 경계가 부드러운 원 (격자 기반 카디널 스트라이프 없음)
+    - effective_R: edge_cut 유효 반경. r > effective_R 정점은 z=0, white color 로
+      바닥 "shelf" 구성 (cut 된 영역 시각적으로 제거).
     """
     # RBF 외삽으로 vmin 아래 값이 나올 수 있음 → 바닥(z=0) 뚫지 않도록 clamp.
     z_disp = np.clip((z_raw - vmin) * factor, 0.0, None).astype(np.float32)
+
+    # edge_cut: r > effective_R 영역은 z=0 으로 떨어뜨림 (shelf 효과)
+    if effective_R is not None:
+        r_flat = np.sqrt(xs ** 2 + ys ** 2)
+        cut_mask = r_flat > effective_R + 1e-6
+        z_disp[cut_mask] = 0.0
+    else:
+        cut_mask = None
+
     verts = np.column_stack([xs.astype(np.float32), ys.astype(np.float32), z_disp])
 
     # Faces — 각 (i,j) 사각형: a=(i,j), b=(i,j+1), c=(i+1,j+1), d=(i+1,j)
@@ -169,6 +181,11 @@ def _build_radial_surface_mesh(
     idx = np.clip((norm * 255).astype(int), 0, 255)
     rgb = lut[idx, :3].astype(np.float32) / 255.0
     colors = np.concatenate([rgb, np.ones((rgb.shape[0], 1), dtype=np.float32)], axis=1)
+
+    # cut 영역 정점은 흰색 (배경 매치) — rect mode 의 alpha=0 white 와 동일 효과
+    if cut_mask is not None and cut_mask.any():
+        colors[cut_mask] = (1.0, 1.0, 1.0, 1.0)
+
     return verts, faces, colors
 
 
@@ -1071,9 +1088,24 @@ class WaferCell(QFrame):
 
         R = float(WAFER_RADIUS_MM)
 
-        # Radial 정점 좌표 선계산 — 이 값들에서 vmin/vmax 도 추출 (rect ZG 불필요).
-        # 벤치: rect G=200 vs radial 20×180 vmin/vmax 차이 <0.02% 로 시각 구분 불가.
-        r_arr = np.linspace(0.0, R, rings + 1)
+        # edge_cut 먼저 결정 (링 배치에 영향)
+        edge_cut_mm = float(common.get("edge_cut_mm", 0.0))
+        effective_R = max(R - edge_cut_mm, 1.0) if edge_cut_mm > 0 else R
+        apply_cut = edge_cut_mm > 0 and effective_R < R
+
+        # Radial 링 배치:
+        # - edge_cut 없음: 0 ~ R 균등 (rings+1 개 링)
+        # - edge_cut 적용: 0 ~ effective_R 균등 (rings+1 개 interior 링) + R (shelf 링 1개)
+        #   → shelf 영역이 하나의 얇은 band 로 렌더됨
+        if apply_cut:
+            r_arr = np.concatenate([
+                np.linspace(0.0, effective_R, rings + 1),
+                [R],
+            ])
+        else:
+            r_arr = np.linspace(0.0, R, rings + 1)
+        n_rings = len(r_arr) - 1   # face rings 수
+
         theta = np.linspace(0.0, 2.0 * np.pi, seg, endpoint=False)
         Rm, Tm = np.meshgrid(r_arr, theta, indexing="ij")
         xs_all = (Rm * np.cos(Tm)).ravel()
@@ -1097,7 +1129,6 @@ class WaferCell(QFrame):
         factor = (target_height / z_range) * (float(z_exag) if z_exag is not None else 1.0)
 
         cmap = resolve_colormap(common.get("colormap", "Turbo"))
-        R = float(WAFER_RADIUS_MM)
 
         gview = self._gl_3d
 
@@ -1116,8 +1147,9 @@ class WaferCell(QFrame):
         # Radial surface mesh — pre-evaluated (xs_all, ys_all, z_raw_all) 재사용
         smooth = bool(chart3d.get("smooth", True))
         v_s, f_s, c_s = _build_radial_surface_mesh(
-            xs_all, ys_all, z_raw_all, rings, seg,
+            xs_all, ys_all, z_raw_all, n_rings, seg,
             vmin, z_range, factor, cmap,
+            effective_R=effective_R if apply_cut else None,
         )
         if self._gl_radial_surface is None:
             self._gl_radial_surface = gl.GLMeshItem(
@@ -1131,11 +1163,18 @@ class WaferCell(QFrame):
             )
         self._gl_radial_surface.setVisible(True)
 
-        # Smooth cylinder wall — 외곽 링 (마지막 ring) 데이터 재사용
-        outer_start = rings * seg
-        wall_xs = xs_all[outer_start:outer_start + seg]
-        wall_ys = ys_all[outer_start:outer_start + seg]
-        wall_z_raw = z_raw_all[outer_start:outer_start + seg]
+        # Smooth cylinder wall —
+        #   edge_cut 적용: r=effective_R 링 (r_arr[rings], 맨 마지막 직전) 재사용
+        #   edge_cut 없음: 외곽 r=R 링 재사용
+        if apply_cut:
+            # r_arr 구성상 index=rings 가 effective_R (마지막 interior 링)
+            wall_ring_idx = rings  # 0-based index in r_arr
+        else:
+            wall_ring_idx = n_rings  # 마지막 링 = R
+        wstart = wall_ring_idx * seg
+        wall_xs = xs_all[wstart:wstart + seg]
+        wall_ys = ys_all[wstart:wstart + seg]
+        wall_z_raw = z_raw_all[wstart:wstart + seg]
         v_w, f_w, c_w = _build_smooth_cylinder_wall(
             wall_xs, wall_ys, wall_z_raw, seg,
             vmin, z_range, factor, cmap,
