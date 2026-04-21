@@ -880,24 +880,60 @@ class MainWindow(QMainWindow):
     def _apply_z_scale_mode(self, displays: list[WaferDisplay], view_mode: str) -> None:
         """cb_zscale을 ground truth로 모든 display의 z_range 세팅.
 
-        공통: 모든 display에 동일 (vmin, vmax) 주입.
+        공통: 각 wafer 의 **RBF 렌더링 값** min/max 수집 후 전 wafer 공통 범위 주입.
+            → input 값 range 대신 실제 rendered range 기반이라 RBF overshoot 도 포함.
         개별: 모두 None reset (cell이 자체 데이터로 vmin/vmax 계산).
-        view_mode 무관 — 2D 상태에서 토글해도 다음 3D 진입 시 정합 보장.
         """
         if self.cb_zscale.currentText() != "공통":
             for d in displays:
                 d.z_range = None
             return
-        all_v: list[float] = []
+
+        # 각 wafer 의 rendered 범위 추정 — radial 15 rings × 90 seg = 1,350 points.
+        # 실제 렌더는 20×180=3,780 points 이지만 범위 추정엔 충분. 비용 wafer 당 ~1ms.
+        from scipy.interpolate import RBFInterpolator
+        from core.coords import WAFER_RADIUS_MM
+        R = float(WAFER_RADIUS_MM)
+        rings, seg = 15, 90
+        r_arr = np.linspace(0.0, R, rings + 1)
+        theta = np.linspace(0.0, 2.0 * np.pi, seg, endpoint=False)
+        Rm, Tm = np.meshgrid(r_arr, theta, indexing="ij")
+        sample_pts = np.column_stack([(Rm * np.cos(Tm)).ravel(),
+                                       (Rm * np.sin(Tm)).ravel()])
+
+        all_min: list[float] = []
+        all_max: list[float] = []
         for d in displays:
-            arr = np.asarray(d.values, dtype=float)
-            valid = arr[~np.isnan(arr)]
+            x_arr = np.asarray(d.x_mm, dtype=float)
+            y_arr = np.asarray(d.y_mm, dtype=float)
+            v_arr = np.asarray(d.values, dtype=float)
+            m = ~np.isnan(v_arr) & ~np.isnan(x_arr) & ~np.isnan(y_arr)
+            if m.sum() < 2:
+                continue
+            try:
+                rbf = RBFInterpolator(
+                    np.column_stack([x_arr[m], y_arr[m]]),
+                    v_arr[m],
+                    kernel="thin_plate_spline",
+                )
+                z = rbf(sample_pts)
+                zf = z[np.isfinite(z)]
+                if zf.size > 0:
+                    all_min.append(float(zf.min()))
+                    all_max.append(float(zf.max()))
+                    continue
+            except Exception:
+                pass
+            # RBF 실패 시 input 범위 폴백
+            valid = v_arr[m]
             if valid.size > 0:
-                all_v.extend(valid.tolist())
-        if not all_v:
+                all_min.append(float(valid.min()))
+                all_max.append(float(valid.max()))
+
+        if not all_min:
             return
-        vmin = float(min(all_v))
-        vmax = float(max(all_v))
+        vmin = min(all_min)
+        vmax = max(all_max)
         for d in displays:
             d.z_range = (vmin, vmax)
 
