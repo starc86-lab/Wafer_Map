@@ -406,25 +406,41 @@ class Chart2DGroup(QGroupBox):
         self.chk_value_labels = _fix_width(QCheckBox())
         self.chk_value_labels.setChecked(bool(cfg.get("show_value_labels", False)))
 
+        # 라벨 폰트 크기 — 작게 / 보통 / 크게
+        self.cb_label_scale = _limit_width(QComboBox())
+        for label, val in (("작게 (85%)", 0.85), ("보통 (100%)", 1.00), ("크게 (115%)", 1.15)):
+            self.cb_label_scale.addItem(label, val)
+        cur_scale = float(cfg.get("label_font_scale", 0.85))
+        best_i, best_d = 0, float("inf")
+        for i in range(self.cb_label_scale.count()):
+            d = abs(cur_scale - float(self.cb_label_scale.itemData(i)))
+            if d < best_d:
+                best_d, best_i = d, i
+        self.cb_label_scale.setCurrentIndex(best_i)
+
         _populate_two_columns(self, [
             ("측정점 표시", self.chk_points),
             ("점 크기", self.cb_point),
             ("라벨 표시", self.chk_value_labels),
+            ("라벨 크기", self.cb_label_scale),
         ])
 
         self.chk_points.toggled.connect(self.changed)
         self.cb_point.currentIndexChanged.connect(self.changed)
         self.chk_value_labels.toggled.connect(self.changed)
+        self.cb_label_scale.currentIndexChanged.connect(self.changed)
 
     def gather(self) -> dict[str, Any]:
         return {
             "show_points": self.chk_points.isChecked(),
             "point_size": int(self.cb_point.currentData()),
             "show_value_labels": self.chk_value_labels.isChecked(),
+            "label_font_scale": float(self.cb_label_scale.currentData()),
         }
 
     def reload(self, cfg: dict[str, Any]) -> None:
-        widgets = (self.chk_points, self.cb_point, self.chk_value_labels)
+        widgets = (self.chk_points, self.cb_point, self.chk_value_labels,
+                   self.cb_label_scale)
         for w in widgets:
             w.blockSignals(True)
         try:
@@ -432,6 +448,13 @@ class Chart2DGroup(QGroupBox):
             idx = self.cb_point.findData(int(cfg.get("point_size", 4)))
             if idx >= 0: self.cb_point.setCurrentIndex(idx)
             self.chk_value_labels.setChecked(bool(cfg.get("show_value_labels", False)))
+            target = float(cfg.get("label_font_scale", 0.85))
+            best_i, best_d = 0, float("inf")
+            for i in range(self.cb_label_scale.count()):
+                d = abs(target - float(self.cb_label_scale.itemData(i)))
+                if d < best_d:
+                    best_d, best_i = d, i
+            self.cb_label_scale.setCurrentIndex(best_i)
         finally:
             for w in widgets:
                 w.blockSignals(False)

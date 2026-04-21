@@ -963,7 +963,13 @@ class MainWindow(QMainWindow):
         """Settings Graph 변경 — cell 재생성 없이 렌더 캐시만 reset + 재렌더.
 
         radial 경로는 RBF fit 이 ~1ms 수준으로 가벼워 별도 캐시 없이 매번 재계산.
+        rings/seg/interp_method 가 바뀌면 공통 z_range 도 달라져야 하므로
+        각 cell 의 display.z_range 를 재계산하고 colorbar vmin/vmax 도 맞춰 갱신.
         """
+        view_mode = self.cb_view.currentText() or "2D"
+        displays = [c._display for c in self._result_panel.cells]
+        if displays:
+            self._apply_z_scale_mode(displays, view_mode)
         self._result_panel.refresh_all()
 
     def _on_view_toggle(self, mode: str) -> None:

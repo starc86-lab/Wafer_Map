@@ -316,6 +316,7 @@ DEFAULT_SETTINGS = {
         "show_points": True,       # 측정점 마커 표시
         "point_size": 4,
         "show_value_labels": False, # 측정점 옆에 VALUE 텍스트 표시
+        "label_font_scale": 0.85,  # 라벨 폰트 크기 배율 (작게 0.85 / 보통 1.0 / 크게 1.15)
     },
 
     # 3D MAP 전용 (공통은 chart_common, Z 스케일은 메인 윈도우 컨트롤)
