@@ -13,8 +13,8 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QShowEvent
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QGridLayout, QHBoxLayout, QLabel, QMainWindow,
-    QMessageBox, QPushButton, QSizePolicy, QSplitter, QToolBar, QToolButton,
-    QVBoxLayout, QWidget,
+    QMessageBox, QPushButton, QSizePolicy, QSpinBox, QSplitter, QToolBar,
+    QToolButton, QVBoxLayout, QWidget,
 )
 
 import numpy as np
@@ -223,6 +223,22 @@ class MainWindow(QMainWindow):
         self.cb_zscale = QComboBox(); self.cb_zscale.addItems(["공통", "개별"])
         self.cb_zscale.setCurrentText("개별")  # 세션 디폴트 (저장 X)
 
+        # Z-range expand (%) — 공통 모드에서만 활성. 중심값 midpoint 고정, range 를
+        # (1 + pct/100) 배로 늘려 colorbar/height 범위 확장. 각 wafer 가 palette
+        # 전체를 덜 쓰게 되어 여러 wafer 비교 시 색/높이 대비가 부드러워짐.
+        _stored_pct = int(load_settings().get("chart_common", {}).get(
+            "z_range_expand_pct", 50
+        ))
+        self._z_range_pct_stored = _stored_pct   # 개별 모드 복귀 시 복원용
+        self.sp_z_range = QSpinBox()
+        self.sp_z_range.setRange(0, 200)
+        self.sp_z_range.setSingleStep(10)
+        self.sp_z_range.setSuffix("%")
+        self.sp_z_range.setValue(_stored_pct if self.cb_zscale.currentText() == "공통" else 0)
+        self.sp_z_range.setEnabled(self.cb_zscale.currentText() == "공통")
+        self.sp_z_range.setFixedWidth(72)
+        self.sp_z_range.valueChanged.connect(self._on_z_range_changed)
+
         self.btn_visualize = QPushButton("▶  Run Analysis")
         self.btn_visualize.setProperty("class", "primary")
         # Input B 헤더 Text+Table+Clear 폭 합과 동일 (시작/끝 X가 일치하도록)
@@ -254,6 +270,8 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.cb_view)
         lay.addWidget(QLabel("Z-Scale:"))
         lay.addWidget(self.cb_zscale)
+        lay.addWidget(QLabel("Z-range:"))
+        lay.addWidget(self.sp_z_range)
         lay.addStretch(1)
         lay.addWidget(self.btn_visualize)
         # 자연 높이를 측정해 fix — splitter 안에서 핸들로 변경 불가
@@ -939,6 +957,17 @@ class MainWindow(QMainWindow):
         vmax = max(all_maxes)
         if vmax <= vmin:
             vmax = vmin + 1e-9
+
+        # Z-range 확장 — midpoint 유지하면서 range 를 (1 + pct/100) 배로.
+        # pct=0 → 원본 min~max, pct=50 → range*1.5, pct=100 → range*2.0.
+        # 각 wafer 가 palette 더 좁은 구간만 써서 색/높이 대비가 부드러워짐.
+        pct = int(self.sp_z_range.value()) if self.sp_z_range.isEnabled() else 0
+        if pct > 0:
+            midpoint = (vmin + vmax) / 2.0
+            half_range = (vmax - vmin) / 2.0 * (1.0 + pct / 100.0)
+            vmin = midpoint - half_range
+            vmax = midpoint + half_range
+
         for d in displays:
             d.z_range = (vmin, vmax)
 
@@ -990,6 +1019,31 @@ class MainWindow(QMainWindow):
         z_range는 2D ImageItem levels(+colorbar)와 3D surface colors 모두에
         영향. 양쪽 렌더 캐시 reset 필요 (보간 캐시는 유지되므로 빠름).
         """
+        # Z-range 스핀박스 활성/비활성 + 값 토글 (개별 모드 → 0 회색, 공통 복귀 → 저장값)
+        is_common = self.cb_zscale.currentText() == "공통"
+        self.sp_z_range.blockSignals(True)
+        self.sp_z_range.setEnabled(is_common)
+        self.sp_z_range.setValue(self._z_range_pct_stored if is_common else 0)
+        self.sp_z_range.blockSignals(False)
+
+        cells = self._result_panel.cells
+        if not cells:
+            return
+        view_mode = self.cb_view.currentText() or "2D"
+        displays = [c.display for c in cells]
+        self._apply_z_scale_mode(displays, view_mode)
+        self._result_panel.refresh_all()
+
+    def _on_z_range_changed(self, value: int) -> None:
+        """Z-range 스핀박스 변경 — 저장값 갱신 + 재렌더. 공통 모드에서만 호출됨."""
+        if self.cb_zscale.currentText() != "공통":
+            return
+        self._z_range_pct_stored = int(value)
+        # settings.json 즉시 반영 (Settings 다이얼로그 경유 없이 직접 저장)
+        from core.settings import load_settings as _ls, save_settings as _ss
+        s = _ls()
+        s.setdefault("chart_common", {})["z_range_expand_pct"] = int(value)
+        _ss(s)
         cells = self._result_panel.cells
         if not cells:
             return

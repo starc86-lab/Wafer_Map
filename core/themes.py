@@ -309,6 +309,9 @@ DEFAULT_SETTINGS = {
         "interp_method": "RBF-ThinPlate",
         "decimals": 2,             # 테이블 값 소수점 자릿수 (0/1/2/3, 컬러바는 별도 동적)
         "edge_cut_mm": 1.5,        # 웨이퍼 경계에서 안쪽으로 cut (mm). 0=cut 없음
+        # 공통 Z-scale 모드에서 range 확장 비율 (%). 0=실제 min~max,
+        # 50=range*1.5 (midpoint 중심), 100=range*2.0. 개별 모드에선 무시.
+        "z_range_expand_pct": 50,
     },
 
     # 2D MAP 전용 (공통은 chart_common 참조)

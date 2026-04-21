@@ -116,19 +116,18 @@ def _build_radial_surface_mesh(
     vmin_c: float, z_range_c: float,
     cmap: pg.ColorMap,
     *, cut_mask: np.ndarray | None = None,
-    z_base: float = 0.0,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """원형 radial mesh — pre-evaluated (xs, ys, z_raw) 로 정점 구성.
 
     (rings+1) × seg 정점 순서: i*seg + j (ring i, angle j)
-    - 높이 스케일: `(z_raw - vmin_h) * factor + z_base` (개별 stretch + 공통 위치 offset).
-      공통 모드에서는 z_base 로 wafer avg 위치 반영.
+    - 높이 스케일: `(z_raw - vmin_h) * factor` (vmin_h / factor 는 공통 / 개별 모드에 따라
+      render 에서 결정).
     - 색 스케일: `vmin_c` + `z_range_c` 로 normalize (공통 모드 반영).
     - face: 인접 링 사이 사각형을 2 삼각형으로.
     - cut_mask: True 인 정점은 z=0 + 흰색 (edge_cut shelf / notch V 영역 제거용).
     """
     # RBF 외삽으로 vmin 아래 값이 나올 수 있음 → 바닥(z=0) 뚫지 않도록 clamp.
-    z_disp = np.clip((z_raw - vmin_h) * factor + z_base, 0.0, None).astype(np.float32)
+    z_disp = np.clip((z_raw - vmin_h) * factor, 0.0, None).astype(np.float32)
 
     # 잘려야 할 정점 z=0 으로 강제
     if cut_mask is not None:
@@ -177,18 +176,16 @@ def _build_smooth_cylinder_wall(
     vmin_h: float, factor: float,
     vmin_c: float, z_range_c: float,
     cmap: pg.ColorMap,
-    *, z_base: float = 0.0,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """매끈 원통 벽 — pre-evaluated (xs, ys, z_raw) 외곽 링 기반, bottom z=0.
 
-    - 높이: `(z_raw - vmin_h) * factor + z_base` top z. bottom 은 z=0 유지 (공통 모드
-      에서 avg 큰 wafer 일수록 기둥이 높게 보여 직관적).
+    - 높이: `(z_raw - vmin_h) * factor` top z, bottom 은 z=0.
     - 색: `vmin_c` + `z_range_c` 로 normalize (공통 스케일 반영).
     """
     xs32 = xs.astype(np.float32)
     ys32 = ys.astype(np.float32)
     # 음수 clamp — 바닥 아래로 뚫고 내려가는 문제 방지
-    z_top = np.clip((z_raw - vmin_h) * factor + z_base, 0.0, None).astype(np.float32)
+    z_top = np.clip((z_raw - vmin_h) * factor, 0.0, None).astype(np.float32)
 
     top = np.column_stack([xs32, ys32, z_top])
     bot = np.column_stack([xs32, ys32, np.zeros(seg, dtype=np.float32)])
@@ -896,36 +893,26 @@ class WaferCell(QFrame):
         ys_all = (Rm * np.sin(Tm)).ravel()
         z_raw_all = rbf(np.column_stack([xs_all, ys_all]))
 
-        # 높이 범위 — 항상 **개별 wafer** 기준 (dome 형상 stretch 용).
-        finite = z_raw_all[np.isfinite(z_raw_all)]
-        if finite.size == 0:
-            return
-        vmin_h = float(finite.min())
-        vmax_h = float(finite.max())
-        z_range_h = vmax_h - vmin_h if vmax_h > vmin_h else 1.0
-
-        # 색 범위 — 공통 모드면 display.z_range, 아니면 개별
+        # Z 범위 — 공통 모드면 display.z_range (높이·색 모두 공통), 아니면 개별.
+        # 공통 모드 = 모든 wafer 가 동일 vmin~vmax 로 매핑 → 내부 변동이 공통 범위
+        # 대비 작으면 dome 이 상대적으로 납작하게 보이는 것은 정상 (physical truth).
         if self._display.z_range is not None:
             vmin_c, vmax_c = self._display.z_range
         else:
-            vmin_c, vmax_c = vmin_h, vmax_h
+            finite = z_raw_all[np.isfinite(z_raw_all)]
+            if finite.size == 0:
+                return
+            vmin_c = float(finite.min())
+            vmax_c = float(finite.max())
         z_range_c = vmax_c - vmin_c if vmax_c > vmin_c else 1.0
-        # colorbar / legacy 호환
+        vmin_h = vmin_c
+        z_range_h = z_range_c
         vmin, vmax, z_range = vmin_c, vmax_c, z_range_c
 
         # Z 과장 배율
         z_exag = chart3d.get("z_exaggeration", None)
-        z_exag_val = float(z_exag) if z_exag is not None else 1.0
         target_height = WAFER_RADIUS_MM * 0.4
-        # 형상 stretch — 개별 range 기준 (dome 이 target_height 꽉 채우게).
-        factor = (target_height / z_range_h) * z_exag_val
-        # 공통 모드 위치 offset — wafer 의 min 이 공통 범위 어디에 있는지 비율로 바닥 위치.
-        # → avg 낮은 wafer 는 낮게, 높은 wafer 는 높게 앉음.
-        # 개별 모드는 0 (각 wafer 가 z=0 에서 시작).
-        if self._display.z_range is not None:
-            z_base = ((vmin_h - vmin_c) / z_range_c) * target_height * z_exag_val
-        else:
-            z_base = 0.0
+        factor = (target_height / z_range_h) * (float(z_exag) if z_exag is not None else 1.0)
 
         cmap = resolve_colormap(common.get("colormap", "Turbo"))
 
@@ -959,7 +946,6 @@ class WaferCell(QFrame):
             xs_all, ys_all, z_raw_all, n_rings, seg,
             vmin_h, factor, vmin_c, z_range_c, cmap,
             cut_mask=cut_mask_all if cut_mask_all.any() else None,
-            z_base=z_base,
         )
         # shader="shaded" — lighting 적용으로 smooth=True/False 차이 시각화
         # (shader 없으면 vertex color 그대로 → smooth 차이 안 보임)
@@ -983,7 +969,6 @@ class WaferCell(QFrame):
         v_w, f_w, c_w = _build_smooth_cylinder_wall(
             wall_xs, wall_ys, wall_z_raw, seg,
             vmin_h, factor, vmin_c, z_range_c, cmap,
-            z_base=z_base,
         )
         if self._gl_wall is None:
             self._gl_wall = gl.GLMeshItem(
