@@ -321,6 +321,10 @@ DEFAULT_SETTINGS = {
         "z_exaggeration": 1.0,     # Z 과장 배율 (0.5~3.0, 1.0=기준)
         "show_grid": False,        # 바닥 그리드
         "camera_distance": 550,    # 카메라 거리 (작을수록 확대, 400~800)
+        # 3D mesh 종류: "rect"(기존 GLSurfacePlotItem, 카디널 스트라이프 있음) | "radial"(원형 fan mesh, 매끈)
+        "mesh_type": "rect",
+        "radial_rings": 20,        # radial mesh 반경 방향 링 수 (5~60)
+        "radial_seg": 180,         # radial mesh 각도 세그먼트 수 (60~720)
     },
 
     # Summary 표

@@ -444,17 +444,42 @@ class Chart3DGroup(QGroupBox):
         self.sp_cam_dist.setSingleStep(10)
         self.sp_cam_dist.setValue(int(cfg.get("camera_distance", 550)))
 
+        # Mesh 종류: rect(기존) / radial(원형 fan mesh)
+        self.cb_mesh_type = _limit_width(QComboBox())
+        self.cb_mesh_type.addItem("rect (격자)", "rect")
+        self.cb_mesh_type.addItem("radial (원형)", "radial")
+        cur_mesh = str(cfg.get("mesh_type", "rect"))
+        idx = self.cb_mesh_type.findData(cur_mesh)
+        self.cb_mesh_type.setCurrentIndex(idx if idx >= 0 else 0)
+
+        # radial 밀도 — rings × seg
+        self.sp_rings = _limit_width(QSpinBox())
+        self.sp_rings.setRange(5, 60)
+        self.sp_rings.setSingleStep(5)
+        self.sp_rings.setValue(int(cfg.get("radial_rings", 20)))
+
+        self.sp_rseg = _limit_width(QSpinBox())
+        self.sp_rseg.setRange(60, 720)
+        self.sp_rseg.setSingleStep(60)
+        self.sp_rseg.setValue(int(cfg.get("radial_seg", 180)))
+
         _populate_two_columns(self, [
             ("부드럽게 (smooth)", self.chk_smooth),
             ("Z-Height", self.sp_zexag),
             ("바닥 그리드", self.chk_grid),
             ("카메라 거리", self.sp_cam_dist),
+            ("Mesh 종류", self.cb_mesh_type),
+            ("Radial: rings", self.sp_rings),
+            ("Radial: seg", self.sp_rseg),
         ])
 
         self.chk_smooth.toggled.connect(self.changed)
         self.sp_zexag.valueChanged.connect(self.changed)
         self.chk_grid.toggled.connect(self.changed)
         self.sp_cam_dist.valueChanged.connect(self.changed)
+        self.cb_mesh_type.currentIndexChanged.connect(self.changed)
+        self.sp_rings.valueChanged.connect(self.changed)
+        self.sp_rseg.valueChanged.connect(self.changed)
 
     def gather(self) -> dict[str, Any]:
         return {
@@ -462,10 +487,14 @@ class Chart3DGroup(QGroupBox):
             "z_exaggeration": float(self.sp_zexag.value()),
             "show_grid": self.chk_grid.isChecked(),
             "camera_distance": int(self.sp_cam_dist.value()),
+            "mesh_type": str(self.cb_mesh_type.currentData()),
+            "radial_rings": int(self.sp_rings.value()),
+            "radial_seg": int(self.sp_rseg.value()),
         }
 
     def reload(self, cfg: dict[str, Any]) -> None:
-        widgets = (self.chk_smooth, self.sp_zexag, self.chk_grid, self.sp_cam_dist)
+        widgets = (self.chk_smooth, self.sp_zexag, self.chk_grid, self.sp_cam_dist,
+                   self.cb_mesh_type, self.sp_rings, self.sp_rseg)
         for w in widgets:
             w.blockSignals(True)
         try:
@@ -474,6 +503,10 @@ class Chart3DGroup(QGroupBox):
             self.sp_zexag.setValue(1.0 if cur_z is None else float(cur_z))
             self.chk_grid.setChecked(bool(cfg.get("show_grid", True)))
             self.sp_cam_dist.setValue(int(cfg.get("camera_distance", 550)))
+            idx = self.cb_mesh_type.findData(str(cfg.get("mesh_type", "rect")))
+            if idx >= 0: self.cb_mesh_type.setCurrentIndex(idx)
+            self.sp_rings.setValue(int(cfg.get("radial_rings", 20)))
+            self.sp_rseg.setValue(int(cfg.get("radial_seg", 180)))
         finally:
             for w in widgets:
                 w.blockSignals(False)

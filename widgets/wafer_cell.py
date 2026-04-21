@@ -126,6 +126,103 @@ def _compute_smooth_vertex_normals(vertexes: np.ndarray, faces: np.ndarray) -> n
     return vert_n.astype(np.float32)
 
 
+def _build_radial_surface_mesh(
+    rbf, R: float, rings: int, seg: int,
+    vmin: float, z_range: float, factor: float,
+    cmap: pg.ColorMap,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """원형 radial mesh — 중심 r=0 부터 경계 r=R 까지 (rings+1) 링 × seg 세그먼트.
+
+    - 정점 좌표 (x=r cos θ, y=r sin θ, z=(RBF(x,y)-vmin)*factor)
+    - 각 정점 색: z 정규화로 colormap 샘플
+    - face: 인접 링 사이 사각형을 2 삼각형으로
+    - 외곽 링이 정확히 r=R 이므로 경계가 부드러운 원 (격자 기반 카디널 스트라이프 없음)
+
+    Returns: (verts, faces, colors_rgba)
+    """
+    r_arr = np.linspace(0.0, R, rings + 1)
+    theta = np.linspace(0.0, 2.0 * np.pi, seg, endpoint=False)
+    Rm, Tm = np.meshgrid(r_arr, theta, indexing="ij")
+    xs = (Rm * np.cos(Tm)).ravel()
+    ys = (Rm * np.sin(Tm)).ravel()
+    pts = np.column_stack([xs, ys])
+    z_raw = rbf(pts)
+    z_disp = ((z_raw - vmin) * factor).astype(np.float32)
+    verts = np.column_stack([xs.astype(np.float32), ys.astype(np.float32), z_disp])
+
+    # Faces — 각 (i,j) 사각형: a=(i,j), b=(i,j+1), c=(i+1,j+1), d=(i+1,j)
+    N = rings * seg  # 사각형 개수
+    a = np.empty(N, dtype=np.uint32)
+    b = np.empty(N, dtype=np.uint32)
+    c = np.empty(N, dtype=np.uint32)
+    d = np.empty(N, dtype=np.uint32)
+    k = 0
+    for i in range(rings):
+        for j in range(seg):
+            j_next = (j + 1) % seg
+            a[k] = i * seg + j
+            b[k] = i * seg + j_next
+            c[k] = (i + 1) * seg + j_next
+            d[k] = (i + 1) * seg + j
+            k += 1
+    # 각 쿼드를 2 trig 으로
+    faces = np.empty((2 * N, 3), dtype=np.uint32)
+    faces[0::2, 0] = a; faces[0::2, 1] = b; faces[0::2, 2] = c
+    faces[1::2, 0] = a; faces[1::2, 1] = c; faces[1::2, 2] = d
+
+    # Colors — vertex color 기반 interpolation
+    rng = max(z_range, 1e-9)
+    norm = np.clip((z_raw - vmin) / rng, 0.0, 1.0)
+    lut = cmap.getLookupTable(0.0, 1.0, 256)
+    idx = np.clip((norm * 255).astype(int), 0, 255)
+    rgb = lut[idx, :3].astype(np.float32) / 255.0
+    colors = np.concatenate([rgb, np.ones((rgb.shape[0], 1), dtype=np.float32)], axis=1)
+    return verts, faces, colors
+
+
+def _build_smooth_cylinder_wall(
+    rbf, R: float, seg: int,
+    vmin: float, z_range: float, factor: float,
+    cmap: pg.ColorMap,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """매끈 원통 벽 — r=R 에서 z=RBF(R,θ) 부터 z=0 까지.
+
+    radial surface 의 외곽 링과 top z 공유 → 이음새 매끈.
+    bottom z=0 으로 지면과 연결 → "떠 있는" 느낌 제거.
+    """
+    theta = np.linspace(0.0, 2.0 * np.pi, seg, endpoint=False)
+    xs = (R * np.cos(theta)).astype(np.float32)
+    ys = (R * np.sin(theta)).astype(np.float32)
+    pts = np.column_stack([xs, ys])
+    z_raw = rbf(pts)
+    z_top = ((z_raw - vmin) * factor).astype(np.float32)
+
+    top = np.column_stack([xs, ys, z_top])
+    bot = np.column_stack([xs, ys, np.zeros(seg, dtype=np.float32)])
+    verts = np.vstack([top, bot])
+
+    # faces: 각 세그먼트별 (top_i, top_nxt, bot_nxt) / (top_i, bot_nxt, bot_i)
+    idx = np.arange(seg, dtype=np.uint32)
+    nxt = ((idx + 1) % seg).astype(np.uint32)
+    top_i, top_n = idx, nxt
+    bot_i, bot_n = idx + seg, nxt + seg
+    face_a = np.stack([top_i, top_n, bot_n], axis=1)
+    face_b = np.stack([top_i, bot_n, bot_i], axis=1)
+    faces = np.concatenate([face_a, face_b], axis=0)
+
+    # 색: top 은 data z 기반, bottom 은 vmin(colormap 가장 밑) 쪽
+    rng = max(z_range, 1e-9)
+    norm_top = np.clip((z_raw - vmin) / rng, 0.0, 1.0)
+    lut = cmap.getLookupTable(0.0, 1.0, 256)
+    idx_top = np.clip((norm_top * 255).astype(int), 0, 255)
+    rgb_top = lut[idx_top, :3].astype(np.float32) / 255.0
+    rgb_bot = np.tile(lut[0:1, :3].astype(np.float32) / 255.0, (seg, 1))
+    rgb = np.vstack([rgb_top, rgb_bot])
+    alpha = np.ones((rgb.shape[0], 1), dtype=np.float32)
+    colors = np.concatenate([rgb, alpha], axis=1)
+    return verts, faces, colors
+
+
 def _build_cut_wall_mesh(cut_r: float, XG: np.ndarray, YG: np.ndarray,
                           z_disp: np.ndarray, cmap: pg.ColorMap,
                           z_disp_max: float, n_seg: int = 72):
@@ -516,6 +613,10 @@ class WaferCell(QFrame):
         self._gl_grid = None
         self._gl_wall = None       # edge_cut 측벽 (surface edge → Z=0)
         self._wall_key: tuple | None = None
+        # radial mesh 경로용 slot — GLMeshItem 으로 rect GLSurfacePlotItem 대체
+        self._gl_radial_surface = None
+        self._gl_radial_wall = None
+        self._radial_key: tuple | None = None
         # 데이터 필터는 즉시 (가벼움) — 렌더는 defer면 ResultPanel이 병렬 prefetch 후 호출
         self._load_data()
         if not defer_render:
@@ -800,6 +901,7 @@ class WaferCell(QFrame):
     def _render_3d(self, x_in, y_in, v_in, settings) -> None:
         common = settings.get("chart_common", {})
         chart3d = settings.get("chart_3d", {})
+        mesh_type = str(chart3d.get("mesh_type", "rect")).lower()
 
         # 카메라 distance — Settings 변경 시 즉시 반영. FOV는 45° 하드코딩.
         # (elevation/azimuth는 드래그로 사용자 조작 유지)
@@ -808,6 +910,16 @@ class WaferCell(QFrame):
         if opts.get("distance") != dist:
             self._gl_3d.setCameraPosition(distance=dist)
             self._gl_3d.update()
+
+        if mesh_type == "radial":
+            self._render_3d_radial(x_in, y_in, v_in, settings)
+            return
+
+        # rect (기존) — 격자 기반 GLSurfacePlotItem + z=0 drop 벽
+        # radial slot 이 있으면 숨김
+        for item in (self._gl_radial_surface, self._gl_radial_wall):
+            if item is not None:
+                item.setVisible(False)
 
         XG, YG, ZG, inside, xg, yg = self._ensure_interp(x_in, y_in, v_in, common)
 
@@ -930,6 +1042,128 @@ class WaferCell(QFrame):
             self._gl_wall.setVisible(False)
 
         # colorbar 갱신 (3D용 범위 = vmin~vmax. display.z_range가 있으면 그걸 사용)
+        self._update_colorbar(common, None, vmin=vmin, vmax=vmax)
+
+    def _render_3d_radial(self, x_in, y_in, v_in, settings) -> None:
+        """radial 원형 fan mesh 기반 3D 렌더.
+
+        rect 격자 (GLSurfacePlotItem) 대신 (r, θ) mesh + 매끈 원통 벽.
+        장점: 카디널 스트라이프 없음, 경계 곡선 정확.
+        비용: RBF 정점 수만큼 재평가 (rings × seg + seg).
+        """
+        from scipy.interpolate import RBFInterpolator
+
+        common = settings.get("chart_common", {})
+        chart3d = settings.get("chart_3d", {})
+
+        rings = max(5, int(chart3d.get("radial_rings", 20)))
+        seg = max(60, int(chart3d.get("radial_seg", 180)))
+
+        # 기존 rect surface 는 숨김 (mesh 토글 시)
+        if self._gl_surface is not None:
+            self._gl_surface.setVisible(False)
+        if self._gl_wall is not None:
+            self._gl_wall.setVisible(False)
+
+        # RBF fit — input 데이터에서 직접
+        pts = np.column_stack([np.asarray(x_in, dtype=float), np.asarray(y_in, dtype=float)])
+        vals = np.asarray(v_in, dtype=float)
+        # 유효 데이터만 (NaN 제외)
+        mask = ~np.isnan(vals) & ~np.isnan(pts[:, 0]) & ~np.isnan(pts[:, 1])
+        pts = pts[mask]
+        vals = vals[mask]
+        if len(vals) < 2:
+            return
+        try:
+            rbf = RBFInterpolator(pts, vals, kernel="thin_plate_spline")
+        except Exception:
+            # RBF 실패 (collinear 등) — 조용히 skip. rect 모드 이용 권장.
+            return
+
+        # Z 범위 — 공통 스케일 모드 우선
+        if self._display.z_range is not None:
+            vmin, vmax = self._display.z_range
+        else:
+            # Radial 정점에서 샘플링한 값 기반 (rect ZG 없음)
+            # 일단 input vals 기준으로 근사 → 향후 radial 평가 후 재계산 가능
+            vmin = float(np.nanmin(vals))
+            vmax = float(np.nanmax(vals))
+        z_range = vmax - vmin if vmax > vmin else 1.0
+
+        # Z 과장 배율
+        z_exag = chart3d.get("z_exaggeration", None)
+        target_height = WAFER_RADIUS_MM * 0.4
+        factor = (target_height / z_range) * (float(z_exag) if z_exag is not None else 1.0)
+
+        cmap = resolve_colormap(common.get("colormap", "Turbo"))
+        R = float(WAFER_RADIUS_MM)
+
+        gview = self._gl_3d
+
+        # 바닥 grid — 재사용
+        if chart3d.get("show_grid", True):
+            if self._gl_grid is None:
+                self._gl_grid = gl.GLGridItem()
+                self._gl_grid.setSize(x=350, y=350)
+                self._gl_grid.setSpacing(x=50, y=50)
+                self._gl_grid.setColor((205, 205, 205, 150))
+                gview.addItem(self._gl_grid)
+            self._gl_grid.setVisible(True)
+        elif self._gl_grid is not None:
+            self._gl_grid.setVisible(False)
+
+        # Radial surface mesh
+        smooth = bool(chart3d.get("smooth", True))
+        v_s, f_s, c_s = _build_radial_surface_mesh(
+            rbf, R, rings, seg, vmin, z_range, factor, cmap,
+        )
+        if self._gl_radial_surface is None:
+            self._gl_radial_surface = gl.GLMeshItem(
+                vertexes=v_s, faces=f_s, vertexColors=c_s,
+                smooth=smooth, drawEdges=False, glOptions="opaque",
+            )
+            gview.addItem(self._gl_radial_surface)
+        else:
+            self._gl_radial_surface.setMeshData(
+                vertexes=v_s, faces=f_s, vertexColors=c_s, smooth=smooth,
+            )
+        self._gl_radial_surface.setVisible(True)
+
+        # Smooth cylinder wall — 외곽 r=R 에서 z=0 까지
+        v_w, f_w, c_w = _build_smooth_cylinder_wall(
+            rbf, R, seg, vmin, z_range, factor, cmap,
+        )
+        if self._gl_radial_wall is None:
+            self._gl_radial_wall = gl.GLMeshItem(
+                vertexes=v_w, faces=f_w, vertexColors=c_w,
+                smooth=True, drawEdges=False, glOptions="opaque",
+            )
+            gview.addItem(self._gl_radial_wall)
+        else:
+            self._gl_radial_wall.setMeshData(
+                vertexes=v_w, faces=f_w, vertexColors=c_w, smooth=True,
+            )
+        self._gl_radial_wall.setVisible(True)
+
+        # boundary line (재사용)
+        if common.get("show_circle", True):
+            bx, by = _boundary_xy(
+                common.get("show_notch", True),
+                float(common.get("notch_depth_mm", _NOTCH_DEFAULT_DEPTH_MM)),
+            )
+            circ = np.column_stack([bx, by, np.zeros_like(bx)])
+            if self._gl_boundary is None:
+                self._gl_boundary = gl.GLLinePlotItem(
+                    pos=circ, color=(0, 0, 0, 1), width=2,
+                    antialias=True, glOptions="opaque",
+                )
+                gview.addItem(self._gl_boundary)
+            else:
+                self._gl_boundary.setData(pos=circ)
+            self._gl_boundary.setVisible(True)
+        elif self._gl_boundary is not None:
+            self._gl_boundary.setVisible(False)
+
         self._update_colorbar(common, None, vmin=vmin, vmax=vmax)
 
     def _update_colorbar(self, common: dict, values=None, vmin=None, vmax=None) -> None:
