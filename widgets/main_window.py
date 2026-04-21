@@ -889,15 +889,17 @@ class MainWindow(QMainWindow):
                 d.z_range = None
             return
 
-        # 각 wafer 의 rendered 범위 추정 — radial 15 rings × 90 seg = 1,350 points.
-        # 실제 렌더는 20×180=3,780 points 이지만 범위 추정엔 충분. 비용 wafer 당 ~1ms.
-        # interp_method 는 settings 에서 가져와 실제 렌더와 동일 kernel 사용.
+        # 각 wafer 의 rendered 범위 추정 — **실제 렌더와 동일 rings/seg** 로 샘플.
+        # 이전 코드의 희소 샘플(15×90) 은 실제 렌더(20×180) 의 극값을 놓쳐 공통
+        # z_range 가 일부 wafer 값 밖으로 → 해당 wafer 색이 전부 clip 되던 문제 원인.
         from core.interp import make_rbf
         from core.coords import WAFER_RADIUS_MM
         from core.settings import load_settings as _ls
         R = float(WAFER_RADIUS_MM)
-        method = str(_ls().get("chart_common", {}).get("interp_method", "RBF-ThinPlate"))
-        rings, seg = 15, 90
+        cfg = _ls().get("chart_common", {})
+        method = str(cfg.get("interp_method", "RBF-ThinPlate"))
+        rings = max(5, int(cfg.get("radial_rings", 20)))
+        seg = max(60, int(cfg.get("radial_seg", 180)))
         r_arr = np.linspace(0.0, R, rings + 1)
         theta = np.linspace(0.0, 2.0 * np.pi, seg, endpoint=False)
         Rm, Tm = np.meshgrid(r_arr, theta, indexing="ij")

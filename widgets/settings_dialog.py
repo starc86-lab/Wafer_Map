@@ -451,7 +451,7 @@ class Chart3DGroup(QGroupBox):
 
         # Z-Height (배율) — DoubleSpinBox, 0.5~3.0, step 0.1, 소수 1자리
         self.sp_zexag = _limit_width(QDoubleSpinBox())
-        self.sp_zexag.setRange(0.5, 3.0)
+        self.sp_zexag.setRange(0.1, 3.0)
         self.sp_zexag.setSingleStep(0.1)
         self.sp_zexag.setDecimals(1)
         self.sp_zexag.setSuffix("×")

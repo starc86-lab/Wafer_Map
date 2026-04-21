@@ -806,6 +806,9 @@ class WaferCell(QFrame):
         if chart.get("show_value_labels", False):
             tbl = settings.get("table", {})
             decimals = int(common.get("decimals", tbl.get("decimals", 2)))
+            from PySide6.QtGui import QFont
+            label_font = QFont()
+            label_font.setPointSize(7)
             for x, y, val in zip(x_in, y_in, v_in):
                 if np.isnan(val):
                     continue
@@ -814,6 +817,7 @@ class WaferCell(QFrame):
                         pos=(float(x), float(y), 1.0),
                         text=f"{val:.{decimals}f}",
                         color=(40, 40, 40, 255),
+                        font=label_font,
                     )
                     gview.addItem(ti)
                 except Exception:
