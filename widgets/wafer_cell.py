@@ -147,7 +147,8 @@ def _build_radial_surface_mesh(
     ys = (Rm * np.sin(Tm)).ravel()
     pts = np.column_stack([xs, ys])
     z_raw = rbf(pts)
-    z_disp = ((z_raw - vmin) * factor).astype(np.float32)
+    # RBF 외삽으로 vmin 아래 값이 나올 수 있음 → 바닥(z=0) 뚫지 않도록 clamp.
+    z_disp = np.clip((z_raw - vmin) * factor, 0.0, None).astype(np.float32)
     verts = np.column_stack([xs.astype(np.float32), ys.astype(np.float32), z_disp])
 
     # Faces — 각 (i,j) 사각형: a=(i,j), b=(i,j+1), c=(i+1,j+1), d=(i+1,j)
@@ -195,7 +196,8 @@ def _build_smooth_cylinder_wall(
     ys = (R * np.sin(theta)).astype(np.float32)
     pts = np.column_stack([xs, ys])
     z_raw = rbf(pts)
-    z_top = ((z_raw - vmin) * factor).astype(np.float32)
+    # 음수 clamp — 바닥 아래로 뚫고 내려가는 문제 방지
+    z_top = np.clip((z_raw - vmin) * factor, 0.0, None).astype(np.float32)
 
     top = np.column_stack([xs, ys, z_top])
     bot = np.column_stack([xs, ys, np.zeros(seg, dtype=np.float32)])
@@ -1065,10 +1067,13 @@ class WaferCell(QFrame):
         if self._gl_wall is not None:
             self._gl_wall.setVisible(False)
 
-        # RBF fit — input 데이터에서 직접
+        # 2D/rect mode 와 vmin/vmax 일치를 위해 rect ZG 도 계산 (캐시 재사용).
+        # rect ZG 는 2D view 에서도 필요하므로 캐시 가치 있음. 비용 ~G²*RBF=80ms.
+        XG, YG, ZG, inside, _xg, _yg = self._ensure_interp(x_in, y_in, v_in, common)
+
+        # RBF fit — radial 정점 평가용. _ensure_interp 내부의 RBF 는 함수 local 이라 재사용 불가.
         pts = np.column_stack([np.asarray(x_in, dtype=float), np.asarray(y_in, dtype=float)])
         vals = np.asarray(v_in, dtype=float)
-        # 유효 데이터만 (NaN 제외)
         mask = ~np.isnan(vals) & ~np.isnan(pts[:, 0]) & ~np.isnan(pts[:, 1])
         pts = pts[mask]
         vals = vals[mask]
@@ -1080,14 +1085,15 @@ class WaferCell(QFrame):
             # RBF 실패 (collinear 등) — 조용히 skip. rect 모드 이용 권장.
             return
 
-        # Z 범위 — 공통 스케일 모드 우선
+        # Z 범위 — rect ZG 기반 (2D / rect 3D 와 정합)
         if self._display.z_range is not None:
             vmin, vmax = self._display.z_range
         else:
-            # Radial 정점에서 샘플링한 값 기반 (rect ZG 없음)
-            # 일단 input vals 기준으로 근사 → 향후 radial 평가 후 재계산 가능
-            vmin = float(np.nanmin(vals))
-            vmax = float(np.nanmax(vals))
+            valid = ZG[inside & ~np.isnan(ZG)]
+            if valid.size == 0:
+                return
+            vmin = float(valid.min())
+            vmax = float(valid.max())
         z_range = vmax - vmin if vmax > vmin else 1.0
 
         # Z 과장 배율
