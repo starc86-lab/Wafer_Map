@@ -223,20 +223,28 @@ class MainWindow(QMainWindow):
         self.cb_zscale = QComboBox(); self.cb_zscale.addItems(["공통", "개별"])
         self.cb_zscale.setCurrentText("개별")  # 세션 디폴트 (저장 X)
 
-        # Z-range expand (%) — 공통 모드에서만 활성. 중심값 midpoint 고정, range 를
+        # Z-Span (%) — 공통 모드에서만 활성. 중심값 midpoint 고정, range 를
         # (1 + pct/100) 배로 늘려 colorbar/height 범위 확장. 각 wafer 가 palette
         # 전체를 덜 쓰게 되어 여러 wafer 비교 시 색/높이 대비가 부드러워짐.
         _stored_pct = int(load_settings().get("chart_common", {}).get(
             "z_range_expand_pct", 50
         ))
         self._z_range_pct_stored = _stored_pct   # 개별 모드 복귀 시 복원용
+        self.lbl_z_range = QLabel("Z-Span:")
         self.sp_z_range = QSpinBox()
         self.sp_z_range.setRange(0, 200)
         self.sp_z_range.setSingleStep(10)
         self.sp_z_range.setSuffix("%")
         self.sp_z_range.setValue(_stored_pct if self.cb_zscale.currentText() == "공통" else 0)
-        self.sp_z_range.setEnabled(self.cb_zscale.currentText() == "공통")
         self.sp_z_range.setFixedWidth(72)
+        # 비활성 시 내부 배경도 회색처리 (Fusion 기본은 흰색 유지)
+        self.sp_z_range.setStyleSheet(
+            "QSpinBox:disabled { background-color: #e8e8e8; color: #999; }"
+        )
+        # 라벨도 같이 disable — 텍스트 자동 회색 (Qt 팔레트 disabled 색)
+        _is_common = self.cb_zscale.currentText() == "공통"
+        self.sp_z_range.setEnabled(_is_common)
+        self.lbl_z_range.setEnabled(_is_common)
         self.sp_z_range.valueChanged.connect(self._on_z_range_changed)
 
         self.btn_visualize = QPushButton("▶  Run Analysis")
@@ -270,7 +278,7 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.cb_view)
         lay.addWidget(QLabel("Z-Scale:"))
         lay.addWidget(self.cb_zscale)
-        lay.addWidget(QLabel("Z-range:"))
+        lay.addWidget(self.lbl_z_range)
         lay.addWidget(self.sp_z_range)
         lay.addStretch(1)
         lay.addWidget(self.btn_visualize)
@@ -1019,10 +1027,11 @@ class MainWindow(QMainWindow):
         z_range는 2D ImageItem levels(+colorbar)와 3D surface colors 모두에
         영향. 양쪽 렌더 캐시 reset 필요 (보간 캐시는 유지되므로 빠름).
         """
-        # Z-range 스핀박스 활성/비활성 + 값 토글 (개별 모드 → 0 회색, 공통 복귀 → 저장값)
+        # Z-Span 스핀박스 활성/비활성 + 값 토글 (개별 모드 → 0 회색, 공통 복귀 → 저장값)
         is_common = self.cb_zscale.currentText() == "공통"
         self.sp_z_range.blockSignals(True)
         self.sp_z_range.setEnabled(is_common)
+        self.lbl_z_range.setEnabled(is_common)
         self.sp_z_range.setValue(self._z_range_pct_stored if is_common else 0)
         self.sp_z_range.blockSignals(False)
 
