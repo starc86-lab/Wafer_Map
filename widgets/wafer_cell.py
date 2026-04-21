@@ -579,11 +579,15 @@ class WaferCell(QFrame):
 
         # 2D radial top view widget — mesh_type=radial 일 때 2D 슬롯으로 사용.
         # plain GLViewWidget (Shift+sync 없음 — 2D 는 동기 의미 없음).
+        # 카메라는 3D 와 동일 파라미터 (fov=45, distance=settings) — elevation 만 90 (top-down).
+        # 이러면 "3D 에서 top view 로 각도만 돌렸을 때와 동일한 크기" 로 보임.
         self._gl_2d = gl.GLViewWidget()
         self._gl_2d.setBackgroundColor("w")
-        # top-down: elevation=90, azimuth 무관. distance 는 wafer 가 widget 가득 차도록.
-        self._gl_2d.setCameraPosition(distance=400, elevation=90, azimuth=0)
-        self._gl_2d.opts["fov"] = 1.0  # near-orthographic (perspective 왜곡 최소화)
+        self._gl_2d.setCameraPosition(
+            distance=float(s.get("camera_distance", 550)),
+            elevation=90, azimuth=0,
+        )
+        self._gl_2d.opts["fov"] = 45
         self._gl_2d.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._gl_2d.customContextMenuRequested.connect(self._show_plot_menu)
         self._chart_box_layout.addWidget(self._gl_2d)    # index 2
@@ -956,6 +960,14 @@ class WaferCell(QFrame):
         apply_cut = edge_cut_mm > 0 and effective_R < R
 
         gview = self._gl_2d
+
+        # 카메라 distance — 3D 설정 변경 시 즉시 동기화 (사용자 드래그 pan 은 center 유지)
+        chart3d = settings.get("chart_3d", {})
+        dist = float(chart3d.get("camera_distance", 550))
+        if gview.opts.get("distance") != dist:
+            gview.setCameraPosition(distance=dist)
+            gview.update()
+
         # 기존 모든 item 제거 (top view 는 매 렌더 깨끗이 다시 그림 — overhead 작음)
         for it in list(gview.items):
             gview.removeItem(it)
@@ -1487,12 +1499,13 @@ class WaferCell(QFrame):
                 s = settings_io.load_settings().get("chart_3d", {})
                 from pyqtgraph import Vector
                 if chart is self._gl_2d:
-                    # 2D radial top view — 초기 카메라(top, ortho 근사) 복귀
+                    # 2D radial top view — 3D 와 동일 파라미터로 top-down 만
                     chart.setCameraPosition(
                         pos=Vector(0, 0, 0),
-                        distance=400, elevation=90, azimuth=0,
+                        distance=float(s.get("camera_distance", 550)),
+                        elevation=90, azimuth=0,
                     )
-                    chart.opts["fov"] = 1.0
+                    chart.opts["fov"] = 45
                 else:
                     # 3D — Ctrl+드래그 pan 도 함께 복귀
                     chart.setCameraPosition(
