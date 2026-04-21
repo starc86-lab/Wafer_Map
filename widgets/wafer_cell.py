@@ -1004,16 +1004,15 @@ class WaferCell(QFrame):
         ys_all = (Rm * np.sin(Tm)).ravel()
         z_raw_all = rbf(np.column_stack([xs_all, ys_all]))
 
-        # RBF overshoot clamp — thin_plate_spline 이 측정치 범위 밖 값을 생성 가능.
-        # 물리적 측정치를 벗어나지 않도록 input 범위로 clip.
-        in_vmin, in_vmax = float(np.nanmin(vals)), float(np.nanmax(vals))
-        z_raw_all = np.clip(z_raw_all, in_vmin, in_vmax)
-
-        # vmin/vmax — 공통 스케일 우선, 아니면 input 범위 사용 (clamp 후라 z_raw 와 동일)
+        # vmin/vmax — 공통 스케일 모드 우선, 아니면 radial 평가값 기반
         if self._display.z_range is not None:
             vmin, vmax = self._display.z_range
         else:
-            vmin, vmax = in_vmin, in_vmax
+            finite = z_raw_all[np.isfinite(z_raw_all)]
+            if finite.size == 0:
+                return
+            vmin = float(finite.min())
+            vmax = float(finite.max())
         z_range = vmax - vmin if vmax > vmin else 1.0
 
         # 2D top view: z=0 평면 (높이 표현 없음, 색만)
@@ -1323,15 +1322,15 @@ class WaferCell(QFrame):
         ys_all = (Rm * np.sin(Tm)).ravel()
         z_raw_all = rbf(np.column_stack([xs_all, ys_all]))
 
-        # RBF overshoot clamp — 측정치 범위 밖 값 제거
-        in_vmin, in_vmax = float(np.nanmin(vals)), float(np.nanmax(vals))
-        z_raw_all = np.clip(z_raw_all, in_vmin, in_vmax)
-
-        # Z 범위 — 공통 스케일 모드 우선, 아니면 input 범위
+        # Z 범위 — 공통 스케일 모드 우선, 아니면 radial 평가값 기반
         if self._display.z_range is not None:
             vmin, vmax = self._display.z_range
         else:
-            vmin, vmax = in_vmin, in_vmax
+            finite = z_raw_all[np.isfinite(z_raw_all)]
+            if finite.size == 0:
+                return
+            vmin = float(finite.min())
+            vmax = float(finite.max())
         z_range = vmax - vmin if vmax > vmin else 1.0
 
         # Z 과장 배율
