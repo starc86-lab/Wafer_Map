@@ -112,19 +112,22 @@ def _compute_smooth_vertex_normals(vertexes: np.ndarray, faces: np.ndarray) -> n
 def _build_radial_surface_mesh(
     xs: np.ndarray, ys: np.ndarray, z_raw: np.ndarray,
     rings: int, seg: int,
-    vmin: float, z_range: float, factor: float,
+    vmin_h: float, factor: float,
+    vmin_c: float, z_range_c: float,
     cmap: pg.ColorMap,
     *, cut_mask: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """원형 radial mesh — pre-evaluated (xs, ys, z_raw) 로 정점 구성.
 
     (rings+1) × seg 정점 순서: i*seg + j (ring i, angle j)
-    - face: 인접 링 사이 사각형을 2 삼각형으로
-    - 외곽 링이 정확히 r=R 이므로 경계가 부드러운 원 (격자 기반 카디널 스트라이프 없음)
+    - 높이 스케일: `vmin_h` + `factor` 로 z_disp 계산 (개별 wafer 기준 — 공통 모드에도
+      dome 납작해지지 않도록).
+    - 색 스케일: `vmin_c` + `z_range_c` 로 normalize (공통 모드 반영).
+    - face: 인접 링 사이 사각형을 2 삼각형으로.
     - cut_mask: True 인 정점은 z=0 + 흰색 (edge_cut shelf / notch V 영역 제거용).
     """
     # RBF 외삽으로 vmin 아래 값이 나올 수 있음 → 바닥(z=0) 뚫지 않도록 clamp.
-    z_disp = np.clip((z_raw - vmin) * factor, 0.0, None).astype(np.float32)
+    z_disp = np.clip((z_raw - vmin_h) * factor, 0.0, None).astype(np.float32)
 
     # 잘려야 할 정점 z=0 으로 강제
     if cut_mask is not None:
@@ -152,15 +155,15 @@ def _build_radial_surface_mesh(
     faces[0::2, 0] = a; faces[0::2, 1] = b; faces[0::2, 2] = c
     faces[1::2, 0] = a; faces[1::2, 1] = c; faces[1::2, 2] = d
 
-    # Colors — vertex color 기반 interpolation
-    rng = max(z_range, 1e-9)
-    norm = np.clip((z_raw - vmin) / rng, 0.0, 1.0)
+    # Colors — 공통 스케일 범위 기준 normalize
+    rng = max(z_range_c, 1e-9)
+    norm = np.clip((z_raw - vmin_c) / rng, 0.0, 1.0)
     lut = cmap.getLookupTable(0.0, 1.0, 256)
     idx = np.clip((norm * 255).astype(int), 0, 255)
     rgb = lut[idx, :3].astype(np.float32) / 255.0
     colors = np.concatenate([rgb, np.ones((rgb.shape[0], 1), dtype=np.float32)], axis=1)
 
-    # cut 영역 정점은 흰색 (배경 매치) — rect mode 의 alpha=0 white 와 동일 효과
+    # cut 영역 정점은 흰색 (배경 매치)
     if cut_mask is not None and cut_mask.any():
         colors[cut_mask] = (1.0, 1.0, 1.0, 1.0)
 
@@ -170,17 +173,19 @@ def _build_radial_surface_mesh(
 def _build_smooth_cylinder_wall(
     xs: np.ndarray, ys: np.ndarray, z_raw: np.ndarray,
     seg: int,
-    vmin: float, z_range: float, factor: float,
+    vmin_h: float, factor: float,
+    vmin_c: float, z_range_c: float,
     cmap: pg.ColorMap,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """매끈 원통 벽 — pre-evaluated (xs, ys, z_raw) 외곽 링 기반, bottom z=0.
 
-    radial surface 외곽 링과 top z 공유 → 이음새 매끈.
+    - 높이: `vmin_h` + `factor` 로 top z 계산 (개별 기준).
+    - 색: `vmin_c` + `z_range_c` 로 normalize (공통 스케일 반영).
     """
     xs32 = xs.astype(np.float32)
     ys32 = ys.astype(np.float32)
     # 음수 clamp — 바닥 아래로 뚫고 내려가는 문제 방지
-    z_top = np.clip((z_raw - vmin) * factor, 0.0, None).astype(np.float32)
+    z_top = np.clip((z_raw - vmin_h) * factor, 0.0, None).astype(np.float32)
 
     top = np.column_stack([xs32, ys32, z_top])
     bot = np.column_stack([xs32, ys32, np.zeros(seg, dtype=np.float32)])
@@ -195,9 +200,9 @@ def _build_smooth_cylinder_wall(
     face_b = np.stack([top_i, bot_n, bot_i], axis=1)
     faces = np.concatenate([face_a, face_b], axis=0)
 
-    # 색: top 은 data z 기반, bottom 은 vmin(colormap 가장 밑) 쪽
-    rng = max(z_range, 1e-9)
-    norm_top = np.clip((z_raw - vmin) / rng, 0.0, 1.0)
+    # 색: top 은 data z 기반(공통 스케일), bottom 은 colormap 가장 밑
+    rng = max(z_range_c, 1e-9)
+    norm_top = np.clip((z_raw - vmin_c) / rng, 0.0, 1.0)
     lut = cmap.getLookupTable(0.0, 1.0, 256)
     idx_top = np.clip((norm_top * 255).astype(int), 0, 255)
     rgb_top = lut[idx_top, :3].astype(np.float32) / 255.0
@@ -888,21 +893,29 @@ class WaferCell(QFrame):
         ys_all = (Rm * np.sin(Tm)).ravel()
         z_raw_all = rbf(np.column_stack([xs_all, ys_all]))
 
-        # Z 범위 — 공통 스케일 모드 우선, 아니면 radial 평가값 기반
-        if self._display.z_range is not None:
-            vmin, vmax = self._display.z_range
-        else:
-            finite = z_raw_all[np.isfinite(z_raw_all)]
-            if finite.size == 0:
-                return
-            vmin = float(finite.min())
-            vmax = float(finite.max())
-        z_range = vmax - vmin if vmax > vmin else 1.0
+        # Z 높이용 범위 — **항상 개별 wafer** 값으로 계산.
+        # (공통 스케일 모드에서도 dome 의 높이가 다른 wafer 의 평균 offset 에 눌려
+        #  납작하게 보이는 현상 방지. 색만 공통 처리.)
+        finite = z_raw_all[np.isfinite(z_raw_all)]
+        if finite.size == 0:
+            return
+        vmin_h = float(finite.min())
+        vmax_h = float(finite.max())
+        z_range_h = vmax_h - vmin_h if vmax_h > vmin_h else 1.0
 
-        # Z 과장 배율
+        # 색 범위 — 공통 스케일 모드면 display.z_range, 아니면 개별
+        if self._display.z_range is not None:
+            vmin_c, vmax_c = self._display.z_range
+        else:
+            vmin_c, vmax_c = vmin_h, vmax_h
+        z_range_c = vmax_c - vmin_c if vmax_c > vmin_c else 1.0
+        # colorbar / legacy 호환 — 공통 범위를 colorbar 에 반영
+        vmin, vmax, z_range = vmin_c, vmax_c, z_range_c
+
+        # Z 과장 배율 — 높이 계산은 개별 기준
         z_exag = chart3d.get("z_exaggeration", None)
         target_height = WAFER_RADIUS_MM * 0.4
-        factor = (target_height / z_range) * (float(z_exag) if z_exag is not None else 1.0)
+        factor = (target_height / z_range_h) * (float(z_exag) if z_exag is not None else 1.0)
 
         cmap = resolve_colormap(common.get("colormap", "Turbo"))
 
@@ -934,7 +947,7 @@ class WaferCell(QFrame):
         smooth = bool(chart3d.get("smooth", True))
         v_s, f_s, c_s = _build_radial_surface_mesh(
             xs_all, ys_all, z_raw_all, n_rings, seg,
-            vmin, z_range, factor, cmap,
+            vmin_h, factor, vmin_c, z_range_c, cmap,
             cut_mask=cut_mask_all if cut_mask_all.any() else None,
         )
         # shader="shaded" — lighting 적용으로 smooth=True/False 차이 시각화
@@ -958,7 +971,7 @@ class WaferCell(QFrame):
         wall_z_raw = rbf(np.column_stack([wall_xs, wall_ys]))
         v_w, f_w, c_w = _build_smooth_cylinder_wall(
             wall_xs, wall_ys, wall_z_raw, seg,
-            vmin, z_range, factor, cmap,
+            vmin_h, factor, vmin_c, z_range_c, cmap,
         )
         if self._gl_wall is None:
             self._gl_wall = gl.GLMeshItem(
