@@ -470,6 +470,11 @@ class WaferCell(QFrame):
         self._gl_3d.customContextMenuRequested.connect(self._show_plot_menu)
         self._chart_box_layout.addWidget(self._gl_3d)    # index 1
 
+        # 마지막으로 settings 에서 적용한 camera_distance — 사용자 zoom 보존용.
+        # render 시 opts['distance'] 와 비교하면 zoom 때마다 초기화됨 → settings 값
+        # 변화 감지만 하도록 별도 추적.
+        self._applied_cam_dist: float = cam_dist
+
         self._chart_widget: QWidget = self._gl_2d  # 활성 위젯 추적
 
         self._table = QTableWidget(3, 2)
@@ -673,7 +678,7 @@ class WaferCell(QFrame):
         3D radial 과 동일한 mesh 데이터를 z=0 평면으로 깔아서 위에서 내려다 본 모습.
         측정점/값 라벨/경계 원 모두 GL 객체로 그림.
         """
-        from core.interp import make_rbf
+        from core.interp import make_interp
 
         common = settings.get("chart_common", {})
         chart = settings.get("chart_2d", {})
@@ -686,11 +691,14 @@ class WaferCell(QFrame):
 
         gview = self._gl_2d
 
-        # 카메라 distance — 3D 와 동일 값으로 동기화 (top view 가 3D 크기와 일치)
+        # 카메라 distance — 3D 와 동일 값으로 동기화 (top view 가 3D 크기와 일치).
+        # Settings 값이 **바뀔 때만** 리셋 (사용자의 zoom 상태 보존).
         chart3d = settings.get("chart_3d", {})
         dist = float(chart3d.get("camera_distance", 550))
-        if gview.opts.get("distance") != dist:
+        if dist != self._applied_cam_dist:
             gview.setCameraPosition(distance=dist)
+            self._gl_3d.setCameraPosition(distance=dist)
+            self._applied_cam_dist = dist
 
         # 기존 모든 item 제거 (top view 는 매 렌더 깨끗이 다시 그림 — overhead 작음)
         for it in list(gview.items):
@@ -703,8 +711,12 @@ class WaferCell(QFrame):
         if m.sum() < 2:
             return
         method = str(common.get("interp_method", "RBF-ThinPlate"))
+        radial_width = float(common.get("radial_line_width_mm", 45.0))
         try:
-            rbf = make_rbf(pts[m, 0], pts[m, 1], vals[m], method=method)
+            rbf = make_interp(
+                pts[m, 0], pts[m, 1], vals[m], method=method,
+                radial_line_width_mm=radial_width,
+            )
         except Exception:
             return
 
@@ -838,17 +850,18 @@ class WaferCell(QFrame):
 
         비용: RBF 정점 (rings+1)×seg + seg 개 재평가.
         """
-        from core.interp import make_rbf
+        from core.interp import make_interp
 
         common = settings.get("chart_common", {})
         chart3d = settings.get("chart_3d", {})
 
-        # 카메라 distance — Settings 변경 시 즉시 반영. FOV 45°, elevation/azimuth 는
-        # 드래그로 사용자 조작 유지 (_LockedGLView).
-        opts = self._gl_3d.opts
+        # 카메라 distance — Settings 값이 **바뀔 때만** 반영 (사용자의 휠 zoom 보존).
+        # opts['distance'] 대신 _applied_cam_dist 와 비교해야 함.
         dist = float(chart3d.get("camera_distance", 550))
-        if opts.get("distance") != dist:
+        if dist != self._applied_cam_dist:
             self._gl_3d.setCameraPosition(distance=dist)
+            self._gl_2d.setCameraPosition(distance=dist)
+            self._applied_cam_dist = dist
             self._gl_3d.update()
 
         rings = max(5, int(common.get("radial_rings", 20)))
@@ -861,10 +874,13 @@ class WaferCell(QFrame):
         if mask.sum() < 2:
             return
         method = str(common.get("interp_method", "RBF-ThinPlate"))
+        radial_width = float(common.get("radial_line_width_mm", 45.0))
         try:
-            rbf = make_rbf(pts[mask, 0], pts[mask, 1], vals[mask], method=method)
+            rbf = make_interp(
+                pts[mask, 0], pts[mask, 1], vals[mask], method=method,
+                radial_line_width_mm=radial_width,
+            )
         except Exception:
-            # RBF 실패 (collinear 등) — 조용히 skip. rect 모드 이용 권장.
             return
 
         R = float(WAFER_RADIUS_MM)
@@ -1085,6 +1101,8 @@ class WaferCell(QFrame):
                 )
             chart.opts["fov"] = 45
             chart.update()
+            # Reset 시 applied 값도 동기 — 이후 render 에서 또 리셋 안 걸리게.
+            self._applied_cam_dist = dist
         elif chosen is a_graph:
             self._copy_graph()
         elif chosen is a_data:

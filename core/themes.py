@@ -312,6 +312,11 @@ DEFAULT_SETTINGS = {
         # 공통 Z-scale 모드에서 range 확장 비율 (%). 0=실제 min~max,
         # 50=range*1.5 (midpoint 중심), 100=range*2.0. 개별 모드에선 무시.
         "z_range_expand_pct": 50,
+        # 1D radial scan 자동 감지 — 원점 중심 (길이 300 × 폭 `radial_line_width_mm`)
+        # 직사각형에 모든 측정점 fit 되면 1D radial scan 으로 간주 → 1D spline 보간.
+        # 그 외는 2D RBF. CMP 등 rotation symmetric 공정 라인 스캔이 주 사용처.
+        # Smoothing factor 는 코드 상수 (10.0, 나이테 방지 safe 값).
+        "radial_line_width_mm": 45.0,
     },
 
     # 2D MAP 전용 (공통은 chart_common 참조)

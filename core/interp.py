@@ -62,6 +62,125 @@ def is_collinear(x, y, *, rel_tol: float = 0.02) -> bool:
     return float(s[1] / s[0]) < rel_tol
 
 
+class RadialInterp:
+    """1D scan → 반경 대칭 2D 보간기. `RBFInterpolator` 와 동일 인터페이스
+    (`instance(pts_Nx2) → values_N`) 로 render 경로가 RBF 와 동일하게 호출 가능.
+
+    가정: radial symmetric 데이터 (대표 사용처: CMP 공정 — 회전 폴리싱 패드로
+    rotation symmetric). 측정값 v 를 `r = √(x²+y²)` 의 함수로 모델링.
+    라인 방향 / 오프셋 무관.
+
+    Smoothing 은 **매우 공격적**. 나이테 (동심원 밴드) 아티팩트 방지 목적으로
+    `UnivariateSpline` `s = n × noise² × smoothing_factor` 에서 factor 기본 10.0.
+    radial 프로파일은 물리적으로 매끈해야 해서 detail 보존보다 smooth 우선.
+    경험적으로 factor ≥ 3 부터 시각 차이 없음 → 10 은 여유 있는 safe 값.
+    """
+
+    def __init__(self, x, y, v, *, smoothing_factor: float = 10.0):
+        x = np.asarray(x, dtype=float)
+        y = np.asarray(y, dtype=float)
+        v = np.asarray(v, dtype=float)
+        # r 계산 + 1μm 양자화 + 같은 r 평균 (±대칭 / zigzag perp 편차 통합)
+        r = np.sqrt(x * x + y * y)
+        r_round = np.round(r, 3)
+        r_u, inv = np.unique(r_round, return_inverse=True)
+        v_u = np.zeros_like(r_u, dtype=float)
+        cnt = np.zeros_like(r_u, dtype=float)
+        np.add.at(v_u, inv, v)
+        np.add.at(cnt, inv, 1)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            v_u = v_u / cnt
+
+        self._r_u = r_u
+        self._v_u = v_u
+
+        if r_u.size == 0:
+            self._fn = lambda rq: np.zeros_like(rq)
+            return
+        if r_u.size == 1:
+            const_v = float(v_u[0])
+            self._fn = lambda rq: np.full_like(rq, const_v, dtype=float)
+            return
+        if r_u.size < 4:
+            # 점 너무 적으면 linear interp + 끝단 constant extrapolation
+            self._fn = interp1d(
+                r_u, v_u, kind="linear", bounds_error=False,
+                fill_value=(float(v_u[0]), float(v_u[-1])),
+            )
+            return
+
+        # 공격적 smoothing — factor 배수로 잔잔한 wiggle 제거
+        noise = _estimate_noise_1d(v_u)
+        # noise 가 0 이어도 최소한의 smoothing 이 걸리도록 floor 값 추가
+        # (floor = (데이터 range) × 0.005 → 스케일 비례, 튐 방지)
+        v_range = float(v_u.max() - v_u.min())
+        noise_floor = v_range * 5e-3
+        noise_eff = max(noise, noise_floor)
+        s_val = float(r_u.size) * (noise_eff ** 2) * float(smoothing_factor)
+        try:
+            self._fn = UnivariateSpline(r_u, v_u, k=3, s=s_val, ext=3)
+        except Exception:
+            self._fn = interp1d(
+                r_u, v_u, kind="cubic", bounds_error=False,
+                fill_value=(float(v_u[0]), float(v_u[-1])),
+            )
+
+    def __call__(self, pts):
+        pts = np.asarray(pts, dtype=float)
+        if pts.ndim == 1:
+            pts = pts.reshape(1, -1)
+        r_q = np.sqrt(pts[:, 0] ** 2 + pts[:, 1] ** 2)
+        z = self._fn(r_q)
+        return np.asarray(z, dtype=float)
+
+
+def make_interp(
+    x, y, v, *,
+    method: str = "RBF-ThinPlate",
+    smoothing: float = 0.0,
+    radial_line_width_mm: float = 45.0,
+):
+    """통합 보간기 팩토리 — 1D radial scan 자동 감지 → `RadialInterp` 또는 `make_rbf`.
+
+    모두 `instance(pts_Nx2) → values_N` 인터페이스 제공.
+
+    - 1D radial scan (`is_radial_scan` 통과): `RadialInterp` — 1D spline on r.
+      smoothing 은 내부 상수 (factor=10.0). 나이테 방지 목적. CMP 같은 radial
+      symmetric 공정에 최적.
+    - 그 외: `make_rbf` — 2D RBF (기존 동작).
+    """
+    if is_radial_scan(x, y, line_width_mm=radial_line_width_mm):
+        return RadialInterp(x, y, v)
+    return make_rbf(x, y, v, method=method, smoothing=smoothing)
+
+
+def is_radial_scan(x, y, *, line_width_mm: float = 45.0) -> bool:
+    """1D radial scan 판정 — 원점 중심 직사각형(길이 300mm × 폭 `line_width_mm`) 안에
+    모든 점이 들어가는지.
+
+    CMP 처럼 rotation symmetric 공정의 1D line scan / 원점 근처를 지나는 zigzag
+    scan 을 감지해 radial 1D spline 경로로 보냄. 라인 방향 / 오프셋 무관.
+
+    알고리즘: SVD of raw points (centering 없이) → 원점 통과 best-fit 방향 `d`.
+    모든 점의 `d` 에 수직인 성분 중 최대값이 `line_width_mm / 2` 이하면 True.
+
+    각도 무관 — 수평/수직/45°/임의 각도 직선 스캔 모두 동일 판정.
+    """
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    if x.size < 2:
+        return False
+    pts = np.column_stack([x, y])
+    try:
+        _, _, Vh = np.linalg.svd(pts, full_matrices=False)
+    except Exception:
+        return False
+    direction = Vh[0]
+    n_perp = np.array([-direction[1], direction[0]])
+    max_perp = float(np.abs(pts @ n_perp).max())
+    return max_perp <= line_width_mm / 2.0
+
+
 def _estimate_noise_1d(v_u: np.ndarray) -> float:
     """1D 프로파일의 고주파 노이즈 std 추정 — 1차 차분 기반.
 

@@ -919,12 +919,13 @@ class MainWindow(QMainWindow):
         # 각 wafer 의 rendered 범위 추정 — **실제 렌더와 동일 rings/seg** 로 샘플.
         # 이전 코드의 희소 샘플(15×90) 은 실제 렌더(20×180) 의 극값을 놓쳐 공통
         # z_range 가 일부 wafer 값 밖으로 → 해당 wafer 색이 전부 clip 되던 문제 원인.
-        from core.interp import make_rbf
+        from core.interp import make_interp
         from core.coords import WAFER_RADIUS_MM
         from core.settings import load_settings as _ls
         R = float(WAFER_RADIUS_MM)
         cfg = _ls().get("chart_common", {})
         method = str(cfg.get("interp_method", "RBF-ThinPlate"))
+        radial_width = float(cfg.get("radial_line_width_mm", 45.0))
         rings = max(5, int(cfg.get("radial_rings", 20)))
         seg = max(60, int(cfg.get("radial_seg", 180)))
         r_arr = np.linspace(0.0, R, rings + 1)
@@ -945,7 +946,10 @@ class MainWindow(QMainWindow):
             if m.sum() < 2:
                 continue
             try:
-                rbf = make_rbf(x_arr[m], y_arr[m], v_arr[m], method=method)
+                rbf = make_interp(
+                    x_arr[m], y_arr[m], v_arr[m], method=method,
+                    radial_line_width_mm=radial_width,
+                )
                 z = rbf(sample_pts)
                 zf = z[np.isfinite(z)]
                 if zf.size > 0:

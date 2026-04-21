@@ -302,6 +302,16 @@ class ChartCommonGroup(QGroupBox):
         self.sp_rseg.setSingleStep(60)
         self.sp_rseg.setValue(int(cfg.get("radial_seg", 180)))
 
+        # 1D radial scan 자동 감지 폭 — 원점 중심 직사각형의 전체 폭 (mm).
+        # 내부적으로 half_width = width/2 로 쓰임. CMP 등 rotation symmetric
+        # 공정의 라인 스캔 감지용. 이 폭 안에 모든 점 fit → 1D spline 경로.
+        self.sb_radial_width = _limit_width(QDoubleSpinBox())
+        self.sb_radial_width.setRange(10.0, 150.0)
+        self.sb_radial_width.setSingleStep(5.0)
+        self.sb_radial_width.setDecimals(1)
+        self.sb_radial_width.setSuffix(" mm")
+        self.sb_radial_width.setValue(float(cfg.get("radial_line_width_mm", 45.0)))
+
         _populate_two_columns(self, [
             ("컬러맵", self.cb_cmap),
             ("보간 방법", self.cb_interp),
@@ -315,6 +325,7 @@ class ChartCommonGroup(QGroupBox):
             ("그래프 크기", self.cb_chart_size),
             ("소수점 자릿수", self.cb_decimals),
             ("Edge cut", self.sb_edge_cut),
+            ("1D Scan 폭", self.sb_radial_width),
         ])
 
         self.cb_cmap.currentIndexChanged.connect(self.changed)
@@ -329,6 +340,7 @@ class ChartCommonGroup(QGroupBox):
         self.cb_chart_size.currentIndexChanged.connect(self.changed)
         self.cb_decimals.currentIndexChanged.connect(self.changed)
         self.sb_edge_cut.valueChanged.connect(self.changed)
+        self.sb_radial_width.valueChanged.connect(self.changed)
 
     def gather(self) -> dict[str, Any]:
         w, h = self.cb_chart_size.currentData()
@@ -346,6 +358,7 @@ class ChartCommonGroup(QGroupBox):
             "chart_height": int(h),
             "decimals": int(self.cb_decimals.currentData()),
             "edge_cut_mm": float(self.sb_edge_cut.value()),
+            "radial_line_width_mm": float(self.sb_radial_width.value()),
         }
 
     def reload(self, cfg: dict[str, Any]) -> None:
@@ -353,7 +366,7 @@ class ChartCommonGroup(QGroupBox):
                    self.chk_notch, self.cb_notch_depth, self.sb_boundary_r,
                    self.sp_rings, self.sp_rseg,
                    self.chk_scale_bar, self.cb_chart_size, self.cb_decimals,
-                   self.sb_edge_cut)
+                   self.sb_edge_cut, self.sb_radial_width)
         for w in widgets:
             w.blockSignals(True)
         try:
@@ -380,6 +393,7 @@ class ChartCommonGroup(QGroupBox):
             if idx >= 0:
                 self.cb_decimals.setCurrentIndex(idx)
             self.sb_edge_cut.setValue(float(cfg.get("edge_cut_mm", 0.0)))
+            self.sb_radial_width.setValue(float(cfg.get("radial_line_width_mm", 45.0)))
         finally:
             for w in widgets:
                 w.blockSignals(False)
