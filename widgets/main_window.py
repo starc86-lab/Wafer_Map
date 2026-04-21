@@ -891,9 +891,12 @@ class MainWindow(QMainWindow):
 
         # 각 wafer 의 rendered 범위 추정 — radial 15 rings × 90 seg = 1,350 points.
         # 실제 렌더는 20×180=3,780 points 이지만 범위 추정엔 충분. 비용 wafer 당 ~1ms.
-        from scipy.interpolate import RBFInterpolator
+        # interp_method 는 settings 에서 가져와 실제 렌더와 동일 kernel 사용.
+        from core.interp import make_rbf
         from core.coords import WAFER_RADIUS_MM
+        from core.settings import load_settings as _ls
         R = float(WAFER_RADIUS_MM)
+        method = str(_ls().get("chart_common", {}).get("interp_method", "RBF-ThinPlate"))
         rings, seg = 15, 90
         r_arr = np.linspace(0.0, R, rings + 1)
         theta = np.linspace(0.0, 2.0 * np.pi, seg, endpoint=False)
@@ -911,11 +914,7 @@ class MainWindow(QMainWindow):
             if m.sum() < 2:
                 continue
             try:
-                rbf = RBFInterpolator(
-                    np.column_stack([x_arr[m], y_arr[m]]),
-                    v_arr[m],
-                    kernel="thin_plate_spline",
-                )
+                rbf = make_rbf(x_arr[m], y_arr[m], v_arr[m], method=method)
                 z = rbf(sample_pts)
                 zf = z[np.isfinite(z)]
                 if zf.size > 0:

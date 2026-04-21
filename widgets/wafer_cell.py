@@ -951,7 +951,7 @@ class WaferCell(QFrame):
         3D radial 과 동일한 mesh 데이터를 z=0 평면으로 깔아서 위에서 내려다 본 모습.
         측정점/값 라벨/경계 원 모두 GL 객체로 그림.
         """
-        from scipy.interpolate import RBFInterpolator
+        from core.interp import make_rbf
 
         common = settings.get("chart_common", {})
         chart = settings.get("chart_2d", {})
@@ -979,15 +979,15 @@ class WaferCell(QFrame):
         self._gl_radial_2d_points = None
         self._gl_radial_2d_labels = []
 
-        # RBF fit
+        # RBF fit — settings 의 interp_method 반영
         pts = np.column_stack([np.asarray(x_in, dtype=float), np.asarray(y_in, dtype=float)])
         vals = np.asarray(v_in, dtype=float)
         m = ~np.isnan(vals) & ~np.isnan(pts[:, 0]) & ~np.isnan(pts[:, 1])
-        pts = pts[m]; vals = vals[m]
-        if len(vals) < 2:
+        if m.sum() < 2:
             return
+        method = str(common.get("interp_method", "RBF-ThinPlate"))
         try:
-            rbf = RBFInterpolator(pts, vals, kernel="thin_plate_spline")
+            rbf = make_rbf(pts[m, 0], pts[m, 1], vals[m], method=method)
         except Exception:
             return
 
@@ -1268,7 +1268,7 @@ class WaferCell(QFrame):
         장점: 카디널 스트라이프 없음, 경계 곡선 정확.
         비용: RBF 정점 수만큼 재평가 (rings × seg + seg).
         """
-        from scipy.interpolate import RBFInterpolator
+        from core.interp import make_rbf
 
         common = settings.get("chart_common", {})
         chart3d = settings.get("chart_3d", {})
@@ -1282,16 +1282,15 @@ class WaferCell(QFrame):
         if self._gl_wall is not None:
             self._gl_wall.setVisible(False)
 
-        # RBF fit — radial 정점 평가용
+        # RBF fit — settings 의 interp_method 반영
         pts = np.column_stack([np.asarray(x_in, dtype=float), np.asarray(y_in, dtype=float)])
         vals = np.asarray(v_in, dtype=float)
         mask = ~np.isnan(vals) & ~np.isnan(pts[:, 0]) & ~np.isnan(pts[:, 1])
-        pts = pts[mask]
-        vals = vals[mask]
-        if len(vals) < 2:
+        if mask.sum() < 2:
             return
+        method = str(common.get("interp_method", "RBF-ThinPlate"))
         try:
-            rbf = RBFInterpolator(pts, vals, kernel="thin_plate_spline")
+            rbf = make_rbf(pts[mask, 0], pts[mask, 1], vals[mask], method=method)
         except Exception:
             # RBF 실패 (collinear 등) — 조용히 skip. rect 모드 이용 권장.
             return

@@ -22,6 +22,25 @@ _RBF_KERNELS = {
 }
 
 
+def make_rbf(x, y, v, *, method: str = "RBF-ThinPlate", smoothing: float = 0.0):
+    """method 이름으로 RBFInterpolator 생성 (epsilon 자동 처리).
+
+    rect / radial 렌더 경로에서 공통으로 사용해 kernel 선택 로직 통일.
+    """
+    kernel = _RBF_KERNELS.get(method, "thin_plate_spline")
+    pts = np.column_stack([np.asarray(x, dtype=float),
+                            np.asarray(y, dtype=float)])
+    v_arr = np.asarray(v, dtype=float)
+    kw: dict = {"kernel": kernel, "smoothing": smoothing}
+    if kernel in ("multiquadric", "gaussian", "inverse_multiquadric"):
+        from scipy.spatial import cKDTree
+        tree = cKDTree(pts)
+        d, _ = tree.query(pts, k=min(2, len(pts)))
+        median_dist = float(np.median(d[:, 1])) if d.ndim > 1 else 10.0
+        kw["epsilon"] = 1.0 / max(median_dist, 1e-3)
+    return RBFInterpolator(pts, v_arr, **kw)
+
+
 def is_collinear(x, y, *, rel_tol: float = 0.02) -> bool:
     """측정점이 사실상 1 개 직선 위에 놓여있는지 PCA(SVD) 로 판정.
 
