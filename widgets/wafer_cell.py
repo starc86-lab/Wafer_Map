@@ -583,9 +583,12 @@ class WaferCell(QFrame):
         # 이러면 "3D 에서 top view 로 각도만 돌렸을 때와 동일한 크기" 로 보임.
         self._gl_2d = gl.GLViewWidget()
         self._gl_2d.setBackgroundColor("w")
+        # elevation=90 (top-down), azimuth=-90 (notch 를 6시 = 화면 하단으로).
+        # pyqtgraph top-view 에서 azimuth=0 이면 +Y 가 화면 왼쪽 → notch(−Y) 가 9시로 감.
+        # azimuth=-90 으로 보정해 2D plot 관례(+Y up, notch 아래)와 일치.
         self._gl_2d.setCameraPosition(
             distance=float(s.get("camera_distance", 550)),
-            elevation=90, azimuth=0,
+            elevation=90, azimuth=-90,
         )
         self._gl_2d.opts["fov"] = 45
         self._gl_2d.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -1001,15 +1004,16 @@ class WaferCell(QFrame):
         ys_all = (Rm * np.sin(Tm)).ravel()
         z_raw_all = rbf(np.column_stack([xs_all, ys_all]))
 
-        # vmin/vmax — 3D radial 과 동일 로직
+        # RBF overshoot clamp — thin_plate_spline 이 측정치 범위 밖 값을 생성 가능.
+        # 물리적 측정치를 벗어나지 않도록 input 범위로 clip.
+        in_vmin, in_vmax = float(np.nanmin(vals)), float(np.nanmax(vals))
+        z_raw_all = np.clip(z_raw_all, in_vmin, in_vmax)
+
+        # vmin/vmax — 공통 스케일 우선, 아니면 input 범위 사용 (clamp 후라 z_raw 와 동일)
         if self._display.z_range is not None:
             vmin, vmax = self._display.z_range
         else:
-            finite = z_raw_all[np.isfinite(z_raw_all)]
-            if finite.size == 0:
-                return
-            vmin = float(finite.min())
-            vmax = float(finite.max())
+            vmin, vmax = in_vmin, in_vmax
         z_range = vmax - vmin if vmax > vmin else 1.0
 
         # 2D top view: z=0 평면 (높이 표현 없음, 색만)
@@ -1319,15 +1323,15 @@ class WaferCell(QFrame):
         ys_all = (Rm * np.sin(Tm)).ravel()
         z_raw_all = rbf(np.column_stack([xs_all, ys_all]))
 
-        # Z 범위 — 공통 스케일 모드 우선, 아니면 radial 평가값 기반
+        # RBF overshoot clamp — 측정치 범위 밖 값 제거
+        in_vmin, in_vmax = float(np.nanmin(vals)), float(np.nanmax(vals))
+        z_raw_all = np.clip(z_raw_all, in_vmin, in_vmax)
+
+        # Z 범위 — 공통 스케일 모드 우선, 아니면 input 범위
         if self._display.z_range is not None:
             vmin, vmax = self._display.z_range
         else:
-            finite = z_raw_all[np.isfinite(z_raw_all)]
-            if finite.size == 0:
-                return
-            vmin = float(finite.min())
-            vmax = float(finite.max())
+            vmin, vmax = in_vmin, in_vmax
         z_range = vmax - vmin if vmax > vmin else 1.0
 
         # Z 과장 배율
@@ -1499,11 +1503,11 @@ class WaferCell(QFrame):
                 s = settings_io.load_settings().get("chart_3d", {})
                 from pyqtgraph import Vector
                 if chart is self._gl_2d:
-                    # 2D radial top view — 3D 와 동일 파라미터로 top-down 만
+                    # 2D radial top view — azimuth=-90 으로 notch 6시 정렬
                     chart.setCameraPosition(
                         pos=Vector(0, 0, 0),
                         distance=float(s.get("camera_distance", 550)),
-                        elevation=90, azimuth=0,
+                        elevation=90, azimuth=-90,
                     )
                     chart.opts["fov"] = 45
                 else:

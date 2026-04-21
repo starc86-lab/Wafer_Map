@@ -178,6 +178,15 @@ def interpolate_wafer(
             sys.stderr.flush()
             return np.full(XG.shape, np.nan, dtype=float)
 
+    # RBF overshoot clamp — thin_plate_spline 은 측정치 범위를 벗어나는 값을 생성 가능.
+    # 물리적 측정치를 벗어나지 않도록 input 범위로 clip. NaN 은 유지.
+    v_valid = v[~np.isnan(v)]
+    if v_valid.size > 0:
+        in_vmin, in_vmax = float(v_valid.min()), float(v_valid.max())
+        nan_mask = np.isnan(ZG)
+        ZG = np.clip(ZG, in_vmin, in_vmax)
+        ZG[nan_mask] = np.nan  # clip 뒤에도 NaN 유지
+
     # Edge cut — 웨이퍼 경계 기준 안쪽으로 cut_mm (radial/RBF 공통)
     if edge_cut_mm > 0:
         RG = np.sqrt(XG.astype(float) ** 2 + YG.astype(float) ** 2)
