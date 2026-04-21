@@ -906,7 +906,7 @@ class WaferCell(QFrame):
         if chart3d.get("show_grid", True):
             if self._gl_grid is None:
                 self._gl_grid = gl.GLGridItem()
-                self._gl_grid.setSize(x=160, y=160)
+                self._gl_grid.setSize(x=320, y=320)
                 self._gl_grid.setSpacing(x=50, y=50)
                 self._gl_grid.setColor((205, 205, 205, 150))
                 gview.addItem(self._gl_grid)
