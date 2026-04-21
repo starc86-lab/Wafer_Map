@@ -906,8 +906,10 @@ class MainWindow(QMainWindow):
         sample_pts = np.column_stack([(Rm * np.cos(Tm)).ravel(),
                                        (Rm * np.sin(Tm)).ravel()])
 
-        all_min: list[float] = []
-        all_max: list[float] = []
+        # 각 wafer 의 **개별 렌더 범위** (min/max) 수집 → 그 중 최소 min / 최대 max
+        # 로 공통 범위 결정. 개별 모드가 각 wafer 에 쓰는 범위와 동일 기준 사용.
+        all_mins: list[float] = []
+        all_maxes: list[float] = []
         for d in displays:
             x_arr = np.asarray(d.x_mm, dtype=float)
             y_arr = np.asarray(d.y_mm, dtype=float)
@@ -920,21 +922,23 @@ class MainWindow(QMainWindow):
                 z = rbf(sample_pts)
                 zf = z[np.isfinite(z)]
                 if zf.size > 0:
-                    all_min.append(float(zf.min()))
-                    all_max.append(float(zf.max()))
+                    all_mins.append(float(zf.min()))
+                    all_maxes.append(float(zf.max()))
                     continue
             except Exception:
                 pass
-            # RBF 실패 시 input 범위 폴백
+            # RBF 실패 시 input 값 폴백
             valid = v_arr[m]
             if valid.size > 0:
-                all_min.append(float(valid.min()))
-                all_max.append(float(valid.max()))
+                all_mins.append(float(valid.min()))
+                all_maxes.append(float(valid.max()))
 
-        if not all_min:
+        if not all_mins:
             return
-        vmin = min(all_min)
-        vmax = max(all_max)
+        vmin = min(all_mins)
+        vmax = max(all_maxes)
+        if vmax <= vmin:
+            vmax = vmin + 1e-9
         for d in displays:
             d.z_range = (vmin, vmax)
 
