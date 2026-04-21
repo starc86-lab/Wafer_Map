@@ -223,14 +223,15 @@ class MainWindow(QMainWindow):
         self.cb_zscale = QComboBox(); self.cb_zscale.addItems(["공통", "개별"])
         self.cb_zscale.setCurrentText("개별")  # 세션 디폴트 (저장 X)
 
-        # Z-Span (%) — 공통 모드에서만 활성. 중심값 midpoint 고정, range 를
-        # (1 + pct/100) 배로 늘려 colorbar/height 범위 확장. 각 wafer 가 palette
-        # 전체를 덜 쓰게 되어 여러 wafer 비교 시 색/높이 대비가 부드러워짐.
+        # Z-Margin (%) — 공통 모드에서만 활성. matplotlib `ax.margins()` 관례:
+        # 데이터 min/max 양쪽에 padding 을 %로 추가. 중심값 midpoint 고정,
+        # range 를 (1 + pct/100) 배로 확장. 각 wafer 가 palette 전체를 덜 쓰게
+        # 되어 여러 wafer 비교 시 색/높이 대비가 부드러워짐.
         _stored_pct = int(load_settings().get("chart_common", {}).get(
             "z_range_expand_pct", 50
         ))
         self._z_range_pct_stored = _stored_pct   # 개별 모드 복귀 시 복원용
-        self.lbl_z_range = QLabel("Z-Span:")
+        self.lbl_z_range = QLabel("Z-Margin:")
         self.sp_z_range = QSpinBox()
         self.sp_z_range.setRange(0, 200)
         self.sp_z_range.setSingleStep(10)
@@ -966,7 +967,7 @@ class MainWindow(QMainWindow):
         if vmax <= vmin:
             vmax = vmin + 1e-9
 
-        # Z-range 확장 — midpoint 유지하면서 range 를 (1 + pct/100) 배로.
+        # Z-Margin — matplotlib margins() 관례. midpoint 고정 + range*(1+pct/100).
         # pct=0 → 원본 min~max, pct=50 → range*1.5, pct=100 → range*2.0.
         # 각 wafer 가 palette 더 좁은 구간만 써서 색/높이 대비가 부드러워짐.
         pct = int(self.sp_z_range.value()) if self.sp_z_range.isEnabled() else 0
@@ -1027,7 +1028,7 @@ class MainWindow(QMainWindow):
         z_range는 2D ImageItem levels(+colorbar)와 3D surface colors 모두에
         영향. 양쪽 렌더 캐시 reset 필요 (보간 캐시는 유지되므로 빠름).
         """
-        # Z-Span 스핀박스 활성/비활성 + 값 토글 (개별 모드 → 0 회색, 공통 복귀 → 저장값)
+        # Z-Margin 스핀박스 활성/비활성 + 값 토글 (개별 모드 → 0 회색, 공통 복귀 → 저장값)
         is_common = self.cb_zscale.currentText() == "공통"
         self.sp_z_range.blockSignals(True)
         self.sp_z_range.setEnabled(is_common)
@@ -1044,7 +1045,7 @@ class MainWindow(QMainWindow):
         self._result_panel.refresh_all()
 
     def _on_z_range_changed(self, value: int) -> None:
-        """Z-range 스핀박스 변경 — 저장값 갱신 + 재렌더. 공통 모드에서만 호출됨."""
+        """Z-Margin 스핀박스 변경 — 저장값 갱신 + 재렌더. 공통 모드에서만 호출됨."""
         if self.cb_zscale.currentText() != "공통":
             return
         self._z_range_pct_stored = int(value)
