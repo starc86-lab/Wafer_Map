@@ -127,26 +127,17 @@ def _compute_smooth_vertex_normals(vertexes: np.ndarray, faces: np.ndarray) -> n
 
 
 def _build_radial_surface_mesh(
-    rbf, R: float, rings: int, seg: int,
+    xs: np.ndarray, ys: np.ndarray, z_raw: np.ndarray,
+    rings: int, seg: int,
     vmin: float, z_range: float, factor: float,
     cmap: pg.ColorMap,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """원형 radial mesh — 중심 r=0 부터 경계 r=R 까지 (rings+1) 링 × seg 세그먼트.
+    """원형 radial mesh — pre-evaluated (xs, ys, z_raw) 로 정점 구성.
 
-    - 정점 좌표 (x=r cos θ, y=r sin θ, z=(RBF(x,y)-vmin)*factor)
-    - 각 정점 색: z 정규화로 colormap 샘플
+    (rings+1) × seg 정점 순서: i*seg + j (ring i, angle j)
     - face: 인접 링 사이 사각형을 2 삼각형으로
     - 외곽 링이 정확히 r=R 이므로 경계가 부드러운 원 (격자 기반 카디널 스트라이프 없음)
-
-    Returns: (verts, faces, colors_rgba)
     """
-    r_arr = np.linspace(0.0, R, rings + 1)
-    theta = np.linspace(0.0, 2.0 * np.pi, seg, endpoint=False)
-    Rm, Tm = np.meshgrid(r_arr, theta, indexing="ij")
-    xs = (Rm * np.cos(Tm)).ravel()
-    ys = (Rm * np.sin(Tm)).ravel()
-    pts = np.column_stack([xs, ys])
-    z_raw = rbf(pts)
     # RBF 외삽으로 vmin 아래 값이 나올 수 있음 → 바닥(z=0) 뚫지 않도록 clamp.
     z_disp = np.clip((z_raw - vmin) * factor, 0.0, None).astype(np.float32)
     verts = np.column_stack([xs.astype(np.float32), ys.astype(np.float32), z_disp])
@@ -182,25 +173,22 @@ def _build_radial_surface_mesh(
 
 
 def _build_smooth_cylinder_wall(
-    rbf, R: float, seg: int,
+    xs: np.ndarray, ys: np.ndarray, z_raw: np.ndarray,
+    seg: int,
     vmin: float, z_range: float, factor: float,
     cmap: pg.ColorMap,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """매끈 원통 벽 — r=R 에서 z=RBF(R,θ) 부터 z=0 까지.
+    """매끈 원통 벽 — pre-evaluated (xs, ys, z_raw) 외곽 링 기반, bottom z=0.
 
-    radial surface 의 외곽 링과 top z 공유 → 이음새 매끈.
-    bottom z=0 으로 지면과 연결 → "떠 있는" 느낌 제거.
+    radial surface 외곽 링과 top z 공유 → 이음새 매끈.
     """
-    theta = np.linspace(0.0, 2.0 * np.pi, seg, endpoint=False)
-    xs = (R * np.cos(theta)).astype(np.float32)
-    ys = (R * np.sin(theta)).astype(np.float32)
-    pts = np.column_stack([xs, ys])
-    z_raw = rbf(pts)
+    xs32 = xs.astype(np.float32)
+    ys32 = ys.astype(np.float32)
     # 음수 clamp — 바닥 아래로 뚫고 내려가는 문제 방지
     z_top = np.clip((z_raw - vmin) * factor, 0.0, None).astype(np.float32)
 
-    top = np.column_stack([xs, ys, z_top])
-    bot = np.column_stack([xs, ys, np.zeros(seg, dtype=np.float32)])
+    top = np.column_stack([xs32, ys32, z_top])
+    bot = np.column_stack([xs32, ys32, np.zeros(seg, dtype=np.float32)])
     verts = np.vstack([top, bot])
 
     # faces: 각 세그먼트별 (top_i, top_nxt, bot_nxt) / (top_i, bot_nxt, bot_i)
@@ -1067,11 +1055,7 @@ class WaferCell(QFrame):
         if self._gl_wall is not None:
             self._gl_wall.setVisible(False)
 
-        # 2D/rect mode 와 vmin/vmax 일치를 위해 rect ZG 도 계산 (캐시 재사용).
-        # rect ZG 는 2D view 에서도 필요하므로 캐시 가치 있음. 비용 ~G²*RBF=80ms.
-        XG, YG, ZG, inside, _xg, _yg = self._ensure_interp(x_in, y_in, v_in, common)
-
-        # RBF fit — radial 정점 평가용. _ensure_interp 내부의 RBF 는 함수 local 이라 재사용 불가.
+        # RBF fit — radial 정점 평가용
         pts = np.column_stack([np.asarray(x_in, dtype=float), np.asarray(y_in, dtype=float)])
         vals = np.asarray(v_in, dtype=float)
         mask = ~np.isnan(vals) & ~np.isnan(pts[:, 0]) & ~np.isnan(pts[:, 1])
@@ -1085,15 +1069,26 @@ class WaferCell(QFrame):
             # RBF 실패 (collinear 등) — 조용히 skip. rect 모드 이용 권장.
             return
 
-        # Z 범위 — rect ZG 기반 (2D / rect 3D 와 정합)
+        R = float(WAFER_RADIUS_MM)
+
+        # Radial 정점 좌표 선계산 — 이 값들에서 vmin/vmax 도 추출 (rect ZG 불필요).
+        # 벤치: rect G=200 vs radial 20×180 vmin/vmax 차이 <0.02% 로 시각 구분 불가.
+        r_arr = np.linspace(0.0, R, rings + 1)
+        theta = np.linspace(0.0, 2.0 * np.pi, seg, endpoint=False)
+        Rm, Tm = np.meshgrid(r_arr, theta, indexing="ij")
+        xs_all = (Rm * np.cos(Tm)).ravel()
+        ys_all = (Rm * np.sin(Tm)).ravel()
+        z_raw_all = rbf(np.column_stack([xs_all, ys_all]))
+
+        # Z 범위 — 공통 스케일 모드 우선, 아니면 radial 평가값 기반
         if self._display.z_range is not None:
             vmin, vmax = self._display.z_range
         else:
-            valid = ZG[inside & ~np.isnan(ZG)]
-            if valid.size == 0:
+            finite = z_raw_all[np.isfinite(z_raw_all)]
+            if finite.size == 0:
                 return
-            vmin = float(valid.min())
-            vmax = float(valid.max())
+            vmin = float(finite.min())
+            vmax = float(finite.max())
         z_range = vmax - vmin if vmax > vmin else 1.0
 
         # Z 과장 배율
@@ -1118,10 +1113,11 @@ class WaferCell(QFrame):
         elif self._gl_grid is not None:
             self._gl_grid.setVisible(False)
 
-        # Radial surface mesh
+        # Radial surface mesh — pre-evaluated (xs_all, ys_all, z_raw_all) 재사용
         smooth = bool(chart3d.get("smooth", True))
         v_s, f_s, c_s = _build_radial_surface_mesh(
-            rbf, R, rings, seg, vmin, z_range, factor, cmap,
+            xs_all, ys_all, z_raw_all, rings, seg,
+            vmin, z_range, factor, cmap,
         )
         if self._gl_radial_surface is None:
             self._gl_radial_surface = gl.GLMeshItem(
@@ -1135,9 +1131,14 @@ class WaferCell(QFrame):
             )
         self._gl_radial_surface.setVisible(True)
 
-        # Smooth cylinder wall — 외곽 r=R 에서 z=0 까지
+        # Smooth cylinder wall — 외곽 링 (마지막 ring) 데이터 재사용
+        outer_start = rings * seg
+        wall_xs = xs_all[outer_start:outer_start + seg]
+        wall_ys = ys_all[outer_start:outer_start + seg]
+        wall_z_raw = z_raw_all[outer_start:outer_start + seg]
         v_w, f_w, c_w = _build_smooth_cylinder_wall(
-            rbf, R, seg, vmin, z_range, factor, cmap,
+            wall_xs, wall_ys, wall_z_raw, seg,
+            vmin, z_range, factor, cmap,
         )
         if self._gl_radial_wall is None:
             self._gl_radial_wall = gl.GLMeshItem(
