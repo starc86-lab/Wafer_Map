@@ -893,26 +893,26 @@ class WaferCell(QFrame):
         ys_all = (Rm * np.sin(Tm)).ravel()
         z_raw_all = rbf(np.column_stack([xs_all, ys_all]))
 
-        # Z 높이용 범위 — **항상 개별 wafer** 값으로 계산.
-        # (공통 스케일 모드에서도 dome 의 높이가 다른 wafer 의 평균 offset 에 눌려
-        #  납작하게 보이는 현상 방지. 색만 공통 처리.)
-        finite = z_raw_all[np.isfinite(z_raw_all)]
-        if finite.size == 0:
-            return
-        vmin_h = float(finite.min())
-        vmax_h = float(finite.max())
-        z_range_h = vmax_h - vmin_h if vmax_h > vmin_h else 1.0
-
-        # 색 범위 — 공통 스케일 모드면 display.z_range, 아니면 개별
+        # Z 범위 — 공통 모드면 display.z_range (높이·색 모두 공통), 아니면 개별.
+        # 공통 모드의 의의는 wafer 간 **절대 높이 비교** → avg 낮은 wafer 는 낮게,
+        # 높은 wafer 는 높게 떠있어야 함. 높이만 개별로 두면 모든 dome 이 같은
+        # z 에 앉아 비교 의미 사라짐.
         if self._display.z_range is not None:
             vmin_c, vmax_c = self._display.z_range
         else:
-            vmin_c, vmax_c = vmin_h, vmax_h
+            finite = z_raw_all[np.isfinite(z_raw_all)]
+            if finite.size == 0:
+                return
+            vmin_c = float(finite.min())
+            vmax_c = float(finite.max())
         z_range_c = vmax_c - vmin_c if vmax_c > vmin_c else 1.0
-        # colorbar / legacy 호환 — 공통 범위를 colorbar 에 반영
+        # 높이 스케일도 동일 범위 사용
+        vmin_h = vmin_c
+        z_range_h = z_range_c
+        # colorbar / legacy 호환
         vmin, vmax, z_range = vmin_c, vmax_c, z_range_c
 
-        # Z 과장 배율 — 높이 계산은 개별 기준
+        # Z 과장 배율 — 높이는 공통/개별 어느 쪽이든 현재 z_range 기준
         z_exag = chart3d.get("z_exaggeration", None)
         target_height = WAFER_RADIUS_MM * 0.4
         factor = (target_height / z_range_h) * (float(z_exag) if z_exag is not None else 1.0)
