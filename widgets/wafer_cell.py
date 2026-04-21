@@ -583,13 +583,10 @@ class WaferCell(QFrame):
         # 이러면 "3D 에서 top view 로 각도만 돌렸을 때와 동일한 크기" 로 보임.
         self._gl_2d = gl.GLViewWidget()
         self._gl_2d.setBackgroundColor("w")
-        # elevation=90 (top-down), azimuth=-90 (notch 를 6시 = 화면 하단으로).
-        # pyqtgraph top-view 에서 azimuth=0 이면 +Y 가 화면 왼쪽 → notch(−Y) 가 9시로 감.
-        # azimuth=-90 으로 보정해 2D plot 관례(+Y up, notch 아래)와 일치.
-        self._gl_2d.setCameraPosition(
-            distance=float(s.get("camera_distance", 550)),
-            elevation=90, azimuth=-90,
-        )
+        # elevation=90 (top-down), azimuth=-90 (notch 를 6시 = 화면 하단).
+        # distance=380 → 2*380*tan(22.5°)≈315mm 의 vertical field → wafer(300mm) 가
+        # widget 의 ~95% 차지 (rect 2D 의 padding=0.05 와 동일 fill 비율).
+        self._gl_2d.setCameraPosition(distance=380, elevation=90, azimuth=-90)
         self._gl_2d.opts["fov"] = 45
         self._gl_2d.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._gl_2d.customContextMenuRequested.connect(self._show_plot_menu)
@@ -964,13 +961,6 @@ class WaferCell(QFrame):
 
         gview = self._gl_2d
 
-        # 카메라 distance — 3D 설정 변경 시 즉시 동기화 (사용자 드래그 pan 은 center 유지)
-        chart3d = settings.get("chart_3d", {})
-        dist = float(chart3d.get("camera_distance", 550))
-        if gview.opts.get("distance") != dist:
-            gview.setCameraPosition(distance=dist)
-            gview.update()
-
         # 기존 모든 item 제거 (top view 는 매 렌더 깨끗이 다시 그림 — overhead 작음)
         for it in list(gview.items):
             gview.removeItem(it)
@@ -1087,7 +1077,7 @@ class WaferCell(QFrame):
             ])
             scatter = gl.GLScatterPlotItem(
                 pos=pts3d, color=(0.0, 0.0, 0.0, 0.85),
-                size=float(chart.get("point_size", 4)) * 1.5,
+                size=float(chart.get("point_size", 4)),
                 pxMode=True, glOptions="opaque",
             )
             gview.addItem(scatter)
@@ -1501,11 +1491,10 @@ class WaferCell(QFrame):
                 s = settings_io.load_settings().get("chart_3d", {})
                 from pyqtgraph import Vector
                 if chart is self._gl_2d:
-                    # 2D radial top view — azimuth=-90 으로 notch 6시 정렬
+                    # 2D radial top view — fixed distance (rect 2D 와 동일 fill 비율)
                     chart.setCameraPosition(
                         pos=Vector(0, 0, 0),
-                        distance=float(s.get("camera_distance", 550)),
-                        elevation=90, azimuth=-90,
+                        distance=380, elevation=90, azimuth=-90,
                     )
                     chart.opts["fov"] = 45
                 else:
