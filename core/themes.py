@@ -297,8 +297,8 @@ DEFAULT_SETTINGS = {
         "colormap": "Turbo",
         "show_circle": True,       # 웨이퍼 경계 원
         "show_notch": True,        # 경계 원에 notch(V자 홈) 표시 — 6시 방향 고정
-        "notch_depth_mm": 5.0,     # notch 깊이(mm, 시각적 과장)
-        "boundary_r_mm": 150.0,    # 경계 원 반지름 (웨이퍼 바깥 약간 여유 150~160). notch 는 이 원에만 표시
+        "notch_depth_mm": 3.0,     # notch 깊이(mm, 시각적 과장)
+        "boundary_r_mm": 153.0,    # 경계 원 반지름 (웨이퍼 바깥 여유 150~160). notch 는 이 원에만 표시
         # Radial mesh 밀도 — 2D top view / 3D 공통. RBF 1회 평가로 공유.
         "radial_rings": 20,        # 반경 방향 링 수 (5~60)
         "radial_seg": 180,         # 각도 세그먼트 수 (60~720)
@@ -308,7 +308,7 @@ DEFAULT_SETTINGS = {
         # 보간 방법 — core/interp.py 참고
         "interp_method": "RBF-ThinPlate",
         "decimals": 2,             # 테이블 값 소수점 자릿수 (0/1/2/3, 컬러바는 별도 동적)
-        "edge_cut_mm": 0.0,        # 웨이퍼 경계에서 안쪽으로 cut (mm). 0=cut 없음. radial/RBF 양쪽 공통
+        "edge_cut_mm": 1.5,        # 웨이퍼 경계에서 안쪽으로 cut (mm). 0=cut 없음
     },
 
     # 2D MAP 전용 (공통은 chart_common 참조)
@@ -321,8 +321,8 @@ DEFAULT_SETTINGS = {
     # 3D MAP 전용 (공통은 chart_common, Z 스케일은 메인 윈도우 컨트롤)
     "chart_3d": {
         "smooth": True,
-        "z_exaggeration": 1.0,     # Z 과장 배율 (0.5~3.0, 1.0=기준)
-        "show_grid": False,        # 바닥 그리드
+        "z_exaggeration": 0.8,     # Z 과장 배율 (0.5~3.0, 1.0=기준)
+        "show_grid": True,         # 바닥 그리드
         "camera_distance": 550,    # 카메라 거리 (작을수록 확대, 400~800)
     },
 

@@ -906,7 +906,7 @@ class WaferCell(QFrame):
         if chart3d.get("show_grid", True):
             if self._gl_grid is None:
                 self._gl_grid = gl.GLGridItem()
-                self._gl_grid.setSize(x=350, y=350)
+                self._gl_grid.setSize(x=160, y=160)
                 self._gl_grid.setSpacing(x=50, y=50)
                 self._gl_grid.setColor((205, 205, 205, 150))
                 gview.addItem(self._gl_grid)
@@ -931,10 +931,13 @@ class WaferCell(QFrame):
             vmin, z_range, factor, cmap,
             cut_mask=cut_mask_all if cut_mask_all.any() else None,
         )
+        # shader="shaded" — lighting 적용으로 smooth=True/False 차이 시각화
+        # (shader 없으면 vertex color 그대로 → smooth 차이 안 보임)
         if self._gl_surface is None:
             self._gl_surface = gl.GLMeshItem(
                 vertexes=v_s, faces=f_s, vertexColors=c_s,
-                smooth=smooth, drawEdges=False, glOptions="opaque",
+                smooth=smooth, shader="shaded",
+                drawEdges=False, glOptions="opaque",
             )
             gview.addItem(self._gl_surface)
         else:
@@ -954,7 +957,8 @@ class WaferCell(QFrame):
         if self._gl_wall is None:
             self._gl_wall = gl.GLMeshItem(
                 vertexes=v_w, faces=f_w, vertexColors=c_w,
-                smooth=True, drawEdges=False, glOptions="opaque",
+                smooth=True, shader="shaded",
+                drawEdges=False, glOptions="opaque",
             )
             gview.addItem(self._gl_wall)
         else:
