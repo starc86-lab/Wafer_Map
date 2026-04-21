@@ -433,7 +433,7 @@ class MainWindow(QMainWindow):
         """좌표 pair 변경 — preset 소스면 override 유지·재매핑, 아니면 해제. VALUE 재필터."""
         if idx < 0:
             return
-        is_preset = self.cb_coord.itemData(idx, Qt.ItemDataRole.UserRole) == "preset"
+        is_preset = self.cb_coord.itemData(idx, self._ROLE_PRESET) == "preset"
 
         if is_preset and self._preset_override is not None:
             xy = self.cb_coord.itemData(idx)
@@ -600,11 +600,16 @@ class MainWindow(QMainWindow):
             self._preset_override = preset
             self.btn_load_preset.setText(f"프리셋: {preset.display_name}")
 
+    # preset 소스 마킹 role — UserRole 은 (x, y) tuple 로 이미 사용 중.
+    # UserRole+1 을 별도 role 로 써서 "preset" 여부 플래그만 저장.
+    _ROLE_PRESET = int(Qt.ItemDataRole.UserRole) + 1
+
     def _apply_preset_indicator(self):
         """preset 활성 시 cb_coord 상단에 해당 preset pair **하나만** "x / y   [N pt]" 로 삽입.
 
         - 저장 단위가 per-pair 로 바뀐 뒤 프리셋 로드 = pair 하나 → 상단에 그 하나만.
-        - UserRole = "preset" 표시 + 굵은 파란색 스타일.
+        - UserRole = (x_name, y_name) tuple (기존 아이템과 동일 규약 유지)
+        - UserRole+1 = "preset" 플래그 (스타일 구분용)
         - 입력에 같은 pair 가 있으면 제거 (preset 버전이 대체).
         """
         from PySide6.QtGui import QBrush, QColor, QFont
@@ -612,7 +617,7 @@ class MainWindow(QMainWindow):
         combo.blockSignals(True)
         try:
             for i in range(combo.count() - 1, -1, -1):
-                if combo.itemData(i, Qt.ItemDataRole.UserRole) == "preset":
+                if combo.itemData(i, self._ROLE_PRESET) == "preset":
                     combo.removeItem(i)
 
             if self._preset_override is None:
@@ -626,7 +631,7 @@ class MainWindow(QMainWindow):
                 if isinstance(data, tuple) and data == (p.x_name, p.y_name):
                     combo.removeItem(j)
             combo.insertItem(0, label, (p.x_name, p.y_name))
-            combo.setItemData(0, "preset", Qt.ItemDataRole.UserRole)
+            combo.setItemData(0, "preset", self._ROLE_PRESET)
             f = QFont(combo.font())
             f.setBold(True)
             combo.setItemData(0, f, Qt.ItemDataRole.FontRole)
