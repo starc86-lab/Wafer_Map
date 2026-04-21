@@ -299,6 +299,13 @@ DEFAULT_SETTINGS = {
         "show_notch": True,        # 경계 원에 notch(V자 홈) 표시 — 6시 방향 고정
         "notch_depth_mm": 5.0,     # notch 깊이(mm, 시각적 과장)
         "boundary_r_mm": 150.0,    # 경계 원 반지름 (웨이퍼 바깥 약간 여유 150~160). notch 는 이 원에만 표시
+        # mesh 종류 (2D / 3D 모두 동일 mesh):
+        #  "rect"  : 2D=ImageItem(rect grid), 3D=GLSurfacePlotItem
+        #  "radial": 2D=GL top view(radial mesh), 3D=GL 3D(radial mesh)
+        # radial 은 RBF 1회로 2D/3D 공유 + 카디널 스트라이프 없음.
+        "mesh_type": "rect",
+        "radial_rings": 20,        # radial mesh 반경 방향 링 수 (5~60)
+        "radial_seg": 180,         # radial mesh 각도 세그먼트 수 (60~720)
         "show_scale_bar": True,    # 그래프 우측에 컬러맵 스케일바
         "chart_width": 360,        # 그래프 가로 (px) — 360:280 비율 기준 중
         "chart_height": 280,       # 그래프 세로 (px)
@@ -322,10 +329,6 @@ DEFAULT_SETTINGS = {
         "z_exaggeration": 1.0,     # Z 과장 배율 (0.5~3.0, 1.0=기준)
         "show_grid": False,        # 바닥 그리드
         "camera_distance": 550,    # 카메라 거리 (작을수록 확대, 400~800)
-        # 3D mesh 종류: "rect"(기존 GLSurfacePlotItem, 카디널 스트라이프 있음) | "radial"(원형 fan mesh, 매끈)
-        "mesh_type": "rect",
-        "radial_rings": 20,        # radial mesh 반경 방향 링 수 (5~60)
-        "radial_seg": 180,         # radial mesh 각도 세그먼트 수 (60~720)
     },
 
     # Summary 표

@@ -577,6 +577,17 @@ class WaferCell(QFrame):
         self._gl_3d.customContextMenuRequested.connect(self._show_plot_menu)
         self._chart_box_layout.addWidget(self._gl_3d)    # index 1
 
+        # 2D radial top view widget — mesh_type=radial 일 때 2D 슬롯으로 사용.
+        # plain GLViewWidget (Shift+sync 없음 — 2D 는 동기 의미 없음).
+        self._gl_2d = gl.GLViewWidget()
+        self._gl_2d.setBackgroundColor("w")
+        # top-down: elevation=90, azimuth 무관. distance 는 wafer 가 widget 가득 차도록.
+        self._gl_2d.setCameraPosition(distance=400, elevation=90, azimuth=0)
+        self._gl_2d.opts["fov"] = 1.0  # near-orthographic (perspective 왜곡 최소화)
+        self._gl_2d.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._gl_2d.customContextMenuRequested.connect(self._show_plot_menu)
+        self._chart_box_layout.addWidget(self._gl_2d)    # index 2
+
         self._chart_widget: QWidget = self._plot_2d  # 활성 위젯 추적
 
         self._table = QTableWidget(3, 2)
@@ -627,6 +638,11 @@ class WaferCell(QFrame):
         self._gl_radial_surface = None
         self._gl_radial_wall = None
         self._radial_key: tuple | None = None
+        # 2D radial (top-view) slot — 별도 GLViewWidget(_gl_2d) 에 add 됨
+        self._gl_radial_2d_surface = None
+        self._gl_radial_2d_boundary = None
+        self._gl_radial_2d_points = None
+        self._gl_radial_2d_labels: list = []
         # 데이터 필터는 즉시 (가벼움) — 렌더는 defer면 ResultPanel이 병렬 prefetch 후 호출
         self._load_data()
         if not defer_render:
@@ -783,7 +799,10 @@ class WaferCell(QFrame):
         self._activate_current_view()
 
     def _activate_current_view(self) -> None:
-        """현재 _view_mode 인덱스로 stack 토글, 캐시 없으면 그때 한 번 그림."""
+        """현재 _view_mode 인덱스로 stack 토글, 캐시 없으면 그때 한 번 그림.
+
+        2D 의 경우 mesh_type=radial 이면 _gl_2d (top view) 사용, 아니면 _plot_2d.
+        """
         settings = settings_io.load_settings()
         if self._view_mode == "3D":
             self._chart_box_layout.setCurrentIndex(1)
@@ -792,8 +811,13 @@ class WaferCell(QFrame):
                 self._render_3d(self._x_in, self._y_in, self._v_in, settings)
                 self._rendered_3d = True
         else:
-            self._chart_box_layout.setCurrentIndex(0)
-            self._chart_widget = self._plot_2d
+            mesh_type = str(settings.get("chart_common", {}).get("mesh_type", "rect"))
+            if mesh_type == "radial":
+                self._chart_box_layout.setCurrentIndex(2)
+                self._chart_widget = self._gl_2d
+            else:
+                self._chart_box_layout.setCurrentIndex(0)
+                self._chart_widget = self._plot_2d
             if not self._rendered_2d and self._v_in.size > 0:
                 self._render_2d(self._x_in, self._y_in, self._v_in, settings)
                 self._rendered_2d = True
@@ -855,6 +879,11 @@ class WaferCell(QFrame):
 
     def _render_2d(self, x_in, y_in, v_in, settings) -> None:
         common = settings.get("chart_common", {})
+        mesh_type = str(common.get("mesh_type", "rect")).lower()
+        if mesh_type == "radial":
+            self._render_2d_radial(x_in, y_in, v_in, settings)
+            return
+
         chart = settings.get("chart_2d", {})
         XG, YG, ZG, inside, xg, yg = self._ensure_interp(x_in, y_in, v_in, common)
         ZG = np.where(inside, ZG, np.nan)
@@ -909,10 +938,171 @@ class WaferCell(QFrame):
         else:
             self._update_colorbar(common, ZG[inside])
 
+    def _render_2d_radial(self, x_in, y_in, v_in, settings) -> None:
+        """2D top-view radial mesh — RBF 1회 평가, _gl_2d 위젯 사용.
+
+        3D radial 과 동일한 mesh 데이터를 z=0 평면으로 깔아서 위에서 내려다 본 모습.
+        측정점/값 라벨/경계 원 모두 GL 객체로 그림.
+        """
+        from scipy.interpolate import RBFInterpolator
+
+        common = settings.get("chart_common", {})
+        chart = settings.get("chart_2d", {})
+        rings = max(5, int(common.get("radial_rings", 20)))
+        seg = max(60, int(common.get("radial_seg", 180)))
+        edge_cut_mm = float(common.get("edge_cut_mm", 0.0))
+        R = float(WAFER_RADIUS_MM)
+        effective_R = max(R - edge_cut_mm, 1.0) if edge_cut_mm > 0 else R
+        apply_cut = edge_cut_mm > 0 and effective_R < R
+
+        gview = self._gl_2d
+        # 기존 모든 item 제거 (top view 는 매 렌더 깨끗이 다시 그림 — overhead 작음)
+        for it in list(gview.items):
+            gview.removeItem(it)
+        self._gl_radial_2d_surface = None
+        self._gl_radial_2d_boundary = None
+        self._gl_radial_2d_points = None
+        self._gl_radial_2d_labels = []
+
+        # RBF fit
+        pts = np.column_stack([np.asarray(x_in, dtype=float), np.asarray(y_in, dtype=float)])
+        vals = np.asarray(v_in, dtype=float)
+        m = ~np.isnan(vals) & ~np.isnan(pts[:, 0]) & ~np.isnan(pts[:, 1])
+        pts = pts[m]; vals = vals[m]
+        if len(vals) < 2:
+            return
+        try:
+            rbf = RBFInterpolator(pts, vals, kernel="thin_plate_spline")
+        except Exception:
+            return
+
+        # 링 배치 (3D radial 과 동일 — edge_cut shelf 1 ring 추가)
+        if apply_cut:
+            r_arr = np.concatenate([np.linspace(0.0, effective_R, rings + 1), [R]])
+        else:
+            r_arr = np.linspace(0.0, R, rings + 1)
+        n_rings = len(r_arr) - 1
+
+        theta = np.linspace(0.0, 2.0 * np.pi, seg, endpoint=False)
+        Rm, Tm = np.meshgrid(r_arr, theta, indexing="ij")
+        xs_all = (Rm * np.cos(Tm)).ravel()
+        ys_all = (Rm * np.sin(Tm)).ravel()
+        z_raw_all = rbf(np.column_stack([xs_all, ys_all]))
+
+        # vmin/vmax — 3D radial 과 동일 로직
+        if self._display.z_range is not None:
+            vmin, vmax = self._display.z_range
+        else:
+            finite = z_raw_all[np.isfinite(z_raw_all)]
+            if finite.size == 0:
+                return
+            vmin = float(finite.min())
+            vmax = float(finite.max())
+        z_range = vmax - vmin if vmax > vmin else 1.0
+
+        # 2D top view: z=0 평면 (높이 표현 없음, 색만)
+        # cut mask — edge_cut 만 (notch 는 boundary 원에만 표시)
+        eff_r_seg = np.full(seg, effective_R, dtype=float)
+        vert_theta_idx = np.arange(xs_all.size) % seg
+        r_flat = np.sqrt(xs_all ** 2 + ys_all ** 2)
+        cut_mask_all = r_flat > eff_r_seg[vert_theta_idx] + 1e-6
+
+        cmap = resolve_colormap(common.get("colormap", "Turbo"))
+        # 정점 색 — z_raw 기반 normalize
+        rng = max(z_range, 1e-9)
+        norm = np.clip((z_raw_all - vmin) / rng, 0.0, 1.0)
+        lut = cmap.getLookupTable(0.0, 1.0, 256)
+        idx_arr = np.clip((norm * 255).astype(int), 0, 255)
+        rgb = lut[idx_arr, :3].astype(np.float32) / 255.0
+        colors = np.concatenate([rgb, np.ones((rgb.shape[0], 1), dtype=np.float32)], axis=1)
+        if cut_mask_all.any():
+            colors[cut_mask_all] = (1.0, 1.0, 1.0, 1.0)
+
+        # Faces
+        N = n_rings * seg
+        a = np.empty(N, dtype=np.uint32); b = np.empty(N, dtype=np.uint32)
+        c = np.empty(N, dtype=np.uint32); d = np.empty(N, dtype=np.uint32)
+        k = 0
+        for i in range(n_rings):
+            for j in range(seg):
+                jn = (j + 1) % seg
+                a[k] = i * seg + j
+                b[k] = i * seg + jn
+                c[k] = (i + 1) * seg + jn
+                d[k] = (i + 1) * seg + j
+                k += 1
+        faces = np.empty((2 * N, 3), dtype=np.uint32)
+        faces[0::2, 0] = a; faces[0::2, 1] = b; faces[0::2, 2] = c
+        faces[1::2, 0] = a; faces[1::2, 1] = c; faces[1::2, 2] = d
+
+        # 정점 — z=0 평면
+        verts = np.column_stack([
+            xs_all.astype(np.float32),
+            ys_all.astype(np.float32),
+            np.zeros(xs_all.size, dtype=np.float32),
+        ])
+        mesh = gl.GLMeshItem(
+            vertexes=verts, faces=faces, vertexColors=colors,
+            smooth=True, drawEdges=False, glOptions="opaque",
+        )
+        gview.addItem(mesh)
+        self._gl_radial_2d_surface = mesh
+
+        # 경계 원 (notch 표시) — mesh 위에 살짝 띄움
+        if common.get("show_circle", True):
+            bx, by = _boundary_xy(
+                common.get("show_notch", True),
+                float(common.get("notch_depth_mm", _NOTCH_DEFAULT_DEPTH_MM)),
+                R=float(common.get("boundary_r_mm", WAFER_RADIUS_MM)),
+            )
+            circ = np.column_stack([bx, by, np.full_like(bx, 0.5)])
+            line = gl.GLLinePlotItem(
+                pos=circ, color=(0, 0, 0, 1), width=2,
+                antialias=True, glOptions="opaque",
+            )
+            gview.addItem(line)
+            self._gl_radial_2d_boundary = line
+
+        # 측정점
+        if chart.get("show_points", True):
+            pts3d = np.column_stack([
+                np.asarray(x_in, dtype=np.float32),
+                np.asarray(y_in, dtype=np.float32),
+                np.full(len(x_in), 0.7, dtype=np.float32),
+            ])
+            scatter = gl.GLScatterPlotItem(
+                pos=pts3d, color=(0.0, 0.0, 0.0, 0.85),
+                size=float(chart.get("point_size", 4)) * 1.5,
+                pxMode=True, glOptions="opaque",
+            )
+            gview.addItem(scatter)
+            self._gl_radial_2d_points = scatter
+
+        # 값 라벨
+        if chart.get("show_value_labels", False):
+            tbl = settings.get("table", {})
+            decimals = int(common.get("decimals", tbl.get("decimals", 2)))
+            for x, y, val in zip(x_in, y_in, v_in):
+                if np.isnan(val):
+                    continue
+                try:
+                    ti = gl.GLTextItem(
+                        pos=(float(x), float(y), 1.0),
+                        text=f"{val:.{decimals}f}",
+                        color=(40, 40, 40, 255),
+                    )
+                    gview.addItem(ti)
+                    self._gl_radial_2d_labels.append(ti)
+                except Exception:
+                    pass
+
+        # colorbar
+        self._update_colorbar(common, None, vmin=vmin, vmax=vmax)
+
     def _render_3d(self, x_in, y_in, v_in, settings) -> None:
         common = settings.get("chart_common", {})
         chart3d = settings.get("chart_3d", {})
-        mesh_type = str(chart3d.get("mesh_type", "rect")).lower()
+        mesh_type = str(common.get("mesh_type", "rect")).lower()
 
         # 카메라 distance — Settings 변경 시 즉시 반영. FOV는 45° 하드코딩.
         # (elevation/azimuth는 드래그로 사용자 조작 유지)
@@ -1068,8 +1258,8 @@ class WaferCell(QFrame):
         common = settings.get("chart_common", {})
         chart3d = settings.get("chart_3d", {})
 
-        rings = max(5, int(chart3d.get("radial_rings", 20)))
-        seg = max(60, int(chart3d.get("radial_seg", 180)))
+        rings = max(5, int(common.get("radial_rings", 20)))
+        seg = max(60, int(common.get("radial_seg", 180)))
 
         # 기존 rect surface 는 숨김 (mesh 토글 시)
         if self._gl_surface is not None:
@@ -1295,15 +1485,22 @@ class WaferCell(QFrame):
                 )
             elif isinstance(chart, gl.GLViewWidget):
                 s = settings_io.load_settings().get("chart_3d", {})
-                # Ctrl+드래그 pan 은 opts["center"] 를 변경 → 초기 원점 (0,0,0) 으로 복귀.
-                # setCameraPosition(pos=...) 로 center 도 리셋해야 완전 복구.
                 from pyqtgraph import Vector
-                chart.setCameraPosition(
-                    pos=Vector(0, 0, 0),
-                    distance=float(s.get("camera_distance", 500)),
-                    elevation=28, azimuth=-135,
-                )
-                chart.opts["fov"] = 45
+                if chart is self._gl_2d:
+                    # 2D radial top view — 초기 카메라(top, ortho 근사) 복귀
+                    chart.setCameraPosition(
+                        pos=Vector(0, 0, 0),
+                        distance=400, elevation=90, azimuth=0,
+                    )
+                    chart.opts["fov"] = 1.0
+                else:
+                    # 3D — Ctrl+드래그 pan 도 함께 복귀
+                    chart.setCameraPosition(
+                        pos=Vector(0, 0, 0),
+                        distance=float(s.get("camera_distance", 500)),
+                        elevation=28, azimuth=-135,
+                    )
+                    chart.opts["fov"] = 45
                 chart.update()
         elif chosen is a_graph:
             self._copy_graph()

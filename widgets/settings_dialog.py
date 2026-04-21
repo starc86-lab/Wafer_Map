@@ -297,6 +297,25 @@ class ChartCommonGroup(QGroupBox):
         self.sb_boundary_r.setValue(float(cfg.get("boundary_r_mm", 150.0)))
         _limit_width(self.sb_boundary_r)
 
+        # Mesh 종류 — 2D/3D 공통. rect(격자) | radial(원형)
+        self.cb_mesh_type = _limit_width(QComboBox())
+        self.cb_mesh_type.addItem("rect (격자)", "rect")
+        self.cb_mesh_type.addItem("radial (원형)", "radial")
+        cur_mesh = str(cfg.get("mesh_type", "rect"))
+        idx_m = self.cb_mesh_type.findData(cur_mesh)
+        self.cb_mesh_type.setCurrentIndex(idx_m if idx_m >= 0 else 0)
+
+        # radial 밀도
+        self.sp_rings = _limit_width(QSpinBox())
+        self.sp_rings.setRange(5, 60)
+        self.sp_rings.setSingleStep(5)
+        self.sp_rings.setValue(int(cfg.get("radial_rings", 20)))
+
+        self.sp_rseg = _limit_width(QSpinBox())
+        self.sp_rseg.setRange(60, 720)
+        self.sp_rseg.setSingleStep(60)
+        self.sp_rseg.setValue(int(cfg.get("radial_seg", 180)))
+
         _populate_two_columns(self, [
             ("컬러맵", self.cb_cmap),
             ("보간 방법", self.cb_interp),
@@ -305,6 +324,9 @@ class ChartCommonGroup(QGroupBox):
             ("Notch 표시", self.chk_notch),
             ("Notch Depth", depth_row),
             ("경계 원 반지름", self.sb_boundary_r),
+            ("Mesh 종류", self.cb_mesh_type),
+            ("Radial: rings", self.sp_rings),
+            ("Radial: seg", self.sp_rseg),
             ("스케일바 표시", self.chk_scale_bar),
             ("그래프 크기", self.cb_chart_size),
             ("소수점 자릿수", self.cb_decimals),
@@ -318,6 +340,9 @@ class ChartCommonGroup(QGroupBox):
         self.chk_notch.toggled.connect(self.changed)
         self.cb_notch_depth.currentIndexChanged.connect(self.changed)
         self.sb_boundary_r.valueChanged.connect(self.changed)
+        self.cb_mesh_type.currentIndexChanged.connect(self.changed)
+        self.sp_rings.valueChanged.connect(self.changed)
+        self.sp_rseg.valueChanged.connect(self.changed)
         self.chk_scale_bar.toggled.connect(self.changed)
         self.cb_chart_size.currentIndexChanged.connect(self.changed)
         self.cb_decimals.currentIndexChanged.connect(self.changed)
@@ -333,6 +358,9 @@ class ChartCommonGroup(QGroupBox):
             "show_notch": self.chk_notch.isChecked(),
             "notch_depth_mm": float(self.cb_notch_depth.currentData()),
             "boundary_r_mm": float(self.sb_boundary_r.value()),
+            "mesh_type": str(self.cb_mesh_type.currentData()),
+            "radial_rings": int(self.sp_rings.value()),
+            "radial_seg": int(self.sp_rseg.value()),
             "show_scale_bar": self.chk_scale_bar.isChecked(),
             "chart_width": int(w),
             "chart_height": int(h),
@@ -343,6 +371,7 @@ class ChartCommonGroup(QGroupBox):
     def reload(self, cfg: dict[str, Any]) -> None:
         widgets = (self.cb_cmap, self.cb_interp, self.cb_grid, self.chk_circle,
                    self.chk_notch, self.cb_notch_depth, self.sb_boundary_r,
+                   self.cb_mesh_type, self.sp_rings, self.sp_rseg,
                    self.chk_scale_bar, self.cb_chart_size, self.cb_decimals,
                    self.sb_edge_cut)
         for w in widgets:
@@ -359,6 +388,10 @@ class ChartCommonGroup(QGroupBox):
             idx = self.cb_notch_depth.findData(float(cfg.get("notch_depth_mm", 5.0)))
             if idx >= 0: self.cb_notch_depth.setCurrentIndex(idx)
             self.sb_boundary_r.setValue(float(cfg.get("boundary_r_mm", 150.0)))
+            idx = self.cb_mesh_type.findData(str(cfg.get("mesh_type", "rect")))
+            if idx >= 0: self.cb_mesh_type.setCurrentIndex(idx)
+            self.sp_rings.setValue(int(cfg.get("radial_rings", 20)))
+            self.sp_rseg.setValue(int(cfg.get("radial_seg", 180)))
             self.chk_scale_bar.setChecked(bool(cfg.get("show_scale_bar", True)))
             cur_w = int(cfg.get("chart_width", 360))
             cur_h = int(cfg.get("chart_height", 280))
@@ -458,42 +491,17 @@ class Chart3DGroup(QGroupBox):
         self.sp_cam_dist.setSingleStep(10)
         self.sp_cam_dist.setValue(int(cfg.get("camera_distance", 550)))
 
-        # Mesh 종류: rect(기존) / radial(원형 fan mesh)
-        self.cb_mesh_type = _limit_width(QComboBox())
-        self.cb_mesh_type.addItem("rect (격자)", "rect")
-        self.cb_mesh_type.addItem("radial (원형)", "radial")
-        cur_mesh = str(cfg.get("mesh_type", "rect"))
-        idx = self.cb_mesh_type.findData(cur_mesh)
-        self.cb_mesh_type.setCurrentIndex(idx if idx >= 0 else 0)
-
-        # radial 밀도 — rings × seg
-        self.sp_rings = _limit_width(QSpinBox())
-        self.sp_rings.setRange(5, 60)
-        self.sp_rings.setSingleStep(5)
-        self.sp_rings.setValue(int(cfg.get("radial_rings", 20)))
-
-        self.sp_rseg = _limit_width(QSpinBox())
-        self.sp_rseg.setRange(60, 720)
-        self.sp_rseg.setSingleStep(60)
-        self.sp_rseg.setValue(int(cfg.get("radial_seg", 180)))
-
         _populate_two_columns(self, [
             ("부드럽게 (smooth)", self.chk_smooth),
             ("Z-Height", self.sp_zexag),
             ("바닥 그리드", self.chk_grid),
             ("카메라 거리", self.sp_cam_dist),
-            ("Mesh 종류", self.cb_mesh_type),
-            ("Radial: rings", self.sp_rings),
-            ("Radial: seg", self.sp_rseg),
         ])
 
         self.chk_smooth.toggled.connect(self.changed)
         self.sp_zexag.valueChanged.connect(self.changed)
         self.chk_grid.toggled.connect(self.changed)
         self.sp_cam_dist.valueChanged.connect(self.changed)
-        self.cb_mesh_type.currentIndexChanged.connect(self.changed)
-        self.sp_rings.valueChanged.connect(self.changed)
-        self.sp_rseg.valueChanged.connect(self.changed)
 
     def gather(self) -> dict[str, Any]:
         return {
@@ -501,14 +509,10 @@ class Chart3DGroup(QGroupBox):
             "z_exaggeration": float(self.sp_zexag.value()),
             "show_grid": self.chk_grid.isChecked(),
             "camera_distance": int(self.sp_cam_dist.value()),
-            "mesh_type": str(self.cb_mesh_type.currentData()),
-            "radial_rings": int(self.sp_rings.value()),
-            "radial_seg": int(self.sp_rseg.value()),
         }
 
     def reload(self, cfg: dict[str, Any]) -> None:
-        widgets = (self.chk_smooth, self.sp_zexag, self.chk_grid, self.sp_cam_dist,
-                   self.cb_mesh_type, self.sp_rings, self.sp_rseg)
+        widgets = (self.chk_smooth, self.sp_zexag, self.chk_grid, self.sp_cam_dist)
         for w in widgets:
             w.blockSignals(True)
         try:
@@ -517,10 +521,6 @@ class Chart3DGroup(QGroupBox):
             self.sp_zexag.setValue(1.0 if cur_z is None else float(cur_z))
             self.chk_grid.setChecked(bool(cfg.get("show_grid", True)))
             self.sp_cam_dist.setValue(int(cfg.get("camera_distance", 550)))
-            idx = self.cb_mesh_type.findData(str(cfg.get("mesh_type", "rect")))
-            if idx >= 0: self.cb_mesh_type.setCurrentIndex(idx)
-            self.sp_rings.setValue(int(cfg.get("radial_rings", 20)))
-            self.sp_rseg.setValue(int(cfg.get("radial_seg", 180)))
         finally:
             for w in widgets:
                 w.blockSignals(False)
