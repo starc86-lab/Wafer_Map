@@ -131,26 +131,21 @@ def _build_radial_surface_mesh(
     rings: int, seg: int,
     vmin: float, z_range: float, factor: float,
     cmap: pg.ColorMap,
-    *, effective_R: float | None = None,
+    *, cut_mask: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """원형 radial mesh — pre-evaluated (xs, ys, z_raw) 로 정점 구성.
 
     (rings+1) × seg 정점 순서: i*seg + j (ring i, angle j)
     - face: 인접 링 사이 사각형을 2 삼각형으로
     - 외곽 링이 정확히 r=R 이므로 경계가 부드러운 원 (격자 기반 카디널 스트라이프 없음)
-    - effective_R: edge_cut 유효 반경. r > effective_R 정점은 z=0, white color 로
-      바닥 "shelf" 구성 (cut 된 영역 시각적으로 제거).
+    - cut_mask: True 인 정점은 z=0 + 흰색 (edge_cut shelf / notch V 영역 제거용).
     """
     # RBF 외삽으로 vmin 아래 값이 나올 수 있음 → 바닥(z=0) 뚫지 않도록 clamp.
     z_disp = np.clip((z_raw - vmin) * factor, 0.0, None).astype(np.float32)
 
-    # edge_cut: r > effective_R 영역은 z=0 으로 떨어뜨림 (shelf 효과)
-    if effective_R is not None:
-        r_flat = np.sqrt(xs ** 2 + ys ** 2)
-        cut_mask = r_flat > effective_R + 1e-6
+    # 잘려야 할 정점 z=0 으로 강제
+    if cut_mask is not None:
         z_disp[cut_mask] = 0.0
-    else:
-        cut_mask = None
 
     verts = np.column_stack([xs.astype(np.float32), ys.astype(np.float32), z_disp])
 
@@ -1144,12 +1139,30 @@ class WaferCell(QFrame):
         elif self._gl_grid is not None:
             self._gl_grid.setVisible(False)
 
+        # ── notch 반영 per-angle effective r 계산 ──
+        # 각 각도 θ_j 마다 유효 최외곽 r: notch 영역은 V 자로 안쪽으로 dip + edge_cut 으로 추가 offset
+        show_notch = bool(common.get("show_notch", True))
+        notch_depth = float(common.get("notch_depth_mm", _NOTCH_DEFAULT_DEPTH_MM))
+        r_bound_seg = np.full(seg, R, dtype=float)
+        if show_notch:
+            d_notch = np.abs(((theta - _NOTCH_ANGLE + np.pi) % (2.0 * np.pi)) - np.pi)
+            in_notch_seg = d_notch < _NOTCH_HALF_RAD
+            r_bound_seg[in_notch_seg] = R - notch_depth * (1.0 - d_notch[in_notch_seg] / _NOTCH_HALF_RAD)
+        # edge_cut 추가 offset — 각 각도별 notched 경계에서 안쪽으로 edge_cut 만큼
+        eff_r_seg = np.maximum(r_bound_seg - (edge_cut_mm if apply_cut else 0.0), 1.0)
+
+        # Per-vertex cut mask: 해당 정점의 r 이 그 각도의 eff_r 보다 크면 잘림
+        # 정점 순서 = (ring i, angle j): index = i*seg + j → theta 인덱스 = index % seg
+        vert_theta_idx = np.arange(xs_all.size) % seg
+        r_flat = np.sqrt(xs_all ** 2 + ys_all ** 2)
+        cut_mask_all = r_flat > eff_r_seg[vert_theta_idx] + 1e-6
+
         # Radial surface mesh — pre-evaluated (xs_all, ys_all, z_raw_all) 재사용
         smooth = bool(chart3d.get("smooth", True))
         v_s, f_s, c_s = _build_radial_surface_mesh(
             xs_all, ys_all, z_raw_all, n_rings, seg,
             vmin, z_range, factor, cmap,
-            effective_R=effective_R if apply_cut else None,
+            cut_mask=cut_mask_all if cut_mask_all.any() else None,
         )
         if self._gl_radial_surface is None:
             self._gl_radial_surface = gl.GLMeshItem(
@@ -1163,18 +1176,10 @@ class WaferCell(QFrame):
             )
         self._gl_radial_surface.setVisible(True)
 
-        # Smooth cylinder wall —
-        #   edge_cut 적용: r=effective_R 링 (r_arr[rings], 맨 마지막 직전) 재사용
-        #   edge_cut 없음: 외곽 r=R 링 재사용
-        if apply_cut:
-            # r_arr 구성상 index=rings 가 effective_R (마지막 interior 링)
-            wall_ring_idx = rings  # 0-based index in r_arr
-        else:
-            wall_ring_idx = n_rings  # 마지막 링 = R
-        wstart = wall_ring_idx * seg
-        wall_xs = xs_all[wstart:wstart + seg]
-        wall_ys = ys_all[wstart:wstart + seg]
-        wall_z_raw = z_raw_all[wstart:wstart + seg]
+        # Smooth cylinder wall — 각 angle 별 eff_r 에 배치 → notch 영역 안쪽으로 dip.
+        wall_xs = eff_r_seg * np.cos(theta)
+        wall_ys = eff_r_seg * np.sin(theta)
+        wall_z_raw = rbf(np.column_stack([wall_xs, wall_ys]))
         v_w, f_w, c_w = _build_smooth_cylinder_wall(
             wall_xs, wall_ys, wall_z_raw, seg,
             vmin, z_range, factor, cmap,
