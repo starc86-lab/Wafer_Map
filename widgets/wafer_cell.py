@@ -22,15 +22,10 @@ from PySide6.QtWidgets import (
 
 from core import settings as settings_io
 from core.coords import WAFER_RADIUS_MM, filter_in_wafer
-from core.interp import interpolate_wafer
 from core.metrics import summary_metrics
 
 
 BOUNDARY_SEGMENTS = 361
-
-# 격자 마진 — RBF 보간 외삽 품질을 위한 약간의 여유. 카디널 "짤림"은 z=0 drop 제거 +
-# translucent 블렌딩으로 해결.
-GRID_MARGIN_MM = 5.0
 
 # 300mm 웨이퍼 notch — 실제 스펙은 ~3mm 폭/~1mm 깊이지만 화면에서 잘 보이도록 과장.
 # 방향은 6시(하단, 3π/2) 고정. 깊이는 settings(chart_common.notch_depth_mm)에서 주입.
@@ -56,26 +51,6 @@ def _boundary_xy(
         in_notch = d < _NOTCH_HALF_RAD
         r[in_notch] = R - depth * (1 - d[in_notch] / _NOTCH_HALF_RAD)
     return r * np.cos(theta), r * np.sin(theta)
-
-
-def _points_inside_wafer(XG, YG, show_notch: bool, depth: float = _NOTCH_DEFAULT_DEPTH_MM):
-    """격자점이 웨이퍼 내부인가. notch 옵션 시 V자 + margin까지 제외.
-
-    margin은 cell의 반지름(0.5 픽셀)만큼 — V자 **경계선과 교차하는** cell만 추가 투명화.
-    해상도 무관하게 V자 "영역 크기"는 동일 (고해상도엔 부드럽게, 저해상도엔 계단).
-    """
-    r = np.sqrt(XG * XG + YG * YG)
-    inside = r <= WAFER_RADIUS_MM
-    if show_notch:
-        cell = abs(XG[1, 0] - XG[0, 0]) if XG.shape[0] > 1 else 3.0
-        theta = np.arctan2(YG, XG)
-        d = np.abs(((theta - _NOTCH_ANGLE + np.pi) % (2 * np.pi)) - np.pi)
-        angle_margin = 0.5 * cell / WAFER_RADIUS_MM
-        in_notch_angle = d < _NOTCH_HALF_RAD + angle_margin
-        boundary_r = WAFER_RADIUS_MM - depth * (1 - d / _NOTCH_HALF_RAD)
-        boundary_r_render = boundary_r - 0.5 * cell
-        inside &= ~(in_notch_angle & (r > boundary_r_render))
-    return inside
 
 
 # ── 커스텀 컬러맵 — pyqtgraph 기본 목록에 없는 것 ──────
@@ -231,81 +206,6 @@ def _build_smooth_cylinder_wall(
     alpha = np.ones((rgb.shape[0], 1), dtype=np.float32)
     colors = np.concatenate([rgb, alpha], axis=1)
     return verts, faces, colors
-
-
-def _build_cut_wall_mesh(cut_r: float, XG: np.ndarray, YG: np.ndarray,
-                          z_disp: np.ndarray, cmap: pg.ColorMap,
-                          z_disp_max: float, n_seg: int = 72):
-    """edge_cut 경계 원통 벽 — (x,y,0) → (x,y,z_disp(cut_r)).
-
-    서피스 외각을 바닥 Z=0 에 시각적으로 연결 → "떠 있는" 느낌 제거.
-    - z_disp: 화면에 표시되는(scaling 반영된) Z 격자. 벽 top 높이에 사용
-    - z_disp_max: 화면 z 범위 (0~max). color normalize 용
-    - 색: 서피스 가장자리 색과 동일 계통 (같은 LUT, 같은 norm)
-
-    반환: (vertexes, faces, face_colors) 또는 모두 None.
-    """
-    if cut_r <= 0:
-        return None, None, None
-    theta = np.linspace(0.0, 2.0 * np.pi, n_seg, endpoint=False)
-    xg_lin = XG[:, 0]   # meshgrid indexing='ij' 가정
-    yg_lin = YG[0, :]
-    dx = float(abs(xg_lin[1] - xg_lin[0])) if xg_lin.size > 1 else 1.0
-    probe_r_start = max(cut_r - 1.5 * dx, dx * 0.5)
-    zs = np.zeros(n_seg, dtype=np.float32)
-    for i, t in enumerate(theta):
-        z_val = 0.0
-        for k in range(0, 12):
-            pr = probe_r_start - k * dx
-            if pr <= 0:
-                break
-            px = pr * np.cos(t)
-            py = pr * np.sin(t)
-            xi = int(np.clip(np.searchsorted(xg_lin, px), 0, xg_lin.size - 1))
-            yi = int(np.clip(np.searchsorted(yg_lin, py), 0, yg_lin.size - 1))
-            z_val = float(z_disp[xi, yi])
-            if not np.isnan(z_val) and z_val != 0.0:
-                break
-        zs[i] = float(z_val) if not np.isnan(z_val) else 0.0
-
-    cos_t = np.cos(theta).astype(np.float32)
-    sin_t = np.sin(theta).astype(np.float32)
-    cx = (cut_r * cos_t).astype(np.float32)
-    cy = (cut_r * sin_t).astype(np.float32)
-    bot = np.column_stack([cx, cy, np.zeros(n_seg, dtype=np.float32)])
-    top = np.column_stack([cx, cy, zs])
-    verts = np.vstack([bot, top])
-
-    idx = np.arange(n_seg)
-    nxt = (idx + 1) % n_seg
-    face_a = np.stack([idx, nxt, n_seg + idx], axis=1)
-    face_b = np.stack([nxt, n_seg + nxt, n_seg + idx], axis=1)
-    faces = np.concatenate([face_a, face_b], axis=0).astype(np.uint32)
-
-    # face colors — 각 face 는 해당 segment 의 top Z 기준 colormap
-    face_z = np.concatenate([zs, zs])
-    rng = max(float(z_disp_max), 1e-9)
-    norm = np.clip(face_z / rng, 0.0, 1.0)
-    lut = cmap.getLookupTable(0.0, 1.0, 256)
-    lut_idx = np.clip((norm * 255).astype(int), 0, 255)
-    rgb = lut[lut_idx].astype(np.float32) / 255.0
-    alpha = np.ones((rgb.shape[0], 1), dtype=np.float32)
-    face_colors = np.concatenate([rgb, alpha], axis=1)
-    return verts, faces, face_colors
-
-
-class _CtrlPanViewBox(pg.ViewBox):
-    """2D PlotWidget 전용 ViewBox — Ctrl+좌드래그만 pan 허용.
-
-    - 일반 좌드래그: 무시 (실수 이동 방지)
-    - Ctrl+좌드래그: pan (위치 이동) — 3D 의 Ctrl+드래그 pan 과 동일 관례
-    - wheel: 기본 zoom (ViewBox 기본 동작)
-    """
-    def mouseDragEvent(self, ev, axis=None):
-        if ev.modifiers() & Qt.KeyboardModifier.ControlModifier:
-            super().mouseDragEvent(ev, axis)
-        else:
-            ev.ignore()
 
 
 class _LockedGLView(gl.GLViewWidget):
@@ -541,58 +441,31 @@ class WaferCell(QFrame):
 
         lay.addWidget(self._chart_box, stretch=1)
 
-        # 커스텀 ViewBox 주입 — Ctrl+드래그 pan + wheel zoom
-        self._plot_2d = pg.PlotWidget(viewBox=_CtrlPanViewBox())
-        self._plot_2d.setBackground("w")
-        self._plot_2d.setAspectLocked(True)
-        self._plot_2d.setFrameShape(QFrame.Shape.NoFrame)
-        # 300mm 웨이퍼는 항상 -150~+150 mm이라 축 눈금 불필요
-        self._plot_2d.getPlotItem().hideAxis("bottom")
-        self._plot_2d.getPlotItem().hideAxis("left")
-        # wheel zoom 활성. 드래그 pan 은 _CtrlPanViewBox 가 Ctrl 시에만 허용.
-        self._plot_2d.setMouseEnabled(True, True)
-        self._plot_2d.getPlotItem().setMenuEnabled(False)
-        # 좌하단 [A] auto-range 버튼 숨김 — 누르면 enableAutoRange로 크기 바뀜
-        self._plot_2d.getPlotItem().hideButtons()
-        self._plot_2d.getPlotItem().setDefaultPadding(0)
-        self._plot_2d.setRange(
-            xRange=(-WAFER_RADIUS_MM, WAFER_RADIUS_MM),
-            yRange=(-WAFER_RADIUS_MM, WAFER_RADIUS_MM),
-            padding=0.05,
-        )
-        self._plot_2d.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self._plot_2d.customContextMenuRequested.connect(self._show_plot_menu)
-        self._chart_box_layout.addWidget(self._plot_2d)  # index 0
+        s = settings_io.load_settings().get("chart_3d", {})
+        cam_dist = float(s.get("camera_distance", 550))
 
+        # 2D top-view (radial) — plain GLViewWidget (Shift 동기 없음, 2D 는 의미 X).
+        # 카메라는 3D 와 동일 파라미터 (distance, fov) — elevation 만 90 (top-down),
+        # azimuth=-90 으로 notch 를 6시(화면 하단)로 정렬.
+        # → 3D 를 top 각도로 돌려 봤을 때와 동일 크기.
+        self._gl_2d = gl.GLViewWidget()
+        self._gl_2d.setBackgroundColor("w")
+        self._gl_2d.setCameraPosition(distance=cam_dist, elevation=90, azimuth=-90)
+        self._gl_2d.opts["fov"] = 45
+        self._gl_2d.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._gl_2d.customContextMenuRequested.connect(self._show_plot_menu)
+        self._chart_box_layout.addWidget(self._gl_2d)    # index 0
+
+        # 3D radial view
         self._gl_3d = _LockedGLView()
         self._gl_3d.setBackgroundColor("w")
-        # 초기 카메라 — FOV 45° 하드, distance는 settings 값
-        s = settings_io.load_settings().get("chart_3d", {})
-        self._gl_3d.setCameraPosition(
-            distance=float(s.get("camera_distance", 500)),
-            elevation=28, azimuth=-135,
-        )
+        self._gl_3d.setCameraPosition(distance=cam_dist, elevation=28, azimuth=-135)
         self._gl_3d.opts["fov"] = 45
         self._gl_3d.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._gl_3d.customContextMenuRequested.connect(self._show_plot_menu)
         self._chart_box_layout.addWidget(self._gl_3d)    # index 1
 
-        # 2D radial top view widget — mesh_type=radial 일 때 2D 슬롯으로 사용.
-        # plain GLViewWidget (Shift+sync 없음 — 2D 는 동기 의미 없음).
-        # 카메라는 3D 와 동일 파라미터 (fov=45, distance=settings) — elevation 만 90 (top-down).
-        # 이러면 "3D 에서 top view 로 각도만 돌렸을 때와 동일한 크기" 로 보임.
-        self._gl_2d = gl.GLViewWidget()
-        self._gl_2d.setBackgroundColor("w")
-        # elevation=90 (top-down), azimuth=-90 (notch 를 6시 = 화면 하단).
-        # distance=380 → 2*380*tan(22.5°)≈315mm 의 vertical field → wafer(300mm) 가
-        # widget 의 ~95% 차지 (rect 2D 의 padding=0.05 와 동일 fill 비율).
-        self._gl_2d.setCameraPosition(distance=380, elevation=90, azimuth=-90)
-        self._gl_2d.opts["fov"] = 45
-        self._gl_2d.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self._gl_2d.customContextMenuRequested.connect(self._show_plot_menu)
-        self._chart_box_layout.addWidget(self._gl_2d)    # index 2
-
-        self._chart_widget: QWidget = self._plot_2d  # 활성 위젯 추적
+        self._chart_widget: QWidget = self._gl_2d  # 활성 위젯 추적
 
         self._table = QTableWidget(3, 2)
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -622,31 +495,11 @@ class WaferCell(QFrame):
         # 렌더 캐시 — 한 번 그려진 모드는 재계산 없이 인덱스 토글만
         self._rendered_2d = False
         self._rendered_3d = False
-        # 보간 캐시 — 같은 데이터 + 같은 (interp_method, grid_resolution)이면 ZG 재사용
-        self._interp_cache: tuple | None = None   # (XG, YG, ZG, xg, yg)
-        self._interp_key: tuple | None = None     # (method, G)
-        # mask 캐시 — (show_notch, notch_depth) 따로 관리. depth만 바꿔도 ZG 보존
-        self._mask_cache: np.ndarray | None = None
-        self._mask_key: tuple | None = None       # (G, show_notch, depth)
-        # 3D GL items — 재사용 slot (setData로 데이터만 교체, GPU buffer 유지)
-        self._gl_surface = None
-        self._surface_key: tuple | None = None    # (shader, smooth) — 바뀌면 재생성
-        # z_sig: 이전 surface의 z 값 signature. 동일하면 z 재전달 안 함 → normals 재계산 생략
-        # (smooth=True 에서 z 업데이트는 매우 비쌈: 250² vertex normals 계산)
-        self._surface_z_sig: tuple | None = None
-        self._gl_boundary = None
-        self._gl_grid = None
-        self._gl_wall = None       # edge_cut 측벽 (surface edge → Z=0)
-        self._wall_key: tuple | None = None
-        # radial mesh 경로용 slot — GLMeshItem 으로 rect GLSurfacePlotItem 대체
-        self._gl_radial_surface = None
-        self._gl_radial_wall = None
-        self._radial_key: tuple | None = None
-        # 2D radial (top-view) slot — 별도 GLViewWidget(_gl_2d) 에 add 됨
-        self._gl_radial_2d_surface = None
-        self._gl_radial_2d_boundary = None
-        self._gl_radial_2d_points = None
-        self._gl_radial_2d_labels: list = []
+        # 3D radial mesh slot — GLMeshItem (surface + cylinder wall)
+        self._gl_surface = None      # radial surface mesh
+        self._gl_wall = None         # smooth cylinder wall
+        self._gl_boundary = None     # 경계 원 (notch 포함)
+        self._gl_grid = None         # 바닥 grid
         # 데이터 필터는 즉시 (가벼움) — 렌더는 defer면 ResultPanel이 병렬 prefetch 후 호출
         self._load_data()
         if not defer_render:
@@ -715,38 +568,28 @@ class WaferCell(QFrame):
         """3D 캐시만 무효화 — z_range 변경 등 3D만 영향받을 때.
 
         현재 view가 3D면 즉시 재렌더, 2D면 다음 3D 진입 시 그림.
-        2D 캐시는 그대로 유지.
         """
         self._rendered_3d = False
-        self._reset_3d_items()
+        self._hide_3d_items()
         if self._view_mode == "3D":
             self._activate_current_view()
 
     def refresh(self) -> None:
-        """Settings(컬러맵·shading·격자 옵션 등) 변경 시 호출.
-
-        렌더 캐시는 reset하되 **보간 캐시는 유지** — interp_method/grid_resolution이
-        바뀐 경우에만 `_ensure_interp`가 내부적으로 재계산. 덕분에 RBF 50~100ms 비용 생략.
-        """
+        """Settings(컬러맵·보간·mesh 옵션 등) 변경 시 호출 — 양쪽 view 재렌더."""
         self._rendered_2d = False
         self._rendered_3d = False
-        self._reset_2d_items()
-        self._reset_3d_items()
+        self._hide_3d_items()
         settings = settings_io.load_settings()
         self._apply_chart_size(settings.get("chart_common", {}))
         self._activate_current_view()
 
     def prefetch_interp(self) -> None:
-        """보간 캐시만 미리 채움 (GUI 미접근) — ResultPanel 병렬 보간용.
+        """호환 유지용 — radial 경로에선 별도 캐시 없이 렌더 시 직접 RBF.
 
-        GIL 해제되는 scipy RBF C 코드를 여러 cell에서 동시에 돌려 wall-clock 단축.
-        렌더는 이후 메인 스레드에서 순차 수행.
+        이전 rect 경로의 _ensure_interp 병렬화를 위해 ResultPanel 이 호출했던 훅.
+        radial 은 RBF fit 자체가 ~1ms 로 충분히 빨라 병렬화 이득 미미. no-op.
         """
-        if self._v_in.size == 0:
-            return
-        settings = settings_io.load_settings()
-        common = settings.get("chart_common", {})
-        self._ensure_interp(self._x_in, self._y_in, self._v_in, common)
+        return
 
     def prefetch_inactive_view(self) -> None:
         """현재 view_mode와 반대 view를 미리 렌더 (캐시만 채움).
@@ -778,8 +621,7 @@ class WaferCell(QFrame):
         d = self._display
         n = min(len(d.x_mm), len(d.y_mm), len(d.values))
         if n == 0:
-            self._reset_2d_items()
-            self._reset_3d_items()
+            self._hide_3d_items()
             return
         x_mm = np.asarray(d.x_mm[:n], dtype=float)
         y_mm = np.asarray(d.y_mm[:n], dtype=float)
@@ -788,25 +630,24 @@ class WaferCell(QFrame):
         x_in, y_in, v_in, _ = filter_in_wafer(x_mm, y_mm, v)
         self._x_in, self._y_in, self._v_in = x_in, y_in, v_in
 
-        # 새 데이터이므로 렌더/보간 캐시 모두 무효화
+        # 새 데이터 — 렌더 캐시 무효화
         self._rendered_2d = False
         self._rendered_3d = False
-        self._interp_cache = None
-        self._interp_key = None
-        self._mask_cache = None
-        self._mask_key = None
-        self._reset_2d_items()
-        self._reset_3d_items()
+        self._hide_3d_items()
 
         settings = settings_io.load_settings()
         self._update_table(v_in, settings.get("table", {}))
         self._activate_current_view()
 
-    def _activate_current_view(self) -> None:
-        """현재 _view_mode 인덱스로 stack 토글, 캐시 없으면 그때 한 번 그림.
+    def _hide_3d_items(self) -> None:
+        """3D items 숨김 (widget 자체는 유지, setData 로 다음 렌더 시 즉시 재사용)."""
+        for it in (self._gl_surface, self._gl_wall,
+                    self._gl_boundary, self._gl_grid):
+            if it is not None:
+                it.setVisible(False)
 
-        2D 의 경우 mesh_type=radial 이면 _gl_2d (top view) 사용, 아니면 _plot_2d.
-        """
+    def _activate_current_view(self) -> None:
+        """현재 _view_mode 인덱스로 stack 토글, 캐시 없으면 그때 한 번 그림."""
         settings = settings_io.load_settings()
         if self._view_mode == "3D":
             self._chart_box_layout.setCurrentIndex(1)
@@ -815,134 +656,13 @@ class WaferCell(QFrame):
                 self._render_3d(self._x_in, self._y_in, self._v_in, settings)
                 self._rendered_3d = True
         else:
-            mesh_type = str(settings.get("chart_common", {}).get("mesh_type", "rect"))
-            if mesh_type == "radial":
-                self._chart_box_layout.setCurrentIndex(2)
-                self._chart_widget = self._gl_2d
-            else:
-                self._chart_box_layout.setCurrentIndex(0)
-                self._chart_widget = self._plot_2d
+            self._chart_box_layout.setCurrentIndex(0)
+            self._chart_widget = self._gl_2d
             if not self._rendered_2d and self._v_in.size > 0:
                 self._render_2d(self._x_in, self._y_in, self._v_in, settings)
                 self._rendered_2d = True
 
-    def _reset_2d_items(self) -> None:
-        """plot 안의 모든 item 제거 (위젯 자체는 유지)."""
-        self._plot_2d.getPlotItem().clear()
-
-    def _reset_3d_items(self) -> None:
-        """3D items는 slot에 보관되어 setData로 재사용 — 여기선 가시성만 OFF.
-
-        items 자체를 제거하면 GPU buffer 재할당이 발생해 grid=250에서 cell당 수백 ms.
-        hide만 해두면 다음 render에서 setData로 즉시 교체.
-        """
-        for it in (self._gl_surface, self._gl_boundary, self._gl_grid, self._gl_wall):
-            if it is not None:
-                it.setVisible(False)
-
-    def _ensure_interp(self, x_in, y_in, v_in, common):
-        """보간 결과를 캐시 — (method, grid_resolution)이 그대로면 재사용.
-
-        컬러맵·shading 등은 interp 결과에 영향 없으므로 캐시 히트 경로로 수 ms 처리.
-        """
-        method = common.get("interp_method", "RBF-ThinPlate")
-        G = int(common.get("grid_resolution", 200))
-        show_notch = bool(common.get("show_notch", True))
-        depth = float(common.get("notch_depth_mm", _NOTCH_DEFAULT_DEPTH_MM))
-        edge_cut = float(common.get("edge_cut_mm", 0.0))
-        # edge_cut 은 radial 경로에서만 유효하지만 일반 캐시 key 에도 포함 — 바뀌면 무효화
-        interp_key = (method, G, edge_cut)
-        mask_key = (G, show_notch, depth)
-
-        # 보간(RBF/Radial) — key 그대로면 ZG 재사용
-        if self._interp_cache is None or self._interp_key != interp_key:
-            # 격자 범위를 wafer 반지름 + margin 으로 확장 → 카디널 접점(±150,0)/(0,±150) 에서
-            # 격자 정점이 원 경계와 정확히 일치해 생기는 3D 삼각형 "짤림" 제거.
-            # 마스크는 그대로 r <= WAFER_RADIUS_MM 이라 시각화 경계는 유지.
-            grid_r = WAFER_RADIUS_MM + GRID_MARGIN_MM
-            xg = np.linspace(-grid_r, grid_r, G)
-            yg = np.linspace(-grid_r, grid_r, G)
-            XG, YG = np.meshgrid(xg, yg, indexing="ij")
-            ZG = interpolate_wafer(
-                x_in, y_in, v_in, XG, YG,
-                method=method,
-                edge_cut_mm=edge_cut,
-                wafer_radius_mm=float(WAFER_RADIUS_MM),
-            )
-            self._interp_cache = (XG, YG, ZG, xg, yg)
-            self._interp_key = interp_key
-            self._mask_cache = None  # G 바뀌면 mask도 재계산
-        XG, YG, ZG, xg, yg = self._interp_cache
-
-        # mask — (G, show_notch, depth) 별도 관리. depth만 바꿔도 RBF는 안 돎
-        if self._mask_cache is None or self._mask_key != mask_key:
-            self._mask_cache = _points_inside_wafer(XG, YG, show_notch, depth)
-            self._mask_key = mask_key
-
-        return XG, YG, ZG, self._mask_cache, xg, yg
-
     def _render_2d(self, x_in, y_in, v_in, settings) -> None:
-        common = settings.get("chart_common", {})
-        mesh_type = str(common.get("mesh_type", "rect")).lower()
-        if mesh_type == "radial":
-            self._render_2d_radial(x_in, y_in, v_in, settings)
-            return
-
-        chart = settings.get("chart_2d", {})
-        XG, YG, ZG, inside, xg, yg = self._ensure_interp(x_in, y_in, v_in, common)
-        ZG = np.where(inside, ZG, np.nan)
-
-        plot = self._plot_2d
-        self._reset_2d_items()
-
-        cmap_name = common.get("colormap", "Turbo")
-        img = pg.ImageItem(ZG)
-        # 격자 범위와 정합 — _ensure_interp 의 grid_r 과 동일 확장
-        grid_r = WAFER_RADIUS_MM + GRID_MARGIN_MM
-        img.setRect(QRectF(-grid_r, -grid_r, 2 * grid_r, 2 * grid_r))
-        cmap = resolve_colormap(cmap_name)
-        img.setLookupTable(cmap.getLookupTable())
-        # Z-Scale 공통 모드면 display.z_range로 levels 고정 → 2D에도 공통 스케일 반영
-        if self._display.z_range is not None:
-            img.setLevels(self._display.z_range)
-        plot.addItem(img)
-
-        if common.get("show_circle", True):
-            bx, by = _boundary_xy(
-                common.get("show_notch", True),
-                float(common.get("notch_depth_mm", _NOTCH_DEFAULT_DEPTH_MM)),
-                R=float(common.get("boundary_r_mm", WAFER_RADIUS_MM)),
-            )
-            plot.plot(bx, by, pen=pg.mkPen("k", width=2))
-        if chart.get("show_points", True):
-            plot.addItem(pg.ScatterPlotItem(
-                x_in, y_in, pen=None,
-                brush=pg.mkBrush(0, 0, 0, 220),
-                size=int(chart.get("point_size", 4)),
-            ))
-
-        if chart.get("show_value_labels", False):
-            # 측정점 value label 소수점은 chart_common.decimals 사용 (Summary 표와 동일)
-            tbl = settings.get("table", {})
-            decimals = int(common.get("decimals", tbl.get("decimals", 2)))
-            for x, y, val in zip(x_in, y_in, v_in):
-                if np.isnan(val):
-                    continue
-                txt = pg.TextItem(
-                    f"{val:.{decimals}f}",
-                    color=(40, 40, 40),
-                    anchor=(0.5, 1.2),
-                )
-                txt.setPos(float(x), float(y))
-                plot.addItem(txt)
-
-        # colorbar 갱신 — 공통 스케일이면 display.z_range, 아니면 ZG inside 유효값
-        if self._display.z_range is not None:
-            self._update_colorbar(common, None, vmin=self._display.z_range[0], vmax=self._display.z_range[1])
-        else:
-            self._update_colorbar(common, ZG[inside])
-
-    def _render_2d_radial(self, x_in, y_in, v_in, settings) -> None:
         """2D top-view radial mesh — RBF 1회 평가, _gl_2d 위젯 사용.
 
         3D radial 과 동일한 mesh 데이터를 z=0 평면으로 깔아서 위에서 내려다 본 모습.
@@ -961,13 +681,15 @@ class WaferCell(QFrame):
 
         gview = self._gl_2d
 
+        # 카메라 distance — 3D 와 동일 값으로 동기화 (top view 가 3D 크기와 일치)
+        chart3d = settings.get("chart_3d", {})
+        dist = float(chart3d.get("camera_distance", 550))
+        if gview.opts.get("distance") != dist:
+            gview.setCameraPosition(distance=dist)
+
         # 기존 모든 item 제거 (top view 는 매 렌더 깨끗이 다시 그림 — overhead 작음)
         for it in list(gview.items):
             gview.removeItem(it)
-        self._gl_radial_2d_surface = None
-        self._gl_radial_2d_boundary = None
-        self._gl_radial_2d_points = None
-        self._gl_radial_2d_labels = []
 
         # RBF fit — settings 의 interp_method 반영
         pts = np.column_stack([np.asarray(x_in, dtype=float), np.asarray(y_in, dtype=float)])
@@ -1051,7 +773,6 @@ class WaferCell(QFrame):
             smooth=True, drawEdges=False, glOptions="opaque",
         )
         gview.addItem(mesh)
-        self._gl_radial_2d_surface = mesh
 
         # 경계 원 (notch 표시) — mesh 위에 살짝 띄움
         if common.get("show_circle", True):
@@ -1066,7 +787,6 @@ class WaferCell(QFrame):
                 antialias=True, glOptions="opaque",
             )
             gview.addItem(line)
-            self._gl_radial_2d_boundary = line
 
         # 측정점
         if chart.get("show_points", True):
@@ -1081,7 +801,6 @@ class WaferCell(QFrame):
                 pxMode=True, glOptions="opaque",
             )
             gview.addItem(scatter)
-            self._gl_radial_2d_points = scatter
 
         # 값 라벨
         if chart.get("show_value_labels", False):
@@ -1097,7 +816,6 @@ class WaferCell(QFrame):
                         color=(40, 40, 40, 255),
                     )
                     gview.addItem(ti)
-                    self._gl_radial_2d_labels.append(ti)
                 except Exception:
                     pass
 
@@ -1105,172 +823,25 @@ class WaferCell(QFrame):
         self._update_colorbar(common, None, vmin=vmin, vmax=vmax)
 
     def _render_3d(self, x_in, y_in, v_in, settings) -> None:
-        common = settings.get("chart_common", {})
-        chart3d = settings.get("chart_3d", {})
-        mesh_type = str(common.get("mesh_type", "rect")).lower()
+        """radial 원형 fan mesh 기반 3D 렌더 — (r, θ) mesh + 매끈 원통 벽.
 
-        # 카메라 distance — Settings 변경 시 즉시 반영. FOV는 45° 하드코딩.
-        # (elevation/azimuth는 드래그로 사용자 조작 유지)
-        opts = self._gl_3d.opts
-        dist = float(chart3d.get("camera_distance", 500))
-        if opts.get("distance") != dist:
-            self._gl_3d.setCameraPosition(distance=dist)
-            self._gl_3d.update()
-
-        if mesh_type == "radial":
-            self._render_3d_radial(x_in, y_in, v_in, settings)
-            return
-
-        # rect (기존) — 격자 기반 GLSurfacePlotItem + z=0 drop 벽
-        # radial slot 이 있으면 숨김
-        for item in (self._gl_radial_surface, self._gl_radial_wall):
-            if item is not None:
-                item.setVisible(False)
-
-        XG, YG, ZG, inside, xg, yg = self._ensure_interp(x_in, y_in, v_in, common)
-
-        # Z 범위 (공통 스케일이면 display.z_range, 아니면 자체 데이터)
-        if self._display.z_range is not None:
-            vmin, vmax = self._display.z_range
-        else:
-            valid = ZG[inside & ~np.isnan(ZG)]
-            if valid.size == 0:
-                return
-            vmin = float(valid.min())
-            vmax = float(valid.max())
-        z_range = vmax - vmin if vmax > vmin else 1.0
-
-        # Z 과장 배율: None 자동, float 고정
-        z_exag = chart3d.get("z_exaggeration", None)
-        target_height = WAFER_RADIUS_MM * 0.4  # X/Y(±150)의 ~40%
-        if z_exag is None:
-            factor = target_height / z_range
-        else:
-            base_factor = target_height / z_range
-            factor = base_factor * float(z_exag)
-
-        # cut 영역(NaN) + 웨이퍼 밖 은 Z=0 으로 처리 → 경계에서 서피스가
-        # 자연스럽게 떨어지며 자동 "벽" 생성 (cut=0 과 동일 기둥 효과)
-        nan_mask = np.isnan(ZG)
-        valid_cell = inside & ~nan_mask
-
-        z_disp = (ZG - vmin) * factor
-        z_disp = np.where(valid_cell, z_disp, 0.0)
-
-        # 컬러: 정점마다 RGBA (공통 컬러맵). 무효 셀 (wafer 밖 OR cut) 은 투명
-        cmap_name = common.get("colormap", "Turbo")
-        cmap = resolve_colormap(cmap_name)
-        lut = cmap.getLookupTable(0.0, 1.0, 256)  # (256, 4) ubyte
-        norm = (ZG - vmin) / z_range
-        norm = np.where(valid_cell, norm, 0.0)
-        idx_arr = np.clip((norm * 255).astype(int), 0, 255)
-        colors = np.empty(ZG.shape + (4,), dtype=np.float32)
-        colors[..., :3] = lut[idx_arr, :3] / 255.0
-        colors[..., 3] = 1.0
-        colors[~valid_cell] = (1.0, 1.0, 1.0, 0.0)
-
-        gview = self._gl_3d
-
-        # ── grid (바닥) — 재사용 ──
-        if chart3d.get("show_grid", True):
-            if self._gl_grid is None:
-                self._gl_grid = gl.GLGridItem()
-                self._gl_grid.setSize(x=350, y=350)
-                self._gl_grid.setSpacing(x=50, y=50)
-                self._gl_grid.setColor((205, 205, 205, 150))
-                gview.addItem(self._gl_grid)
-            self._gl_grid.setVisible(True)
-        elif self._gl_grid is not None:
-            self._gl_grid.setVisible(False)
-
-        # ── surface — shader/smooth 변경 시만 재생성, 그 외엔 setData로 데이터만 교체 ──
-        shader = "shaded"  # 하드코딩 — 다른 shader(normalColor/heightColor)는 컬러맵 무시라 UX 혼란
-        smooth = bool(chart3d.get("smooth", True))
-        surf_key = (shader, smooth)
-        z_f32 = z_disp.astype(np.float32)
-        colors_flat = colors.reshape(-1, 4)
-        # z signature — (보간 cache key, mask cache key, vmin/vmax, factor)
-        z_sig = (self._interp_key, self._mask_key, vmin, vmax, factor)
-        if self._gl_surface is None or self._surface_key != surf_key:
-            if self._gl_surface is not None:
-                gview.removeItem(self._gl_surface)
-            self._gl_surface = gl.GLSurfacePlotItem(
-                x=xg, y=yg, z=z_f32, colors=colors_flat,
-                shader=shader, smooth=smooth,
-                computeNormals=True, glOptions="opaque",
-            )
-            gview.addItem(self._gl_surface)
-            self._surface_key = surf_key
-            self._surface_z_sig = None  # 아래서 주입 트리거
-        elif self._surface_z_sig == z_sig:
-            # z 동일 → colors만 교체 (normals 재사용)
-            # 단 setData(colors=only)는 pyqtgraph 내부에서 meshDataChanged 호출이
-            # 빠져서 GPU에 반영 안 됨 → 명시 트리거 필요
-            self._gl_surface.setData(colors=colors_flat)
-            self._gl_surface.meshDataChanged()
-        else:
-            self._gl_surface.setData(x=xg, y=yg, z=z_f32, colors=colors_flat)
-            self._surface_z_sig = None  # 아래서 주입
-
-        # z 변경되었으면 normals 재주입 (pyqtgraph 기본 Python 루프보다 100× 빠름)
-        if smooth and self._surface_z_sig != z_sig:
-            verts = self._gl_surface._vertexes.reshape(-1, 3)
-            faces = self._gl_surface._faces
-            vn = _compute_smooth_vertex_normals(verts, faces)
-            md = self._gl_surface._meshdata
-            md._vertexNormals = vn
-            md._vertexNormalsIndexedByFaces = None
-            self._surface_z_sig = z_sig
-        self._gl_surface.setVisible(True)
-
-        # ── boundary line — 재사용 ──
-        if common.get("show_circle", True):
-            bx, by = _boundary_xy(
-                common.get("show_notch", True),
-                float(common.get("notch_depth_mm", _NOTCH_DEFAULT_DEPTH_MM)),
-                R=float(common.get("boundary_r_mm", WAFER_RADIUS_MM)),
-            )
-            circ = np.column_stack([bx, by, np.zeros_like(bx)])
-            if self._gl_boundary is None:
-                self._gl_boundary = gl.GLLinePlotItem(
-                    pos=circ, color=(0, 0, 0, 1), width=2,
-                    antialias=True, glOptions="opaque",
-                )
-                gview.addItem(self._gl_boundary)
-            else:
-                self._gl_boundary.setData(pos=circ)
-            self._gl_boundary.setVisible(True)
-        elif self._gl_boundary is not None:
-            self._gl_boundary.setVisible(False)
-
-        # edge_cut 측벽은 별도 메시 필요 없음 — cut 영역을 z=0 으로 설정해둬서
-        # 서피스 메시가 경계에서 자동으로 떨어지며 벽 생성 (cut=0 과 동일 메커니즘)
-        if self._gl_wall is not None:
-            self._gl_wall.setVisible(False)
-
-        # colorbar 갱신 (3D용 범위 = vmin~vmax. display.z_range가 있으면 그걸 사용)
-        self._update_colorbar(common, None, vmin=vmin, vmax=vmax)
-
-    def _render_3d_radial(self, x_in, y_in, v_in, settings) -> None:
-        """radial 원형 fan mesh 기반 3D 렌더.
-
-        rect 격자 (GLSurfacePlotItem) 대신 (r, θ) mesh + 매끈 원통 벽.
-        장점: 카디널 스트라이프 없음, 경계 곡선 정확.
-        비용: RBF 정점 수만큼 재평가 (rings × seg + seg).
+        비용: RBF 정점 (rings+1)×seg + seg 개 재평가.
         """
         from core.interp import make_rbf
 
         common = settings.get("chart_common", {})
         chart3d = settings.get("chart_3d", {})
 
+        # 카메라 distance — Settings 변경 시 즉시 반영. FOV 45°, elevation/azimuth 는
+        # 드래그로 사용자 조작 유지 (_LockedGLView).
+        opts = self._gl_3d.opts
+        dist = float(chart3d.get("camera_distance", 550))
+        if opts.get("distance") != dist:
+            self._gl_3d.setCameraPosition(distance=dist)
+            self._gl_3d.update()
+
         rings = max(5, int(common.get("radial_rings", 20)))
         seg = max(60, int(common.get("radial_seg", 180)))
-
-        # 기존 rect surface 는 숨김 (mesh 토글 시)
-        if self._gl_surface is not None:
-            self._gl_surface.setVisible(False)
-        if self._gl_wall is not None:
-            self._gl_wall.setVisible(False)
 
         # RBF fit — settings 의 interp_method 반영
         pts = np.column_stack([np.asarray(x_in, dtype=float), np.asarray(y_in, dtype=float)])
@@ -1360,17 +931,17 @@ class WaferCell(QFrame):
             vmin, z_range, factor, cmap,
             cut_mask=cut_mask_all if cut_mask_all.any() else None,
         )
-        if self._gl_radial_surface is None:
-            self._gl_radial_surface = gl.GLMeshItem(
+        if self._gl_surface is None:
+            self._gl_surface = gl.GLMeshItem(
                 vertexes=v_s, faces=f_s, vertexColors=c_s,
                 smooth=smooth, drawEdges=False, glOptions="opaque",
             )
-            gview.addItem(self._gl_radial_surface)
+            gview.addItem(self._gl_surface)
         else:
-            self._gl_radial_surface.setMeshData(
+            self._gl_surface.setMeshData(
                 vertexes=v_s, faces=f_s, vertexColors=c_s, smooth=smooth,
             )
-        self._gl_radial_surface.setVisible(True)
+        self._gl_surface.setVisible(True)
 
         # Smooth cylinder wall — 각 angle 별 eff_r 에 배치 → notch 영역 안쪽으로 dip.
         wall_xs = eff_r_seg * np.cos(theta)
@@ -1380,17 +951,17 @@ class WaferCell(QFrame):
             wall_xs, wall_ys, wall_z_raw, seg,
             vmin, z_range, factor, cmap,
         )
-        if self._gl_radial_wall is None:
-            self._gl_radial_wall = gl.GLMeshItem(
+        if self._gl_wall is None:
+            self._gl_wall = gl.GLMeshItem(
                 vertexes=v_w, faces=f_w, vertexColors=c_w,
                 smooth=True, drawEdges=False, glOptions="opaque",
             )
-            gview.addItem(self._gl_radial_wall)
+            gview.addItem(self._gl_wall)
         else:
-            self._gl_radial_wall.setMeshData(
+            self._gl_wall.setMeshData(
                 vertexes=v_w, faces=f_w, vertexColors=c_w, smooth=True,
             )
-        self._gl_radial_wall.setVisible(True)
+        self._gl_wall.setVisible(True)
 
         # boundary line (재사용)
         if common.get("show_circle", True):
@@ -1479,33 +1050,21 @@ class WaferCell(QFrame):
         a_data = menu.addAction("Copy Data")
         chosen = menu.exec(chart.mapToGlobal(pos))
         if chosen is a_reset:
-            if isinstance(chart, pg.PlotWidget):
-                # enableAutoRange는 content 기반 padding 재계산이라 초기 setRange와
-                # 미묘하게 달라짐. 초기와 동일한 범위로 재설정 → 크기 변화 없음
-                chart.setRange(
-                    xRange=(-WAFER_RADIUS_MM, WAFER_RADIUS_MM),
-                    yRange=(-WAFER_RADIUS_MM, WAFER_RADIUS_MM),
-                    padding=0.05,
+            s = settings_io.load_settings().get("chart_3d", {})
+            dist = float(s.get("camera_distance", 550))
+            from pyqtgraph import Vector
+            if chart is self._gl_2d:
+                chart.setCameraPosition(
+                    pos=Vector(0, 0, 0),
+                    distance=dist, elevation=90, azimuth=-90,
                 )
-            elif isinstance(chart, gl.GLViewWidget):
-                s = settings_io.load_settings().get("chart_3d", {})
-                from pyqtgraph import Vector
-                if chart is self._gl_2d:
-                    # 2D radial top view — fixed distance (rect 2D 와 동일 fill 비율)
-                    chart.setCameraPosition(
-                        pos=Vector(0, 0, 0),
-                        distance=380, elevation=90, azimuth=-90,
-                    )
-                    chart.opts["fov"] = 45
-                else:
-                    # 3D — Ctrl+드래그 pan 도 함께 복귀
-                    chart.setCameraPosition(
-                        pos=Vector(0, 0, 0),
-                        distance=float(s.get("camera_distance", 500)),
-                        elevation=28, azimuth=-135,
-                    )
-                    chart.opts["fov"] = 45
-                chart.update()
+            else:  # _gl_3d
+                chart.setCameraPosition(
+                    pos=Vector(0, 0, 0),
+                    distance=dist, elevation=28, azimuth=-135,
+                )
+            chart.opts["fov"] = 45
+            chart.update()
         elif chosen is a_graph:
             self._copy_graph()
         elif chosen is a_data:

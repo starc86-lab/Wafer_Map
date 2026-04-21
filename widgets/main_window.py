@@ -960,8 +960,7 @@ class MainWindow(QMainWindow):
     def refresh_graph(self) -> None:
         """Settings Graph 변경 — cell 재생성 없이 렌더 캐시만 reset + 재렌더.
 
-        보간 캐시는 cell 내부에서 (interp_method, grid_resolution) 비교로 재사용 판단.
-        컬러맵·shading 등 대부분의 변경에서 RBF 50~100ms 비용 생략.
+        radial 경로는 RBF fit 이 ~1ms 수준으로 가벼워 별도 캐시 없이 매번 재계산.
         """
         self._result_panel.refresh_all()
 

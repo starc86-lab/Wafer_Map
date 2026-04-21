@@ -231,12 +231,6 @@ class ChartCommonGroup(QGroupBox):
         if idx >= 0:
             self.cb_interp.setCurrentIndex(idx)
 
-        self.cb_grid = _limit_width(QComboBox())
-        for v in (100, 150, 200, 250, 300, 350, 400, 450, 500):
-            self.cb_grid.addItem(str(v), v)
-        idx = self.cb_grid.findData(int(cfg.get("grid_resolution", 200)))
-        self.cb_grid.setCurrentIndex(idx if idx >= 0 else 2)
-
         self.cb_decimals = _limit_width(QComboBox())
         for v in (0, 1, 2, 3):
             self.cb_decimals.addItem(str(v), v)
@@ -297,15 +291,7 @@ class ChartCommonGroup(QGroupBox):
         self.sb_boundary_r.setValue(float(cfg.get("boundary_r_mm", 150.0)))
         _limit_width(self.sb_boundary_r)
 
-        # Mesh 종류 — 2D/3D 공통. rect(격자) | radial(원형)
-        self.cb_mesh_type = _limit_width(QComboBox())
-        self.cb_mesh_type.addItem("rect (격자)", "rect")
-        self.cb_mesh_type.addItem("radial (원형)", "radial")
-        cur_mesh = str(cfg.get("mesh_type", "rect"))
-        idx_m = self.cb_mesh_type.findData(cur_mesh)
-        self.cb_mesh_type.setCurrentIndex(idx_m if idx_m >= 0 else 0)
-
-        # radial 밀도
+        # radial mesh 밀도 (2D·3D 공통)
         self.sp_rings = _limit_width(QSpinBox())
         self.sp_rings.setRange(5, 60)
         self.sp_rings.setSingleStep(5)
@@ -319,12 +305,10 @@ class ChartCommonGroup(QGroupBox):
         _populate_two_columns(self, [
             ("컬러맵", self.cb_cmap),
             ("보간 방법", self.cb_interp),
-            ("격자 해상도", self.cb_grid),
             ("경계 원", self.chk_circle),
             ("Notch 표시", self.chk_notch),
             ("Notch Depth", depth_row),
             ("경계 원 반지름", self.sb_boundary_r),
-            ("Mesh 종류", self.cb_mesh_type),
             ("Radial: rings", self.sp_rings),
             ("Radial: seg", self.sp_rseg),
             ("스케일바 표시", self.chk_scale_bar),
@@ -335,12 +319,10 @@ class ChartCommonGroup(QGroupBox):
 
         self.cb_cmap.currentIndexChanged.connect(self.changed)
         self.cb_interp.currentIndexChanged.connect(self.changed)
-        self.cb_grid.currentIndexChanged.connect(self.changed)
         self.chk_circle.toggled.connect(self.changed)
         self.chk_notch.toggled.connect(self.changed)
         self.cb_notch_depth.currentIndexChanged.connect(self.changed)
         self.sb_boundary_r.valueChanged.connect(self.changed)
-        self.cb_mesh_type.currentIndexChanged.connect(self.changed)
         self.sp_rings.valueChanged.connect(self.changed)
         self.sp_rseg.valueChanged.connect(self.changed)
         self.chk_scale_bar.toggled.connect(self.changed)
@@ -353,12 +335,10 @@ class ChartCommonGroup(QGroupBox):
         return {
             "colormap": self.cb_cmap.currentText(),
             "interp_method": self.cb_interp.currentText(),
-            "grid_resolution": int(self.cb_grid.currentData()),
             "show_circle": self.chk_circle.isChecked(),
             "show_notch": self.chk_notch.isChecked(),
             "notch_depth_mm": float(self.cb_notch_depth.currentData()),
             "boundary_r_mm": float(self.sb_boundary_r.value()),
-            "mesh_type": str(self.cb_mesh_type.currentData()),
             "radial_rings": int(self.sp_rings.value()),
             "radial_seg": int(self.sp_rseg.value()),
             "show_scale_bar": self.chk_scale_bar.isChecked(),
@@ -369,9 +349,9 @@ class ChartCommonGroup(QGroupBox):
         }
 
     def reload(self, cfg: dict[str, Any]) -> None:
-        widgets = (self.cb_cmap, self.cb_interp, self.cb_grid, self.chk_circle,
+        widgets = (self.cb_cmap, self.cb_interp, self.chk_circle,
                    self.chk_notch, self.cb_notch_depth, self.sb_boundary_r,
-                   self.cb_mesh_type, self.sp_rings, self.sp_rseg,
+                   self.sp_rings, self.sp_rseg,
                    self.chk_scale_bar, self.cb_chart_size, self.cb_decimals,
                    self.sb_edge_cut)
         for w in widgets:
@@ -381,15 +361,11 @@ class ChartCommonGroup(QGroupBox):
             if idx >= 0: self.cb_cmap.setCurrentIndex(idx)
             idx = self.cb_interp.findText(cfg.get("interp_method", "RBF-ThinPlate"))
             if idx >= 0: self.cb_interp.setCurrentIndex(idx)
-            idx = self.cb_grid.findData(int(cfg.get("grid_resolution", 200)))
-            if idx >= 0: self.cb_grid.setCurrentIndex(idx)
             self.chk_circle.setChecked(bool(cfg.get("show_circle", True)))
             self.chk_notch.setChecked(bool(cfg.get("show_notch", True)))
             idx = self.cb_notch_depth.findData(float(cfg.get("notch_depth_mm", 5.0)))
             if idx >= 0: self.cb_notch_depth.setCurrentIndex(idx)
             self.sb_boundary_r.setValue(float(cfg.get("boundary_r_mm", 150.0)))
-            idx = self.cb_mesh_type.findData(str(cfg.get("mesh_type", "rect")))
-            if idx >= 0: self.cb_mesh_type.setCurrentIndex(idx)
             self.sp_rings.setValue(int(cfg.get("radial_rings", 20)))
             self.sp_rseg.setValue(int(cfg.get("radial_seg", 180)))
             self.chk_scale_bar.setChecked(bool(cfg.get("show_scale_bar", True)))
