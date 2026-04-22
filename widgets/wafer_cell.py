@@ -379,7 +379,8 @@ class WaferDisplay:
     x_mm: np.ndarray
     y_mm: np.ndarray
     values: np.ndarray
-    z_range: tuple[float, float] | None = None
+    z_range: tuple[float, float] | None = None          # 2D/3D map Y range (rendered RBF 값 기반)
+    z_range_1d: tuple[float, float] | None = None       # 1D radial graph Y range (실측 v 값 기반)
 
 
 def _fmt(v, decimals: int) -> str:
@@ -477,6 +478,50 @@ class WaferCell(QFrame):
 
         self._chart_widget: QWidget = self._gl_2d  # 활성 위젯 추적
 
+        # 1D Radial Graph — 2D/3D 그래프와 Summary 표 사이. 체크 시에만 보임.
+        # X: r (-5~155 표시, 눈금 0/50/100/150), Y: 실측 min/max 기반.
+        # 상/우 테두리는 숨겨진 축(showAxis) 로 표현. 좌/하 축은 라벨 있음.
+        self._radial_graph = pg.PlotWidget()
+        self._radial_graph.setBackground("w")
+        self._radial_graph.setMouseEnabled(False, False)
+        self._radial_graph.setMenuEnabled(False)
+        self._radial_graph.hideButtons()
+        _ax_left = self._radial_graph.getAxis("left")
+        _ax_bot = self._radial_graph.getAxis("bottom")
+        self._radial_graph.showAxis("top", show=True)
+        self._radial_graph.showAxis("right", show=True)
+        _ax_top = self._radial_graph.getAxis("top")
+        _ax_right = self._radial_graph.getAxis("right")
+        # 4 축 모두 동일 pen (색·굵기) — 테두리 균일감
+        from PySide6.QtGui import QPen, QColor
+        _border_pen = QPen(QColor("#888888"))
+        _border_pen.setWidth(1)
+        for _ax in (_ax_left, _ax_bot, _ax_top, _ax_right):
+            _ax.setPen(_border_pen)
+            _ax.setTextPen("#444")
+        # 하단 — 주눈금 0/50/100/150 만 (보조눈금 없음)
+        _ax_bot.setTicks([
+            [(0, "0"), (50, "50"), (100, "100"), (150, "150")],
+            [],
+        ])
+        # 상 / 우 — 테두리 역할. 주/보조 눈금 모두 제거. 라벨/틱 라인 off
+        _ax_top.setStyle(showValues=False, tickLength=0)
+        _ax_right.setStyle(showValues=False, tickLength=0)
+        _ax_top.setTicks([[], []])
+        _ax_right.setTicks([[], []])
+        # 좌/우 축 폭 동일 (좌는 숫자 라벨, 우는 테두리 — 시각 대칭)
+        _axis_w = 48
+        _ax_left.setWidth(_axis_w)
+        _ax_right.setWidth(_axis_w)
+        # 상/하 축 높이 동일
+        _axis_h = 22
+        _ax_top.setHeight(_axis_h)
+        _ax_bot.setHeight(_axis_h)
+        # X range — 0~150 기준 양끝 10mm 균등 여유 (-10~160). 라벨 cull 방지 + 대칭.
+        self._radial_graph.setXRange(-10, 160, padding=0)
+        self._radial_graph.setVisible(False)
+        lay.addWidget(self._radial_graph)
+
         self._table = QTableWidget(3, 2)
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._table.horizontalHeader().hide()
@@ -556,9 +601,17 @@ class WaferCell(QFrame):
             hbox.setContentsMargins(0, 0, 0, 0)
         else:
             hbox.setContentsMargins(bar_w // 2, 0, bar_w // 2, 0)
+        # 1D Radial Graph — show_1d_radial 체크 시 보이고, 높이 135px
+        show_radial = bool(common.get("show_1d_radial", False))
+        self._radial_graph.setVisible(show_radial)
+        radial_h_px = 135
+        if show_radial:
+            self._radial_graph.setFixedWidth(w + bar_w + 6 * 2)
+            self._radial_graph.setFixedHeight(radial_h_px)
+        radial_h = radial_h_px if show_radial else 0
         title_h = self._title.sizeHint().height()
         table_h = self._table.height()
-        total_h = title_h + h + table_h + 6 * 2 + 4 * 2
+        total_h = title_h + h + radial_h + table_h + 6 * 2 + 4 * 2
         total_w = w + bar_w + 6 * 2  # show_bar 무관 고정
         self.setFixedSize(total_w, total_h)
 
@@ -844,6 +897,7 @@ class WaferCell(QFrame):
 
         # colorbar
         self._update_colorbar(common, None, vmin=vmin, vmax=vmax)
+        self._update_radial_graph(common)
 
     def _render_3d(self, x_in, y_in, v_in, settings) -> None:
         """radial 원형 fan mesh 기반 3D 렌더 — (r, θ) mesh + 매끈 원통 벽.
@@ -1020,6 +1074,78 @@ class WaferCell(QFrame):
             self._gl_boundary.setVisible(False)
 
         self._update_colorbar(common, None, vmin=vmin, vmax=vmax)
+        self._update_radial_graph(common)
+
+    def _update_radial_graph(self, common: dict) -> None:
+        """1D Radial Graph 데이터 갱신 — (r, v) 산점도 + 스플라인 실선.
+
+        visibility 와 size 는 `_apply_chart_size` 에서 통합 관리 (이 메서드는 데이터만).
+        X 축: 0~150mm 고정. Y 축: 2D/3D 와 독립 — `display.z_range_1d` (공통 모드)
+        또는 실측 min/max (개별 모드). Z-Margin 은 main_window 에서 z_range_1d 에
+        이미 적용된 상태라 그대로 사용.
+        """
+        if not bool(common.get("show_1d_radial", False)):
+            return
+
+        self._radial_graph.clear()
+        x = np.asarray(self._x_in, dtype=float)
+        y = np.asarray(self._y_in, dtype=float)
+        v = np.asarray(self._v_in, dtype=float)
+        m = ~np.isnan(v) & ~np.isnan(x) & ~np.isnan(y)
+        if m.sum() < 2:
+            return
+        xm, ym, vm = x[m], y[m], v[m]
+        r = np.sqrt(xm * xm + ym * ym)
+
+        # Y range: display.z_range_1d 있으면 공통, 없으면 개별 실측 min/max
+        if self._display.z_range_1d is not None:
+            y_min, y_max = self._display.z_range_1d
+        else:
+            y_min = float(vm.min())
+            y_max = float(vm.max())
+            if y_max <= y_min:
+                y_max = y_min + 1e-9
+        # 1D 전용 추가 여백 — 산점도가 경계에 붙지 않도록 양쪽 8% 확장.
+        # z_range_1d 자체 (개별/공통/Z-Margin 공유 값) 는 유지, 뷰만 시각적으로 확장.
+        self._radial_graph.setYRange(y_min, y_max, padding=0.08)
+        self._radial_graph.setXRange(-10, 160, padding=0)
+
+        # Y 축 주눈금 — min / midpoint / max 3개 고정. 개별/공통 모드 모두 동일 로직
+        # (y_min, y_max 가 이미 모드에 맞게 계산됨).
+        # 소수점 자릿수는 colorbar 와 동일 기준: tick_step=(vmax-vmin)/4 의 log10.
+        import math
+        cbar_range = self._display.z_range if self._display.z_range is not None else (y_min, y_max)
+        cbar_step = (cbar_range[1] - cbar_range[0]) / 4.0
+        if cbar_step > 0:
+            decimals = max(0, -int(math.floor(math.log10(cbar_step))))
+        else:
+            decimals = 2
+        fmt = f"{{:.{decimals}f}}"
+        mid = (y_min + y_max) / 2.0
+        y_ticks_maj = [
+            (float(y_min), fmt.format(y_min)),
+            (float(mid),   fmt.format(mid)),
+            (float(y_max), fmt.format(y_max)),
+        ]
+        self._radial_graph.getAxis("left").setTicks([y_ticks_maj, []])
+
+        # 스플라인 실선 — RadialInterp 재사용 (2D map 이 RBF 이든 RadialInterp 이든 무관)
+        from core.interp import RadialInterp
+        try:
+            ri = RadialInterp(xm, ym, vm)
+            r_q = np.linspace(0.0, 150.0, 200)
+            v_q = ri(np.column_stack([r_q, np.zeros_like(r_q)]))
+            # spline 색 — 진한 회색 (#555). 실측 scatter (검정) 보다 시각 약하게.
+            # 테두리 #888 보단 진해서 구분되지만 scatter 는 더 돋보임.
+            self._radial_graph.plot(r_q, v_q, pen=pg.mkPen("#555555", width=1.5))
+        except Exception:
+            pass
+        # 실측 산점도
+        self._radial_graph.plot(
+            r, vm, pen=None,
+            symbol="o", symbolSize=4,
+            symbolBrush="#202020", symbolPen=pg.mkPen("#202020"),
+        )
 
     def _update_colorbar(self, common: dict, values=None, vmin=None, vmax=None) -> None:
         """show_scale_bar 옵션 반영 + 컬러맵/범위로 스케일바 갱신."""

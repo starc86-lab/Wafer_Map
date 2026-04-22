@@ -905,15 +905,18 @@ class MainWindow(QMainWindow):
         library.save()
 
     def _apply_z_scale_mode(self, displays: list[WaferDisplay], view_mode: str) -> None:
-        """cb_zscale을 ground truth로 모든 display의 z_range 세팅.
+        """cb_zscale을 ground truth로 모든 display의 z_range + z_range_1d 세팅.
 
-        공통: 각 wafer 의 **RBF 렌더링 값** min/max 수집 후 전 wafer 공통 범위 주입.
-            → input 값 range 대신 실제 rendered range 기반이라 RBF overshoot 도 포함.
-        개별: 모두 None reset (cell이 자체 데이터로 vmin/vmax 계산).
+        2D/3D (`z_range`): 각 wafer 의 **RBF 렌더링 값** min/max 수집 후 공통 범위.
+        1D radial graph (`z_range_1d`): 각 wafer 의 **실측 v** min/max 수집 후 공통 범위.
+        Z-Margin pct 는 두 범위 각각 독립 적용 (midpoint 고정).
+
+        개별: 둘 다 None reset (cell이 자체 데이터로 계산).
         """
         if self.cb_zscale.currentText() != "공통":
             for d in displays:
                 d.z_range = None
+                d.z_range_1d = None
             return
 
         # 각 wafer 의 rendered 범위 추정 — **실제 렌더와 동일 rings/seg** 로 샘플.
@@ -936,8 +939,11 @@ class MainWindow(QMainWindow):
 
         # 각 wafer 의 **개별 렌더 범위** (min/max) 수집 → 그 중 최소 min / 최대 max
         # 로 공통 범위 결정. 개별 모드가 각 wafer 에 쓰는 범위와 동일 기준 사용.
+        # 동시에 실측 v 의 min/max 도 수집 → 1D radial graph Y 공통 범위.
         all_mins: list[float] = []
         all_maxes: list[float] = []
+        all_v_mins: list[float] = []
+        all_v_maxes: list[float] = []
         for d in displays:
             x_arr = np.asarray(d.x_mm, dtype=float)
             y_arr = np.asarray(d.y_mm, dtype=float)
@@ -945,6 +951,12 @@ class MainWindow(QMainWindow):
             m = ~np.isnan(v_arr) & ~np.isnan(x_arr) & ~np.isnan(y_arr)
             if m.sum() < 2:
                 continue
+            # 실측 v 범위 (1D graph Y 공통용)
+            valid = v_arr[m]
+            if valid.size > 0:
+                all_v_mins.append(float(valid.min()))
+                all_v_maxes.append(float(valid.max()))
+            # 렌더 범위 (2D/3D 공통용)
             try:
                 rbf = make_interp(
                     x_arr[m], y_arr[m], v_arr[m], method=method,
@@ -959,30 +971,30 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
             # RBF 실패 시 input 값 폴백
-            valid = v_arr[m]
             if valid.size > 0:
                 all_mins.append(float(valid.min()))
                 all_maxes.append(float(valid.max()))
 
-        if not all_mins:
-            return
-        vmin = min(all_mins)
-        vmax = max(all_maxes)
-        if vmax <= vmin:
-            vmax = vmin + 1e-9
-
         # Z-Margin — matplotlib margins() 관례. midpoint 고정 + range*(1+pct/100).
         # pct=0 → 원본 min~max, pct=50 → range*1.5, pct=100 → range*2.0.
-        # 각 wafer 가 palette 더 좁은 구간만 써서 색/높이 대비가 부드러워짐.
+        # 2D/3D 공통 z_range 와 1D graph z_range_1d 에 독립 적용.
         pct = int(self.sp_z_range.value()) if self.sp_z_range.isEnabled() else 0
-        if pct > 0:
-            midpoint = (vmin + vmax) / 2.0
-            half_range = (vmax - vmin) / 2.0 * (1.0 + pct / 100.0)
-            vmin = midpoint - half_range
-            vmax = midpoint + half_range
+
+        def _margin(vmin: float, vmax: float) -> tuple[float, float]:
+            if vmax <= vmin:
+                vmax = vmin + 1e-9
+            if pct > 0:
+                midpoint = (vmin + vmax) / 2.0
+                half = (vmax - vmin) / 2.0 * (1.0 + pct / 100.0)
+                return midpoint - half, midpoint + half
+            return vmin, vmax
+
+        rendered_range = _margin(min(all_mins), max(all_maxes)) if all_mins else None
+        measured_range = _margin(min(all_v_mins), max(all_v_maxes)) if all_v_mins else None
 
         for d in displays:
-            d.z_range = (vmin, vmax)
+            d.z_range = rendered_range
+            d.z_range_1d = measured_range
 
     def _open_settings(self) -> None:
         from widgets.settings_dialog import SettingsDialog
