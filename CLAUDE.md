@@ -415,20 +415,23 @@ Wafer Map/
 - Settings `1D Radial Graph` 체크 → WaferCell 의 chart_box 와 Summary 표 사이에 `pg.PlotWidget` 삽입 (기본 hidden)
 - 구성: 실측 `(r_i, v_i)` 산점도 (검정 4px) + 1D 스플라인 실선 (`#777`, 2px). `RadialInterp` 재사용 — 메인 맵이 RBF/Radial 어느 경로든 무관
 - **스플라인 그리기 범위 = 측정 r 범위 [r_min, r_max] 만** (0~150 전체가 아님). `r<r_min` (센터 측정 없을 때) 구간은 공백 — 정석 과학 시각화 관례 (flat 외삽 / 왜곡된 미러 모두 부적절). 센터 포함된 CMP 1D 스캔에선 자연스럽게 0 부터 그려짐
-- 축: X = `-10~160` (0~150 대칭 10mm 여유), 하단 주눈금 0/50/100/150. Y = 3 tick (min / midpoint / max), 자릿수는 colorbar 공식 `max(0, -log10((vmax-vmin)/4))` 과 동일
-- 4 테두리 동일 pen (`#888`, 1px). 상/우 축은 tick 없이 라인만 (`setTicks([[],[]])`) — 테두리 역할. 좌/하 축은 explicit tick list 만 (보조눈금 제거)
-- 좌/우 축 폭 48px, 상/하 축 높이 22px 로 고정. 전체 높이 135px
-- **width 설정 주의**: cell 의 vbox layout 이 `contentsMargins(6,6,6,6)` 이라 컨텐츠 영역 폭 = `total_w - 12`. `setFixedWidth(w + bar_w)` 로 써야 우측 테두리 안 잘림 (과거 `+ 6*2` 주면 12px 오버플로우)
-- 축 숫자 색 `#111111` (표 글자색과 동일, 가독성), 폰트 `FONT_SIZES['caption']` (font_scale 연동)
-- Y 범위 = `display.z_range_1d` (개별/공통 토글 + Z-Margin 공유, 실측 v min/max 기반). 2D/3D 의 rendered range 와 **독립** (scatter 가 RBF 외삽 range 밖에 걸려 잘리는 문제 방지). 뷰 padding 추가 8% 로 산점도 점이 경계에 붙지 않게
-- 공통 범위 계산: `main_window._apply_z_scale_mode` 에서 `z_range_1d` 를 별도 loop 로 실측 v_arr min/max 수집 후 Z-Margin 공식 (`midpoint 고정 + range*(1+pct/100)`) 독립 적용
-- visibility / size: `_apply_chart_size` 가 `show_1d_radial` 에 맞춰 설정. data plot 은 `_update_radial_graph` (render_2d/render_3d 끝에서 호출). 실시간 토글은 `graph_changed` → `refresh_graph` 경로 자동
+- 축: 좌/하만 visible (Y/X 라벨). 상/우 축은 visible 이지만 **pen 투명 + tickLength=0 + ticks 비움** 으로 보이지 않는 padding 역할
+  - 우축 폭 48 (좌축 48 과 대칭) — 플롯 영역이 widget 내부에서 **중앙 배치** (위젯은 cell 꽉 채움, 플롯만 좁게)
+  - 상축 높이 16 — 2D/3D 맵과 1D 플롯 사이 수직 여백 확보
+- X = `-10~160` (0~150 대칭 10mm 여유), 하단 주눈금 0/50/100/150. Y = 3 tick (min / midpoint / max), 자릿수는 colorbar 공식 `max(0, -log10((vmax-vmin)/4))` 과 동일
+- 축 숫자 색 `#111111` (표 글자색과 동일), 폰트 12px **하드코딩** (font_scale 무관 — 축 폭 고정이라 큰 폰트 시 잘림 방지)
+- 위젯 width = `w + bar_w` (cell content 꽉 채움). height 135px
+- Y 범위 = `display.z_range_1d` (개별/공통 토글 + Z-Margin 공유, 실측 v min/max 기반). 2D/3D 의 rendered range 와 **독립**. 뷰 padding 추가 8%
+- visibility / size: `_apply_chart_size` 가 `show_1d_radial` 에 맞춰 설정. data plot 은 `_update_radial_graph` (render_2d/render_3d 끝에서 호출)
 
-**Summary 표 테두리 (0.1.0~)**
-- 원인 (실측 `border_strat_1.png` 로 픽셀 확인): Qt `QTableView` 는 `showGrid=True` 일 때 last column right + last row bottom 에 암묵적 gridline 1px 을 그림. CSS `border: 1px` 와 겹쳐 **right=2px, 나머지=1px** 비대칭
+**Summary 표 (0.1.0~)**
+- 구조: `QTableWidget(2, 3)` — row 0 헤더 (Mean / Range / Non Unif.), row 1 값
+- 폭: `setFixedWidth(w + bar_w - 16)` 로 cell 보다 좌/우 8px 씩 짧게, `lay.addWidget(..., alignment=Qt.AlignHCenter)` 로 가운데 정렬 (좌/우 여백 효과, wrapper 없음)
+- 테두리 1px 균일: 원인 (실측 `border_strat_1.png` 로 픽셀 확인) — Qt `QTableView` 는 `showGrid=True` 일 때 last column right + last row bottom 에 암묵적 gridline 1px 을 그림. CSS `border: 1px` 와 겹쳐 **right=2px, 나머지=1px** 비대칭
 - 해결: `setShowGrid(False)` 로 내부 gridline 완전 off + **item border** 로 각 셀 right/bottom 1px 그림 + widget CSS 는 top/left 만. 4 변 모두 정확히 1px 단일 source
 - 테두리 색 `#888888` (1D 그래프 테두리와 통일), 텍스트 색 `#111111`, 폰트 `FONT_SIZES['body']` (전역 QSS)
 - `setFrameShape(NoFrame)` 로 QFrame 기본 Sunken 제거 (palette hack 불필요, CSS 가 완전 제어)
+- 헤더 cell 배경 색 차별화 시도 (회색 bg) 실패 — QSS `::item { background-color: white }` 가 `item.setBackground()` 프로그래매틱 지정을 override. 회색 bg 없이 가는 걸로 결정
 
 **font_scale 동작 (settings UI 폰트 크기 콤보 연동)**
 - `core/themes.py`: `FONT_SIZES` (가변) + `BASE_FONT_SIZES` (base backup, `dict(FONT_SIZES)` 로 생성)

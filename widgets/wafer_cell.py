@@ -336,10 +336,9 @@ class _ColorBar(QWidget):
             tick_step = (self._vmax - self._vmin) / (self._N_TICKS - 1)
             decimals = max(0, -int(math.floor(math.log10(tick_step))))
             fmt = f"{{:.{decimals}f}}"
-            # 폰트: FONT_SIZES['caption'] (font_scale 연동) / 색: #111 (표·1D 축과 동일)
-            from core.themes import FONT_SIZES
+            # 폰트 12px 하드코딩 — font_scale 무관 (컬러바 폭 고정이라 큰 폰트 시 숫자 잘림 방지)
             font = QFont("Arial")
-            font.setPixelSize(FONT_SIZES.get("caption", 11))
+            font.setPixelSize(12)
             p.setFont(font)
             p.setPen(QPen(QColor("#111")))
             fm = QFontMetrics(font)
@@ -492,47 +491,46 @@ class WaferCell(QFrame):
         self._radial_graph.hideButtons()
         _ax_left = self._radial_graph.getAxis("left")
         _ax_bot = self._radial_graph.getAxis("bottom")
+        # 상/우 축 모두 투명 padding (플롯 영역 좁게 + 위쪽 여백 확보)
         self._radial_graph.showAxis("top", show=True)
         self._radial_graph.showAxis("right", show=True)
         _ax_top = self._radial_graph.getAxis("top")
         _ax_right = self._radial_graph.getAxis("right")
-        # 4 축 pen — 연한 회색 #888888 1px (표 테두리와 통일)
-        # 축 텍스트(숫자)는 #111 — 표 글자색과 동일 (가독성)
-        # 폰트 크기 — FONT_SIZES['caption'] (font_scale 연동, 컬러바와 동일 크기)
+        # 좌/하 축 pen — 연한 회색 #888888 1px, 숫자 #111, 폰트 12px 하드코딩
         from PySide6.QtGui import QPen, QColor, QFont
-        from core.themes import FONT_SIZES
         _border_pen = QPen(QColor("#888888"))
         _border_pen.setWidth(1)
         _ax_font = QFont("Arial")
-        _ax_font.setPixelSize(FONT_SIZES.get("caption", 11))
-        for _ax in (_ax_left, _ax_bot, _ax_top, _ax_right):
+        _ax_font.setPixelSize(12)
+        for _ax in (_ax_left, _ax_bot):
             _ax.setPen(_border_pen)
             _ax.setTextPen("#111111")
             _ax.setStyle(tickFont=_ax_font)
-        # 하단 — 주눈금 0/50/100/150 만 (보조눈금 없음)
+        # 하단 — 주눈금 0/50/100/150 만
         _ax_bot.setTicks([
             [(0, "0"), (50, "50"), (100, "100"), (150, "150")],
             [],
         ])
-        # 상 / 우 — 테두리 역할. 주/보조 눈금 모두 제거. 라벨/틱 라인 off
-        _ax_top.setStyle(showValues=False, tickLength=0)
+        _ax_left.setWidth(48)
+        _ax_bot.setHeight(22)
+        # 우축 투명 (선/눈금/라벨 off) + 폭 48 → 플롯 영역 좁아지고 widget 중앙 위치
         _ax_right.setStyle(showValues=False, tickLength=0)
-        _ax_top.setTicks([[], []])
         _ax_right.setTicks([[], []])
-        # 좌/우 축 폭 동일 (좌는 숫자 라벨, 우는 테두리 — 시각 대칭)
-        _axis_w = 48
-        _ax_left.setWidth(_axis_w)
-        _ax_right.setWidth(_axis_w)
-        # 상/하 축 높이 동일
-        _axis_h = 22
-        _ax_top.setHeight(_axis_h)
-        _ax_bot.setHeight(_axis_h)
+        _ax_right.setPen(QPen(QColor(0, 0, 0, 0)))
+        _ax_right.setTextPen(QPen(QColor(0, 0, 0, 0)))
+        _ax_right.setWidth(48)
+        # 상축 투명 padding (widget 상단 ~ 플롯 상단 간격 확보, 2D/3D 와 거리감)
+        _ax_top.setStyle(showValues=False, tickLength=0)
+        _ax_top.setTicks([[], []])
+        _ax_top.setPen(QPen(QColor(0, 0, 0, 0)))
+        _ax_top.setTextPen(QPen(QColor(0, 0, 0, 0)))
+        _ax_top.setHeight(16)
         # X range — 0~150 기준 양끝 10mm 균등 여유 (-10~160). 라벨 cull 방지 + 대칭.
         self._radial_graph.setXRange(-10, 160, padding=0)
         self._radial_graph.setVisible(False)
         lay.addWidget(self._radial_graph)
 
-        self._table = QTableWidget(3, 2)
+        self._table = QTableWidget(2, 3)
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._table.horizontalHeader().hide()
         self._table.verticalHeader().hide()
@@ -559,7 +557,8 @@ class WaferCell(QFrame):
             " border-right: 1px solid #888888; border-bottom: 1px solid #888888; }"
             "QHeaderView::section { background-color: white; color: #111; }"
         )
-        lay.addWidget(self._table)
+        # Table — 폭은 _apply_chart_size 에서 cell 기준으로 설정, layout 에서 가운데 정렬
+        lay.addWidget(self._table, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._table.customContextMenuRequested.connect(self._show_table_menu)
@@ -622,15 +621,16 @@ class WaferCell(QFrame):
         else:
             hbox.setContentsMargins(bar_w // 2, 0, bar_w // 2, 0)
         # 1D Radial Graph — show_1d_radial 체크 시 보이고, 높이 135px
+        # 위젯은 cell content 꽉 채움. 플롯 centering 은 내부 좌/우 축 대칭으로.
         show_radial = bool(common.get("show_1d_radial", False))
         self._radial_graph.setVisible(show_radial)
         radial_h_px = 135
         if show_radial:
-            # layout contentsMargins(6,6,6,6) 때문에 cell 내부 컨텐츠 영역 폭 = total_w - 12.
-            # 과거 total_w 그대로 주면 우측 오버플로우 → 테두리 clipping.
             self._radial_graph.setFixedWidth(w + bar_w)
             self._radial_graph.setFixedHeight(radial_h_px)
         radial_h = radial_h_px if show_radial else 0
+        # Table 폭 — cell 컨텐츠 폭에서 좌우 8px 씩 축소, layout 에서 가운데 정렬
+        self._table.setFixedWidth(w + bar_w - 16)
         title_h = self._title.sizeHint().height()
         table_h = self._table.height()
         total_h = title_h + h + radial_h + table_h + 6 * 2 + 4 * 2
@@ -1157,12 +1157,11 @@ class WaferCell(QFrame):
         ]
         self._radial_graph.getAxis("left").setTicks([y_ticks_maj, []])
 
-        # 축 tick 폰트 — font_scale 연동 실시간 반영 (FONT_SIZES 는 settings 변경 시 갱신됨)
+        # 축 tick 폰트 — 12px 하드코딩 (font_scale 무관, 축 폭 고정이라 큰 폰트 시 잘림 방지)
         from PySide6.QtGui import QFont as _QFont
-        from core.themes import FONT_SIZES as _FS
         _fn = _QFont("Arial")
-        _fn.setPixelSize(_FS.get("caption", 11))
-        for _ax_name in ("left", "bottom", "top", "right"):
+        _fn.setPixelSize(12)
+        for _ax_name in ("left", "bottom"):
             self._radial_graph.getAxis(_ax_name).setStyle(tickFont=_fn)
 
         # 스플라인 실선 — RadialInterp 로 (r, v) 1D spline. 정석 방식대로 **측정된
@@ -1220,14 +1219,17 @@ class WaferCell(QFrame):
         else:
             nu_s = f"{nu / 100.0:.{decimals + 2}f}"
 
-        rows = [
-            ("Average",   _fmt(m['avg'], decimals)),
-            ("Range",     _fmt(m['range'], decimals)),
-            ("Non Unif.", nu_s),
+        # 3 cols × 2 rows — row 0: header, row 1: values
+        headers = ["Mean", "Range", "Non Unif."]
+        values = [
+            _fmt(m['avg'], decimals),
+            _fmt(m['range'], decimals),
+            nu_s,
         ]
-        for r, (label, value) in enumerate(rows):
-            self._set_cell(r, 0, label)
-            self._set_cell(r, 1, value)
+        for c, lbl in enumerate(headers):
+            self._set_cell(0, c, lbl)
+        for c, val in enumerate(values):
+            self._set_cell(1, c, val)
         # content 기반 높이 자동 계산 — 스크롤바 안 뜨게
         self._table.resizeRowsToContents()
         total_h = sum(self._table.rowHeight(r) for r in range(self._table.rowCount()))

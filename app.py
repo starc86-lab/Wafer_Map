@@ -8,8 +8,19 @@ Wafer Map 엔트리포인트.
 from __future__ import annotations
 
 import sys
+import warnings
 
 VERSION = "0.1.0"
+
+# pyqtgraph MeshData.py 의 vertex normal 계산에서 degenerate face (zero-length
+# normal) 로 인한 divide-by-zero RuntimeWarning 억제. radial mesh 의 센터 근처
+# triangle 이 거의 평평하거나 공선일 때 발생. 렌더 결과엔 영향 없음.
+warnings.filterwarnings(
+    "ignore",
+    message="invalid value encountered in divide",
+    category=RuntimeWarning,
+    module=r"pyqtgraph\.opengl\.MeshData",
+)
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QGuiApplication, QSurfaceFormat
