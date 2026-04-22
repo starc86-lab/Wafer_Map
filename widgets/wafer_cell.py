@@ -400,7 +400,7 @@ class _SummaryTableDelegate(QStyledItemDelegate):
 
     QSS `::item { ... }` 규칙을 줄이고 delegate 가 모든 cell 시각 담당.
     """
-    BG_HEADER = QColor("#f0f0f0")
+    BG_HEADER = QColor("#f7f7f7")
     BG_VALUE = QColor("#ffffff")
     BORDER = QColor("#888888")
     TEXT = QColor("#111111")
