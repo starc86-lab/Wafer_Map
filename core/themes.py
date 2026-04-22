@@ -266,12 +266,17 @@ FONT_SIZES = {
     "app_title": 21,
     "section": 15,
     "subtitle": 14,
-    "body": 13,
+    "body": 14,        # 표 + 전역 UI 기준
     "small": 12,
-    "caption": 11,
+    "caption": 12,     # 컬러바 + 1D 그래프 축 (표보다 작음)
     "run_btn": 19,
     "version": 13,
 }
+
+# font_scale 적용 기준값 (immutable backup). apply_global_style 이 scale 적용 시
+# 이 base 에서 multiply → FONT_SIZES 갱신. FONT_SIZES 를 읽는 코드는 항상 현재
+# scale 반영된 값을 얻음. 이전엔 FONT_SIZES 가 QSS 빌드 직후 원복되어 연동 안 됐음.
+BASE_FONT_SIZES = dict(FONT_SIZES)
 
 
 # ────────────────────────────────────────────────────────────────

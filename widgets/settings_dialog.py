@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 from core import settings as settings_io
 from core.coord_library import CoordLibrary, CoordPreset, format_dt_display
 from core.stylesheet import build_stylesheet
-from core.themes import FONTS, FONT_SIZES, HEATMAP_COLORMAPS, THEMES
+from core.themes import BASE_FONT_SIZES, FONTS, FONT_SIZES, HEATMAP_COLORMAPS, THEMES
 
 
 FONT_SCALE_CHOICES = [
@@ -92,17 +92,13 @@ def apply_global_style(app: QApplication, settings: dict[str, Any]) -> None:
 
     theme = THEMES.get(theme_name, THEMES["Light"])
 
-    if abs(scale - 1.0) > 1e-6:
-        orig = dict(FONT_SIZES)
-        scaled = {k: max(8, int(round(v * scale))) for k, v in orig.items()}
-        FONT_SIZES.update(scaled)
-        try:
-            qss = build_stylesheet(theme, font_name)
-        finally:
-            FONT_SIZES.clear()
-            FONT_SIZES.update(orig)
-    else:
-        qss = build_stylesheet(theme, font_name)
+    # BASE_FONT_SIZES 에서 scale 적용해 FONT_SIZES 영구 갱신 — 이후 FONT_SIZES 를
+    # 읽는 모든 코드 (차트 제목, 컬러바, 1D 축 폰트 등) 가 현재 scale 반영된 값
+    # 을 얻음. 이전엔 QSS 빌드 직후 원복해 연동 안 됐음.
+    scaled = {k: max(8, int(round(v * scale))) for k, v in BASE_FONT_SIZES.items()}
+    FONT_SIZES.clear()
+    FONT_SIZES.update(scaled)
+    qss = build_stylesheet(theme, font_name)
 
     app.setStyleSheet(qss)
 
@@ -852,6 +848,9 @@ class SettingsDialog(QDialog):
 
         # 디자인 변경 시 즉시 반영
         self._design.ui_changed.connect(self._apply_ui_runtime)
+        # UI 변경 (font_scale 등) 도 cell 내부 폰트 (title/colorbar/1D axis) 에 반영
+        # 되도록 graph refresh 도 같이 트리거.
+        self._design.ui_changed.connect(self._apply_graph_runtime)
         self._design.graph_changed.connect(self._apply_graph_runtime)
 
         btns = QDialogButtonBox()

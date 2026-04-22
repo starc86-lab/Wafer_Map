@@ -13,7 +13,8 @@ import pyqtgraph as pg
 import pyqtgraph.opengl as gl
 from PySide6.QtCore import QMimeData, QPoint, QRect, QRectF, Qt
 from PySide6.QtGui import (
-    QColor, QFont, QFontMetrics, QImage, QLinearGradient, QPainter, QPen, QPixmap,
+    QColor, QFont, QFontMetrics, QImage, QLinearGradient, QPainter, QPalette, QPen,
+    QPixmap,
 )
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QFrame, QHBoxLayout, QHeaderView, QLabel,
@@ -335,9 +336,12 @@ class _ColorBar(QWidget):
             tick_step = (self._vmax - self._vmin) / (self._N_TICKS - 1)
             decimals = max(0, -int(math.floor(math.log10(tick_step))))
             fmt = f"{{:.{decimals}f}}"
-            font = QFont("Arial", 8)
+            # 폰트: FONT_SIZES['caption'] (font_scale 연동) / 색: #111 (표·1D 축과 동일)
+            from core.themes import FONT_SIZES
+            font = QFont("Arial")
+            font.setPixelSize(FONT_SIZES.get("caption", 11))
             p.setFont(font)
-            p.setPen(QPen(QColor(40, 40, 40)))
+            p.setPen(QPen(QColor("#111")))
             fm = QFontMetrics(font)
             text_right = bar_x - self._LABEL_GAP
             for i in range(self._N_TICKS):
@@ -424,9 +428,9 @@ class WaferCell(QFrame):
         # 전역 QSS의 QWidget { font-size } 가 setFont()를 이기므로 인라인 CSS로 강제.
         # FONT_SIZES['body']는 font_scale 반영된 값이라 +4도 스케일 따라감.
         from core.themes import FONT_SIZES
-        title_px = FONT_SIZES.get("body", 13) + 4
+        title_px = FONT_SIZES.get("body", 14) + 3
         self._title.setStyleSheet(
-            f"font-weight: bold; color: #444; font-size: {title_px}px;"
+            f"font-weight: bold; color: #111; font-size: {title_px}px;"
         )
         lay.addWidget(self._title)
 
@@ -492,13 +496,19 @@ class WaferCell(QFrame):
         self._radial_graph.showAxis("right", show=True)
         _ax_top = self._radial_graph.getAxis("top")
         _ax_right = self._radial_graph.getAxis("right")
-        # 4 축 모두 동일 pen (색·굵기) — 테두리 균일감
-        from PySide6.QtGui import QPen, QColor
+        # 4 축 pen — 연한 회색 #888888 1px (표 테두리와 통일)
+        # 축 텍스트(숫자)는 #111 — 표 글자색과 동일 (가독성)
+        # 폰트 크기 — FONT_SIZES['caption'] (font_scale 연동, 컬러바와 동일 크기)
+        from PySide6.QtGui import QPen, QColor, QFont
+        from core.themes import FONT_SIZES
         _border_pen = QPen(QColor("#888888"))
         _border_pen.setWidth(1)
+        _ax_font = QFont("Arial")
+        _ax_font.setPixelSize(FONT_SIZES.get("caption", 11))
         for _ax in (_ax_left, _ax_bot, _ax_top, _ax_right):
             _ax.setPen(_border_pen)
-            _ax.setTextPen("#444")
+            _ax.setTextPen("#111111")
+            _ax.setStyle(tickFont=_ax_font)
         # 하단 — 주눈금 0/50/100/150 만 (보조눈금 없음)
         _ax_bot.setTicks([
             [(0, "0"), (50, "50"), (100, "100"), (150, "150")],
@@ -532,12 +542,22 @@ class WaferCell(QFrame):
         # 스크롤바 항상 OFF — 높이는 populate 후 content 기반으로 동적 계산
         self._table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        # 테마 영향 차단 — 흰색 배경 + 짙은 회색 텍스트 고정 (PPT 호환)
+        # 테마 영향 차단 — 흰색 배경 + #111 텍스트, #888888 테두리 (1D 그래프와 통일)
+        # 원인: Qt QTableView (showGrid=True) 가 last column right / last row bottom
+        # 에 암묵적 gridline 1px 을 그리고, CSS widget border 1px 과 겹쳐 총 2px.
+        # 실측 `border_strat_1.png` 로 픽셀 확인 (right=2, 나머지=1).
+        # 해결: 내부 gridline 전부 끄고 (setShowGrid False) **item border** 로 각
+        # 셀 right/bottom 에 1px 그림. widget 은 top/left 만 담당 → 중복 제거,
+        # 4 변 모두 정확히 1px (strat_6 구조).
+        self._table.setFrameShape(QFrame.Shape.NoFrame)
+        self._table.setShowGrid(False)
         self._table.setStyleSheet(
-            "QTableWidget { background-color: white; color: #222;"
-            " gridline-color: #cccccc; border: 1px solid #bfbfbf; }"
-            "QTableWidget::item { background-color: white; color: #222; }"
-            "QHeaderView::section { background-color: white; color: #222; }"
+            "QTableWidget { background-color: white; color: #111;"
+            " border-top: 1px solid #888888; border-left: 1px solid #888888;"
+            " border-right: none; border-bottom: none; }"
+            "QTableWidget::item { background-color: white; color: #111;"
+            " border-right: 1px solid #888888; border-bottom: 1px solid #888888; }"
+            "QHeaderView::section { background-color: white; color: #111; }"
         )
         lay.addWidget(self._table)
 
@@ -606,7 +626,9 @@ class WaferCell(QFrame):
         self._radial_graph.setVisible(show_radial)
         radial_h_px = 135
         if show_radial:
-            self._radial_graph.setFixedWidth(w + bar_w + 6 * 2)
+            # layout contentsMargins(6,6,6,6) 때문에 cell 내부 컨텐츠 영역 폭 = total_w - 12.
+            # 과거 total_w 그대로 주면 우측 오버플로우 → 테두리 clipping.
+            self._radial_graph.setFixedWidth(w + bar_w)
             self._radial_graph.setFixedHeight(radial_h_px)
         radial_h = radial_h_px if show_radial else 0
         title_h = self._title.sizeHint().height()
@@ -643,6 +665,12 @@ class WaferCell(QFrame):
         self._rendered_3d = False
         self._hide_3d_items()
         settings = settings_io.load_settings()
+        # 제목 폰트 크기 재적용 — font_scale 변경 즉시 반영
+        from core.themes import FONT_SIZES
+        _title_px = FONT_SIZES.get("body", 14) + 3
+        self._title.setStyleSheet(
+            f"font-weight: bold; color: #111; font-size: {_title_px}px;"
+        )
         self._apply_chart_size(settings.get("chart_common", {}))
         self._activate_current_view()
 
@@ -1129,15 +1157,27 @@ class WaferCell(QFrame):
         ]
         self._radial_graph.getAxis("left").setTicks([y_ticks_maj, []])
 
-        # 스플라인 실선 — RadialInterp 재사용 (2D map 이 RBF 이든 RadialInterp 이든 무관)
+        # 축 tick 폰트 — font_scale 연동 실시간 반영 (FONT_SIZES 는 settings 변경 시 갱신됨)
+        from PySide6.QtGui import QFont as _QFont
+        from core.themes import FONT_SIZES as _FS
+        _fn = _QFont("Arial")
+        _fn.setPixelSize(_FS.get("caption", 11))
+        for _ax_name in ("left", "bottom", "top", "right"):
+            self._radial_graph.getAxis(_ax_name).setStyle(tickFont=_fn)
+
+        # 스플라인 실선 — RadialInterp 로 (r, v) 1D spline. 정석 방식대로 **측정된
+        # r 범위 (r_min ~ r_max) 안에서만** 곡선 그림. r<r_min / r>r_max 는 공백
+        # (데이터 없는 구간을 flat 또는 외삽으로 표시하지 않음 = 과학 시각화 관례).
         from core.interp import RadialInterp
         try:
             ri = RadialInterp(xm, ym, vm)
-            r_q = np.linspace(0.0, 150.0, 200)
+            r_min = float(r.min())
+            r_max = float(r.max())
+            r_q = np.linspace(r_min, r_max, 200)
             v_q = ri(np.column_stack([r_q, np.zeros_like(r_q)]))
-            # spline 색 — 진한 회색 (#555). 실측 scatter (검정) 보다 시각 약하게.
-            # 테두리 #888 보단 진해서 구분되지만 scatter 는 더 돋보임.
-            self._radial_graph.plot(r_q, v_q, pen=pg.mkPen("#555555", width=1.5))
+            # spline 색 — 진한 회색 (#777). 연한 회색 테두리/표 border (#888888)
+            # 보다 확실히 진해 시각 구분. scatter (검정) 보다는 약해 scatter 가 주인공.
+            self._radial_graph.plot(r_q, v_q, pen=pg.mkPen("#777777", width=2))
         except Exception:
             pass
         # 실측 산점도
