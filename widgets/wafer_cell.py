@@ -18,7 +18,8 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QFrame, QHBoxLayout, QHeaderView, QLabel,
-    QMenu, QStackedLayout, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QMenu, QStackedLayout, QStyledItemDelegate, QTableWidget, QTableWidgetItem,
+    QVBoxLayout, QWidget,
 )
 
 from core import settings as settings_io
@@ -392,6 +393,39 @@ def _fmt(v, decimals: int) -> str:
     return f"{v:.{decimals}f}"
 
 
+class _SummaryTableDelegate(QStyledItemDelegate):
+    """Summary 표 cell painting 전담 — QSS stylesheet 이 `QTableWidgetItem.setBackground()` 를
+    override 하는 Qt 버그 우회. row 별 bg (헤더 회색 / 값 흰색) + 1px 테두리 + 텍스트 전부
+    직접 그림.
+
+    QSS `::item { ... }` 규칙을 줄이고 delegate 가 모든 cell 시각 담당.
+    """
+    BG_HEADER = QColor("#f0f0f0")
+    BG_VALUE = QColor("#ffffff")
+    BORDER = QColor("#888888")
+    TEXT = QColor("#111111")
+
+    def paint(self, painter, option, index) -> None:
+        # 배경 — row 0 = header (회색), row 1 = value (흰색)
+        bg = self.BG_HEADER if index.row() == 0 else self.BG_VALUE
+        painter.fillRect(option.rect, bg)
+
+        # 텍스트 — 가운데 정렬
+        text = index.data(Qt.ItemDataRole.DisplayRole)
+        if text is not None:
+            font = index.data(Qt.ItemDataRole.FontRole)
+            if font is not None:
+                painter.setFont(font)
+            painter.setPen(self.TEXT)
+            painter.drawText(option.rect, Qt.AlignmentFlag.AlignCenter, str(text))
+
+        # 테두리 (1px #888) — 각 셀 right + bottom (마지막 col/row 가 외곽 경계 담당)
+        painter.setPen(QPen(self.BORDER, 1))
+        r = option.rect
+        painter.drawLine(r.right(), r.top(), r.right(), r.bottom())
+        painter.drawLine(r.left(), r.bottom(), r.right(), r.bottom())
+
+
 class WaferCell(QFrame):
     """2D heatmap + 4행×2열 Summary 표. 컨테이너 grab → Copy Graph 합성 이미지.
 
@@ -549,14 +583,14 @@ class WaferCell(QFrame):
         # 4 변 모두 정확히 1px (strat_6 구조).
         self._table.setFrameShape(QFrame.Shape.NoFrame)
         self._table.setShowGrid(False)
+        # QSS 는 widget 외곽 border (top/left) 만. cell painting 은 delegate 가 담당
+        # (QSS 의 ::item 규칙이 프로그래매틱 setBackground 를 override 하는 문제 회피).
         self._table.setStyleSheet(
-            "QTableWidget { background-color: white; color: #111;"
+            "QTableWidget { background-color: white;"
             " border-top: 1px solid #888888; border-left: 1px solid #888888;"
             " border-right: none; border-bottom: none; }"
-            "QTableWidget::item { background-color: white; color: #111;"
-            " border-right: 1px solid #888888; border-bottom: 1px solid #888888; }"
-            "QHeaderView::section { background-color: white; color: #111; }"
         )
+        self._table.setItemDelegate(_SummaryTableDelegate(self._table))
         # Table — 폭은 _apply_chart_size 에서 cell 기준으로 설정, layout 에서 가운데 정렬
         lay.addWidget(self._table, alignment=Qt.AlignmentFlag.AlignHCenter)
 
