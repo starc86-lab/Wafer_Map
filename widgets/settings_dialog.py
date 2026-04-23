@@ -1015,6 +1015,13 @@ class SettingsDialog(QDialog):
         merged = dict(self._initial)
         merged.update(self._design.gather())
         merged.update(self._coords.gather())
+        # 세션 휘발 키들 (다이얼로그가 소유하지 않음) — stale _initial 로 덮어쓰는
+        # 사고 방지를 위해 현재 runtime cache 값으로 강제 동기.
+        # r_symmetry_mode: 메인 체크박스만 소유 — non-modal dialog 열어둔 채
+        # 메인에서 토글하면 _initial 과 cache 괴리 → 다이얼로그에서 아무 값만
+        # 바꿔도 _collect 가 stale _initial 값으로 덮어써 상태가 튐.
+        cur = settings_io.load_settings()
+        merged["r_symmetry_mode"] = bool(cur.get("r_symmetry_mode", False))
         return merged
 
     # ── 즉시 반영 핸들러 ────────────────────────
