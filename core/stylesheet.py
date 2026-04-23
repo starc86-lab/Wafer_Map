@@ -53,6 +53,16 @@ QWidget {{
 }}
 QLabel {{ background: transparent; }}
 QLabel:disabled {{ color: {t['text_sub']}; }}
+/* QSpinBox / QDoubleSpinBox 기본 규칙 — `:disabled` 만 있으면 Qt 가 이 위젯을
+   stylesheet-style 로 전환하며 Fusion native border 가 사라져 활성 상태에서도
+   테두리가 안 보이는 버그. 기본 규칙을 명시해 전 상태 일관성 확보. */
+QSpinBox, QDoubleSpinBox {{
+    background-color: {t['surface']};
+    color: {t['text']};
+    border: 1px solid {t['border']};
+    border-radius: 6px;
+    padding: 2px 6px;
+}}
 QSpinBox:disabled, QDoubleSpinBox:disabled,
 QComboBox:disabled, QLineEdit:disabled {{
     background-color: {t['surface_alt']};
