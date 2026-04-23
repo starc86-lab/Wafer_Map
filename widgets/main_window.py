@@ -232,7 +232,7 @@ class MainWindow(QMainWindow):
         self.lbl_z_range = QLabel("Z-Margin:")
         self.sp_z_range = QSpinBox()
         self.sp_z_range.setRange(0, 200)
-        self.sp_z_range.setSingleStep(10)
+        self.sp_z_range.setSingleStep(5)
         self.sp_z_range.setSuffix("%")
         _init_pct = (self._z_margin_pct_common if self._last_zscale_mode == "공통"
                      else self._z_margin_pct_indiv)

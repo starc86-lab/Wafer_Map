@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, QObject, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog,
     QDialogButtonBox, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout,
@@ -37,6 +37,20 @@ FONT_SCALE_CHOICES = [
 LABEL_WIDTH = 140          # 라벨 고정 폭 (좌측 정렬, 가장 긴 "부드럽게 (smooth)" 수용)
 FIELD_WIDTH = 135          # 입력 위젯 고정 너비 (모든 입력란 시작·끝 동일)
 FIELD_HEIGHT = 30          # 입력 위젯 고정 높이 (콤보/스핀/체크 행 높이 통일)
+
+
+class _NoWheelFilter(QObject):
+    """Settings 내 사용자 입력 위젯(QSpinBox/QDoubleSpinBox/QComboBox) 의 휠
+    이벤트를 차단 — 마우스 휠 실수로 값 변경되는 UX 방지.
+
+    eventFilter 가 True 반환 → 위젯 내부 wheelEvent 호출 skip. ev.ignore() 로
+    부모 (스크롤 영역) 에 propagate → 스크롤 기능은 정상 유지.
+    """
+    def eventFilter(self, obj: QObject, ev) -> bool:
+        if ev.type() == QEvent.Type.Wheel:
+            ev.ignore()
+            return True
+        return False
 
 
 def _label(text: str) -> QLabel:
@@ -1010,6 +1024,13 @@ class SettingsDialog(QDialog):
         lay = QVBoxLayout(self)
         lay.addWidget(self._tabs, stretch=1)
         lay.addWidget(btns)
+
+        # 모든 입력 위젯(QSpinBox/QDoubleSpinBox/QComboBox) 의 마우스 휠 차단 —
+        # scrollarea 안에서 실수로 값이 바뀌는 UX 방지.
+        self._no_wheel_filter = _NoWheelFilter(self)
+        for w in self.findChildren(QWidget):
+            if isinstance(w, (QSpinBox, QDoubleSpinBox, QComboBox)):
+                w.installEventFilter(self._no_wheel_filter)
 
     # ── 현재 다이얼로그의 설정 전체를 모아 반환 ──
     def _collect(self) -> dict[str, Any]:
