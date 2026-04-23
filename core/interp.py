@@ -156,6 +156,7 @@ class RadialInterp:
         savgol_polyorder: int = 3,
         lowess_frac: float = 0.3,
         polyfit_degree: int = 3,
+        bin_size_mm: float = 0.0,
     ):
         x = np.asarray(x, dtype=float)
         y = np.asarray(y, dtype=float)
@@ -170,6 +171,23 @@ class RadialInterp:
         np.add.at(cnt, inv, 1)
         with np.errstate(divide="ignore", invalid="ignore"):
             v_u = v_u / cnt
+
+        # Bin average 전처리 — 선택적. bin_size_mm > 0 이면 r 을 N mm 구간으로
+        # 분할해 각 구간 내 평균 v 로 치환 (비어있는 bin 은 건너뜀). 선택된
+        # fitting 방법은 이 binned 산점도에 그대로 적용.
+        if bin_size_mm and bin_size_mm > 0 and r_u.size >= 2:
+            bw = float(bin_size_mm)
+            bin_idx = np.floor(r_u / bw).astype(int)
+            uniq_bins, inv_b = np.unique(bin_idx, return_inverse=True)
+            r_bin = np.zeros(uniq_bins.size, dtype=float)
+            v_bin = np.zeros(uniq_bins.size, dtype=float)
+            cnt_b = np.zeros(uniq_bins.size, dtype=float)
+            np.add.at(r_bin, inv_b, r_u)
+            np.add.at(v_bin, inv_b, v_u)
+            np.add.at(cnt_b, inv_b, 1)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                r_u = r_bin / cnt_b
+                v_u = v_bin / cnt_b
 
         self._r_u = r_u
         self._v_u = v_u
@@ -281,6 +299,7 @@ def make_interp(
     savgol_polyorder: int = 3,
     lowess_frac: float = 0.3,
     polyfit_degree: int = 3,
+    radial_bin_size_mm: float = 0.0,
 ):
     """통합 보간기 팩토리 — 1D radial scan 자동 감지 → `RadialInterp` 또는 `make_rbf`.
 
@@ -298,6 +317,7 @@ def make_interp(
             savgol_polyorder=savgol_polyorder,
             lowess_frac=lowess_frac,
             polyfit_degree=polyfit_degree,
+            bin_size_mm=radial_bin_size_mm,
         )
     return make_rbf(x, y, v, method=method, smoothing=smoothing)
 

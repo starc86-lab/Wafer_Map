@@ -933,6 +933,7 @@ class MainWindow(QMainWindow):
         savgol_p = int(cfg.get("savgol_polyorder", 3))
         lowess_f = float(cfg.get("lowess_frac", 0.3))
         polyfit_d = int(cfg.get("polyfit_degree", 3))
+        bin_size_mm = float(cfg.get("radial_bin_size_mm", 0))
         rings = max(5, int(cfg.get("radial_rings", 20)))
         seg = max(60, int(cfg.get("radial_seg", 180)))
         r_arr = np.linspace(0.0, R, rings + 1)
@@ -971,6 +972,7 @@ class MainWindow(QMainWindow):
                     savgol_polyorder=savgol_p,
                     lowess_frac=lowess_f,
                     polyfit_degree=polyfit_d,
+                    radial_bin_size_mm=bin_size_mm,
                 )
                 z = rbf(sample_pts)
                 zf = z[np.isfinite(z)]

@@ -408,6 +408,14 @@ class Chart1DRadialGroup(QGroupBox):
         self.sp_polyfit_deg.setSingleStep(1)
         self.sp_polyfit_deg.setValue(int(cfg.get("polyfit_degree", 3)))
 
+        # Bin Average 전처리 — 0 = 비활성, 1~25 mm 구간별 평균 후 fitting.
+        # 모든 fitting 방법에 공통 적용 (method 선택과 독립).
+        self.sp_bin_size = _limit_width(QSpinBox())
+        self.sp_bin_size.setRange(0, 25)
+        self.sp_bin_size.setSingleStep(1)
+        self.sp_bin_size.setSuffix(" mm")
+        self.sp_bin_size.setValue(int(cfg.get("radial_bin_size_mm", 0)))
+
         # 라벨 인스턴스 — setEnabled(False) 시 QSS :disabled 규칙으로 회색화
         self.lbl_smooth = _label("Univariate Smoothing")
         self.lbl_savgol_win = _label("SavGol Window")
@@ -417,17 +425,17 @@ class Chart1DRadialGroup(QGroupBox):
 
         # 8 items, half=4 → 좌 4 / 우 4.
         # 좌: 1D Graph 표시 · Univariate Smoothing · SavGol Window · SavGol Polyorder
-        # 우: Radial 방법    · LOWESS Frac         · Polyfit Degree  · (empty placeholder)
-        placeholder = QWidget()
+        # 우: Fitting 방법    · Bin Average         · LOWESS Frac    · Polyfit Degree
+        # Bin Average 는 전처리라 모든 fitting 방법과 공통 적용 — 항상 활성.
         _populate_two_columns(self, [
             ("1D Graph 표시", self.chk_1d_radial),
             (self.lbl_smooth, self.sp_radial_smooth),
             (self.lbl_savgol_win, self.sp_savgol_win),
             (self.lbl_savgol_poly, self.sp_savgol_poly),
             ("Fitting 방법", self.cb_radial_method),
+            ("Bin Average", self.sp_bin_size),
             (self.lbl_lowess_frac, self.sp_lowess_frac),
             (self.lbl_polyfit, self.sp_polyfit_deg),
-            ("", placeholder),
         ])
 
         self._sync_param_enable()
@@ -440,6 +448,7 @@ class Chart1DRadialGroup(QGroupBox):
         self.sp_savgol_poly.valueChanged.connect(self.changed)
         self.sp_lowess_frac.valueChanged.connect(self.changed)
         self.sp_polyfit_deg.valueChanged.connect(self.changed)
+        self.sp_bin_size.valueChanged.connect(self.changed)
 
     def _sync_param_enable(self) -> None:
         """Radial 방법 선택에 따라 관련 파라만 활성. 나머지는 라벨·위젯 회색."""
@@ -472,6 +481,7 @@ class Chart1DRadialGroup(QGroupBox):
             "savgol_polyorder": int(self.sp_savgol_poly.value()),
             "lowess_frac": float(self.sp_lowess_frac.value()),
             "polyfit_degree": int(self.sp_polyfit_deg.value()),
+            "radial_bin_size_mm": int(self.sp_bin_size.value()),
         })
         return result
 
@@ -479,7 +489,7 @@ class Chart1DRadialGroup(QGroupBox):
         self._cfg_snapshot = dict(cfg)
         widgets = (self.chk_1d_radial, self.cb_radial_method,
                    self.sp_radial_smooth, self.sp_savgol_win, self.sp_savgol_poly,
-                   self.sp_lowess_frac, self.sp_polyfit_deg)
+                   self.sp_lowess_frac, self.sp_polyfit_deg, self.sp_bin_size)
         for w in widgets:
             w.blockSignals(True)
         try:
@@ -491,6 +501,7 @@ class Chart1DRadialGroup(QGroupBox):
             self.sp_savgol_poly.setValue(int(cfg.get("savgol_polyorder", 3)))
             self.sp_lowess_frac.setValue(float(cfg.get("lowess_frac", 0.3)))
             self.sp_polyfit_deg.setValue(int(cfg.get("polyfit_degree", 3)))
+            self.sp_bin_size.setValue(int(cfg.get("radial_bin_size_mm", 0)))
         finally:
             self._sync_param_enable()
             for w in widgets:

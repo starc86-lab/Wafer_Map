@@ -868,6 +868,7 @@ class WaferCell(QFrame):
                 savgol_polyorder=int(common.get("savgol_polyorder", 3)),
                 lowess_frac=float(common.get("lowess_frac", 0.3)),
                 polyfit_degree=int(common.get("polyfit_degree", 3)),
+                radial_bin_size_mm=float(common.get("radial_bin_size_mm", 0)),
             )
         except Exception:
             return
@@ -1052,6 +1053,7 @@ class WaferCell(QFrame):
                 savgol_polyorder=int(common.get("savgol_polyorder", 3)),
                 lowess_frac=float(common.get("lowess_frac", 0.3)),
                 polyfit_degree=int(common.get("polyfit_degree", 3)),
+                radial_bin_size_mm=float(common.get("radial_bin_size_mm", 0)),
             )
         except Exception:
             return
@@ -1278,6 +1280,7 @@ class WaferCell(QFrame):
                 savgol_polyorder=int(common.get("savgol_polyorder", 3)),
                 lowess_frac=float(common.get("lowess_frac", 0.3)),
                 polyfit_degree=int(common.get("polyfit_degree", 3)),
+                bin_size_mm=float(common.get("radial_bin_size_mm", 0)),
             )
             r_min = float(r.min())
             r_max = float(r.max())
