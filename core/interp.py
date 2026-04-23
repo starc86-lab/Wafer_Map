@@ -300,15 +300,17 @@ def make_interp(
     lowess_frac: float = 0.3,
     polyfit_degree: int = 3,
     radial_bin_size_mm: float = 0.0,
+    force_radial: bool = False,
 ):
     """통합 보간기 팩토리 — 1D radial scan 자동 감지 → `RadialInterp` 또는 `make_rbf`.
 
     모두 `instance(pts_Nx2) → values_N` 인터페이스 제공.
 
-    - 1D radial scan: `RadialInterp(method=...)` — Settings 에서 7종 알고리즘 선택.
-    - 그 외: `make_rbf` — 2D RBF (기존 동작).
+    - `force_radial=True`: is_radial_scan 판정 스킵하고 무조건 RadialInterp.
+      (r-asymmetry 모드 — 정상 2D 데이터를 강제로 radial symmetric 처리)
+    - 자동 감지: collinear 직선 스캔이면 RadialInterp, 아니면 make_rbf.
     """
-    if is_radial_scan(x, y, line_width_mm=radial_line_width_mm):
+    if force_radial or is_radial_scan(x, y, line_width_mm=radial_line_width_mm):
         return RadialInterp(
             x, y, v,
             method=radial_method,

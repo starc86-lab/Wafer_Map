@@ -12,7 +12,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QShowEvent
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QGridLayout, QHBoxLayout, QLabel, QMainWindow,
+    QCheckBox, QComboBox, QDialog, QGridLayout, QHBoxLayout, QLabel, QMainWindow,
     QMessageBox, QPushButton, QSizePolicy, QSpinBox, QSplitter, QToolBar,
     QToolButton, QVBoxLayout, QWidget,
 )
@@ -267,6 +267,14 @@ class MainWindow(QMainWindow):
         # Z scale 변경 — z_range만 갈아끼우고 3D 캐시 무효화 (2D 캐시 유지)
         self.cb_zscale.currentTextChanged.connect(self._on_zscale_toggle)
 
+        # r-asymmetry 체크 — 정상 2D 데이터를 강제로 radial symmetric 으로 처리.
+        # r,v 뽑아 1D fitting 후 원점 360° 회전 → 2D/3D map. 1D scan (auto-radial)
+        # 데이터는 체크해도 변화 없음. 체크/해제 시 즉시 재렌더.
+        self.chk_r_asym = QCheckBox("r-asymmetry")
+        _r_asym_init = bool(load_settings().get("r_asymmetry_mode", False))
+        self.chk_r_asym.setChecked(_r_asym_init)
+        self.chk_r_asym.toggled.connect(self._on_r_asymmetry_toggled)
+
         for label, widget in [
             ("VALUE:", self.cb_value),
             ("좌표:", self.cb_coord),
@@ -281,6 +289,8 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.cb_zscale)
         lay.addWidget(self.lbl_z_range)
         lay.addWidget(self.sp_z_range)
+        lay.addSpacing(16)
+        lay.addWidget(self.chk_r_asym)
         lay.addStretch(1)
         lay.addWidget(self.btn_visualize)
         # 자연 높이를 측정해 fix — splitter 안에서 핸들로 변경 불가
@@ -973,6 +983,7 @@ class MainWindow(QMainWindow):
                     lowess_frac=lowess_f,
                     polyfit_degree=polyfit_d,
                     radial_bin_size_mm=bin_size_mm,
+                    force_radial=bool(cfg.get("r_asymmetry_mode", False)),
                 )
                 z = rbf(sample_pts)
                 zf = z[np.isfinite(z)]
@@ -1070,6 +1081,23 @@ class MainWindow(QMainWindow):
         view_mode = self.cb_view.currentText() or "2D"
         displays = [c.display for c in cells]
         self._apply_z_scale_mode(displays, view_mode)
+        self._result_panel.refresh_all()
+
+    def _on_r_asymmetry_toggled(self, checked: bool) -> None:
+        """r-asymmetry 체크 — 정상 2D 데이터를 강제 radial symmetric 으로 처리.
+
+        체크 시: is_radial_scan 판정 스킵하고 RadialInterp 경로로 보냄 (1D fitting
+        곡선을 원점 360° 회전). 이미 auto-radial (collinear) 인 데이터는 변화 없음.
+        체크/해제 모두 즉시 전 셀 재렌더.
+        """
+        from core.settings import load_settings as _ls, save_settings as _ss
+        s = _ls()
+        s["r_asymmetry_mode"] = bool(checked)
+        _ss(s)
+        if not self._result_panel.cells:
+            return
+        # refresh_all → 각 cell.refresh() → render 경로 재진입. render 는 매번
+        # settings 를 load 해서 force_radial flag 를 읽으므로 자동 반영.
         self._result_panel.refresh_all()
 
     def _on_z_range_changed(self, value: int) -> None:

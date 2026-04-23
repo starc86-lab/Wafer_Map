@@ -824,8 +824,9 @@ class WaferCell(QFrame):
         common = settings.get("chart_common", {})
         chart = settings.get("chart_2d", {})
 
-        # r-symmetry mode 배지 — 직선/방사 스캔 자동 감지된 경우 좌상단 표시.
-        is_rad = bool(getattr(self._display, "is_radial", False))
+        # r-symmetry mode 배지 — auto-detect (is_radial) 또는 force (r_asymmetry_mode).
+        is_rad = bool(getattr(self._display, "is_radial", False)) or \
+                 bool(settings.get("r_asymmetry_mode", False))
         self._badge_2d.setVisible(is_rad)
         if is_rad:
             self._badge_2d.raise_()
@@ -869,6 +870,7 @@ class WaferCell(QFrame):
                 lowess_frac=float(common.get("lowess_frac", 0.3)),
                 polyfit_degree=int(common.get("polyfit_degree", 3)),
                 radial_bin_size_mm=float(common.get("radial_bin_size_mm", 0)),
+                force_radial=bool(settings.get("r_asymmetry_mode", False)),
             )
         except Exception:
             return
@@ -1010,7 +1012,8 @@ class WaferCell(QFrame):
         chart3d = settings.get("chart_3d", {})
 
         # r-symmetry mode 배지 — 2D 와 동일 로직.
-        is_rad = bool(getattr(self._display, "is_radial", False))
+        is_rad = bool(getattr(self._display, "is_radial", False)) or \
+                 bool(settings.get("r_asymmetry_mode", False))
         self._badge_3d.setVisible(is_rad)
         if is_rad:
             self._badge_3d.raise_()
@@ -1054,6 +1057,7 @@ class WaferCell(QFrame):
                 lowess_frac=float(common.get("lowess_frac", 0.3)),
                 polyfit_degree=int(common.get("polyfit_degree", 3)),
                 radial_bin_size_mm=float(common.get("radial_bin_size_mm", 0)),
+                force_radial=bool(settings.get("r_asymmetry_mode", False)),
             )
         except Exception:
             return
