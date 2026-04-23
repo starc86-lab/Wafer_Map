@@ -371,7 +371,9 @@ class Chart1DRadialGroup(QGroupBox):
 
     def __init__(self, cfg: dict[str, Any], parent: QWidget | None = None) -> None:
         super().__init__("1D Graph, Radial Symmetry 설정", parent)
-        self._cfg_snapshot: dict[str, Any] = dict(cfg)
+        # 주의: 이 카드는 **chart_common 의 1D 관련 키만** 소유. snapshot 을
+        # chart_common 전체로 보관하면 DesignTab.gather merge 시 공통 카드의 최신
+        # UI 값을 stale snapshot 으로 덮어쓰는 버그 발생 → snapshot 없음.
 
         self.chk_1d_radial = _fix_width(QCheckBox())
         self.chk_1d_radial.setChecked(bool(cfg.get("show_1d_radial", False)))
@@ -480,8 +482,9 @@ class Chart1DRadialGroup(QGroupBox):
             w.setEnabled(w in active)
 
     def gather(self) -> dict[str, Any]:
-        result = dict(self._cfg_snapshot)
-        result.update({
+        # 1D 관련 키만 반환. DesignTab merge 시 ChartCommonGroup 의 공통 키를
+        # stale 값으로 덮어쓰지 않도록 snapshot 사용 금지.
+        return {
             "show_1d_radial": self.chk_1d_radial.isChecked(),
             "radial_method": self.cb_radial_method.currentText(),
             "radial_smoothing_factor": float(self.sp_radial_smooth.value()),
@@ -490,11 +493,9 @@ class Chart1DRadialGroup(QGroupBox):
             "lowess_frac": float(self.sp_lowess_frac.value()),
             "polyfit_degree": int(self.sp_polyfit_deg.value()),
             "radial_bin_size_mm": int(self.sp_bin_size.value()),
-        })
-        return result
+        }
 
     def reload(self, cfg: dict[str, Any]) -> None:
-        self._cfg_snapshot = dict(cfg)
         widgets = (self.chk_1d_radial, self.cb_radial_method,
                    self.sp_radial_smooth, self.sp_savgol_win, self.sp_savgol_poly,
                    self.sp_lowess_frac, self.sp_polyfit_deg, self.sp_bin_size)
