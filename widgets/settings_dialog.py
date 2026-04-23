@@ -74,10 +74,16 @@ def _populate_two_columns(group: QGroupBox, items: list[tuple[str, QWidget]]) ->
     _setup_form(right_form, margins=(0, 0, 0, 0))
 
     half = (len(items) + 1) // 2
-    for label_text, widget in items[:half]:
-        left_form.addRow(_label(label_text), widget)
-    for label_text, widget in items[half:]:
-        right_form.addRow(_label(label_text), widget)
+
+    def _add(form, entry):
+        label_or_text, widget = entry
+        lbl = label_or_text if isinstance(label_or_text, QLabel) else _label(label_or_text)
+        form.addRow(lbl, widget)
+
+    for entry in items[:half]:
+        _add(left_form, entry)
+    for entry in items[half:]:
+        _add(right_form, entry)
 
     left_w = QWidget(); left_w.setLayout(left_form)
     right_w = QWidget(); right_w.setLayout(right_form)
@@ -206,6 +212,9 @@ INTERP_METHODS = [
     "RBF-ThinPlate", "RBF-Multiquadric", "RBF-Gaussian", "RBF-Quintic",
 ]
 
+# Radial 1D 보간 알고리즘 — core.interp.RADIAL_METHODS 와 동기.
+from core.interp import RADIAL_METHODS  # noqa: E402
+
 
 class ChartCommonGroup(QGroupBox):
     """MAP 공통 설정 — 2D/3D 양쪽에 적용. 변경 즉시 `changed` emit."""
@@ -282,29 +291,66 @@ class ChartCommonGroup(QGroupBox):
         self.sp_rseg.setSingleStep(60)
         self.sp_rseg.setValue(int(cfg.get("radial_seg", 180)))
 
-        # Radial 1D spline smoothing factor — 0.0~15.0 (0.1 step).
-        # 낮을수록 산점도 추종, 높을수록 스무스. 0 = 정확 보간 (nearly zero smoothing).
+        # Radial 1D 보간 알고리즘 콤보 (6종)
+        self.cb_radial_method = _limit_width(QComboBox())
+        self.cb_radial_method.addItems(RADIAL_METHODS)
+        idx = self.cb_radial_method.findText(cfg.get("radial_method", "Univariate Spline"))
+        self.cb_radial_method.setCurrentIndex(idx if idx >= 0 else 0)
+
+        # Univariate Spline smoothing factor — 0.0~15.0 (0.1 step).
         self.sp_radial_smooth = _limit_width(QDoubleSpinBox())
         self.sp_radial_smooth.setRange(0.0, 15.0)
         self.sp_radial_smooth.setSingleStep(0.1)
         self.sp_radial_smooth.setDecimals(1)
         self.sp_radial_smooth.setValue(float(cfg.get("radial_smoothing_factor", 5.0)))
 
-        # 좌 컬럼: 콤보/체크 (컬러맵·보간·그래프 크기·소수점·1D Radial) — 5개
-        # 우 컬럼: 스핀 (Radial rings·seg·Map Size·Edge cut·Radial Smoothing) — 5개
-        # _populate_two_columns 는 half split — 10 items → half=5 로 균등.
+        # Savitzky-Golay window (홀수) + polyorder
+        self.sp_savgol_win = _limit_width(QSpinBox())
+        self.sp_savgol_win.setRange(3, 101)
+        self.sp_savgol_win.setSingleStep(2)
+        self.sp_savgol_win.setValue(int(cfg.get("savgol_window", 11)))
+
+        self.sp_savgol_poly = _limit_width(QSpinBox())
+        self.sp_savgol_poly.setRange(1, 5)
+        self.sp_savgol_poly.setSingleStep(1)
+        self.sp_savgol_poly.setValue(int(cfg.get("savgol_polyorder", 3)))
+
+        # LOWESS frac — 0.05~1.0 (0.05 step)
+        self.sp_lowess_frac = _limit_width(QDoubleSpinBox())
+        self.sp_lowess_frac.setRange(0.05, 1.0)
+        self.sp_lowess_frac.setSingleStep(0.05)
+        self.sp_lowess_frac.setDecimals(2)
+        self.sp_lowess_frac.setValue(float(cfg.get("lowess_frac", 0.3)))
+
+        # 라벨 인스턴스 직접 생성 — enable/disable 시 setEnabled(False) 로 회색화
+        self.lbl_smooth = _label("Univariate Smoothing")
+        self.lbl_savgol_win = _label("SavGol Window")
+        self.lbl_savgol_poly = _label("SavGol Polyorder")
+        self.lbl_lowess_frac = _label("LOWESS Frac")
+
+        # 총 14 items, half=7. 좌/우 7개씩.
+        # 좌: 컬러맵·보간·그래프 크기·소수점·1D Radial Graph·Radial 방법·Univ Smoothing
+        # 우: Radial rings·Radial seg·Map Size·Edge cut·SavGol Window·SavGol Poly·LOWESS Frac
         _populate_two_columns(self, [
             ("컬러맵", self.cb_cmap),
             ("보간 방법", self.cb_interp),
             ("그래프 크기", self.cb_chart_size),
             ("소수점 자릿수", self.cb_decimals),
             ("1D Radial Graph", self.chk_1d_radial),
+            ("Radial 방법", self.cb_radial_method),
+            (self.lbl_smooth, self.sp_radial_smooth),
             ("Radial: rings", self.sp_rings),
             ("Radial: seg", self.sp_rseg),
             ("Map Size", self.sp_cam_dist),
             ("Edge cut", self.sb_edge_cut),
-            ("Radial Smoothing", self.sp_radial_smooth),
+            (self.lbl_savgol_win, self.sp_savgol_win),
+            (self.lbl_savgol_poly, self.sp_savgol_poly),
+            (self.lbl_lowess_frac, self.sp_lowess_frac),
         ])
+
+        # 선택된 method 에 따른 파라미터 위젯 + 라벨 enable/disable
+        self._sync_radial_param_enable()
+        self.cb_radial_method.currentTextChanged.connect(self._sync_radial_param_enable)
 
         self.cb_cmap.currentIndexChanged.connect(self.changed)
         self.cb_interp.currentIndexChanged.connect(self.changed)
@@ -316,6 +362,36 @@ class ChartCommonGroup(QGroupBox):
         self.chk_1d_radial.toggled.connect(self.changed)
         self.sp_cam_dist.valueChanged.connect(self.changed)
         self.sp_radial_smooth.valueChanged.connect(self.changed)
+        self.cb_radial_method.currentIndexChanged.connect(self.changed)
+        self.sp_savgol_win.valueChanged.connect(self.changed)
+        self.sp_savgol_poly.valueChanged.connect(self.changed)
+        self.sp_lowess_frac.valueChanged.connect(self.changed)
+
+    def _sync_radial_param_enable(self) -> None:
+        """Radial 방법 콤보 선택에 따라 관련 파라미터 위젯/라벨 enable/disable.
+
+        - Univariate Spline → Univariate Smoothing 만 활성
+        - Cubic Spline / PCHIP / Akima → 모두 비활성 (튜닝 없음)
+        - Savitzky-Golay → SavGol Window + Polyorder 활성
+        - LOWESS → LOWESS Frac 활성
+        """
+        m = self.cb_radial_method.currentText()
+        en_uniform = (m == "Univariate Spline")
+        en_savgol = (m == "Savitzky-Golay")
+        en_lowess = (m == "LOWESS")
+        for lbl, w in (
+            (self.lbl_smooth, self.sp_radial_smooth),
+        ):
+            lbl.setEnabled(en_uniform); w.setEnabled(en_uniform)
+        for lbl, w in (
+            (self.lbl_savgol_win, self.sp_savgol_win),
+            (self.lbl_savgol_poly, self.sp_savgol_poly),
+        ):
+            lbl.setEnabled(en_savgol); w.setEnabled(en_savgol)
+        for lbl, w in (
+            (self.lbl_lowess_frac, self.sp_lowess_frac),
+        ):
+            lbl.setEnabled(en_lowess); w.setEnabled(en_lowess)
 
     def gather(self) -> dict[str, Any]:
         w, h = self.cb_chart_size.currentData()
@@ -334,7 +410,11 @@ class ChartCommonGroup(QGroupBox):
             "edge_cut_mm": float(self.sb_edge_cut.value()),
             "show_1d_radial": self.chk_1d_radial.isChecked(),
             "camera_distance": int(self.sp_cam_dist.value()),
+            "radial_method": self.cb_radial_method.currentText(),
             "radial_smoothing_factor": float(self.sp_radial_smooth.value()),
+            "savgol_window": int(self.sp_savgol_win.value()),
+            "savgol_polyorder": int(self.sp_savgol_poly.value()),
+            "lowess_frac": float(self.sp_lowess_frac.value()),
         })
         return result
 
@@ -344,7 +424,8 @@ class ChartCommonGroup(QGroupBox):
                    self.sp_rings, self.sp_rseg,
                    self.cb_chart_size, self.cb_decimals,
                    self.sb_edge_cut, self.chk_1d_radial, self.sp_cam_dist,
-                   self.sp_radial_smooth)
+                   self.cb_radial_method, self.sp_radial_smooth,
+                   self.sp_savgol_win, self.sp_savgol_poly, self.sp_lowess_frac)
         for w in widgets:
             w.blockSignals(True)
         try:
@@ -367,8 +448,14 @@ class ChartCommonGroup(QGroupBox):
             self.sb_edge_cut.setValue(float(cfg.get("edge_cut_mm", 0.0)))
             self.chk_1d_radial.setChecked(bool(cfg.get("show_1d_radial", False)))
             self.sp_cam_dist.setValue(int(cfg.get("camera_distance", 550)))
+            idx = self.cb_radial_method.findText(cfg.get("radial_method", "Univariate Spline"))
+            if idx >= 0: self.cb_radial_method.setCurrentIndex(idx)
             self.sp_radial_smooth.setValue(float(cfg.get("radial_smoothing_factor", 5.0)))
+            self.sp_savgol_win.setValue(int(cfg.get("savgol_window", 11)))
+            self.sp_savgol_poly.setValue(int(cfg.get("savgol_polyorder", 3)))
+            self.sp_lowess_frac.setValue(float(cfg.get("lowess_frac", 0.3)))
         finally:
+            self._sync_radial_param_enable()
             for w in widgets:
                 w.blockSignals(False)
         self.changed.emit()

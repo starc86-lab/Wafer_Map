@@ -833,12 +833,15 @@ class WaferCell(QFrame):
             return
         method = str(common.get("interp_method", "RBF-ThinPlate"))
         radial_width = float(common.get("radial_line_width_mm", 45.0))
-        radial_smooth = float(common.get("radial_smoothing_factor", 5))
         try:
             rbf = make_interp(
                 pts[m, 0], pts[m, 1], vals[m], method=method,
                 radial_line_width_mm=radial_width,
-                radial_smoothing_factor=radial_smooth,
+                radial_method=str(common.get("radial_method", "Univariate Spline")),
+                radial_smoothing_factor=float(common.get("radial_smoothing_factor", 5.0)),
+                savgol_window=int(common.get("savgol_window", 11)),
+                savgol_polyorder=int(common.get("savgol_polyorder", 3)),
+                lowess_frac=float(common.get("lowess_frac", 0.3)),
             )
         except Exception:
             return
@@ -1007,12 +1010,15 @@ class WaferCell(QFrame):
             return
         method = str(common.get("interp_method", "RBF-ThinPlate"))
         radial_width = float(common.get("radial_line_width_mm", 45.0))
-        radial_smooth = float(common.get("radial_smoothing_factor", 5))
         try:
             rbf = make_interp(
                 pts[mask, 0], pts[mask, 1], vals[mask], method=method,
                 radial_line_width_mm=radial_width,
-                radial_smoothing_factor=radial_smooth,
+                radial_method=str(common.get("radial_method", "Univariate Spline")),
+                radial_smoothing_factor=float(common.get("radial_smoothing_factor", 5.0)),
+                savgol_window=int(common.get("savgol_window", 11)),
+                savgol_polyorder=int(common.get("savgol_polyorder", 3)),
+                lowess_frac=float(common.get("lowess_frac", 0.3)),
             )
         except Exception:
             return
@@ -1233,7 +1239,11 @@ class WaferCell(QFrame):
         try:
             ri = RadialInterp(
                 xm, ym, vm,
-                smoothing_factor=float(common.get("radial_smoothing_factor", 5)),
+                method=str(common.get("radial_method", "Univariate Spline")),
+                smoothing_factor=float(common.get("radial_smoothing_factor", 5.0)),
+                savgol_window=int(common.get("savgol_window", 11)),
+                savgol_polyorder=int(common.get("savgol_polyorder", 3)),
+                lowess_frac=float(common.get("lowess_frac", 0.3)),
             )
             r_min = float(r.min())
             r_max = float(r.max())

@@ -10,7 +10,73 @@
 from __future__ import annotations
 
 import numpy as np
-from scipy.interpolate import RBFInterpolator, UnivariateSpline, interp1d
+from scipy.interpolate import (
+    Akima1DInterpolator,
+    CubicSpline,
+    PchipInterpolator,
+    RBFInterpolator,
+    UnivariateSpline,
+    interp1d,
+)
+from scipy.signal import savgol_filter
+
+
+# Radial 1D 보간 알고리즘 목록 (Settings 콤보 순서 그대로)
+RADIAL_METHODS = [
+    "Univariate Spline",  # smoothing cubic spline (smoothing_factor)
+    "Cubic Spline",       # exact, 튜닝 없음
+    "PCHIP",              # exact, shape-preserving, 튜닝 없음
+    "Akima",              # exact, 로컬 결정, 튜닝 없음
+    "Savitzky-Golay",     # savgol_window + savgol_polyorder
+    "LOWESS",             # lowess_frac
+]
+
+
+def _lowess_1d(x: np.ndarray, y: np.ndarray, frac: float, iters: int = 3) -> np.ndarray:
+    """단순 1D LOWESS (tricube weight + robust iteration). statsmodels 의존 회피용.
+
+    입력 (x, y) 는 x 기준 정렬된 1D 배열. frac (0, 1]. 반환: 각 x 위치의 smoothed y.
+    """
+    n = x.size
+    if n == 0:
+        return y.copy()
+    r = max(2, int(np.ceil(float(frac) * n)))
+    r = min(r, n)
+    yest = np.zeros(n, dtype=float)
+    delta = np.ones(n, dtype=float)
+    for _ in range(max(1, int(iters))):
+        for i in range(n):
+            dist = np.abs(x - x[i])
+            h = np.partition(dist, r - 1)[r - 1]
+            if h <= 0:
+                yest[i] = y[i]
+                continue
+            w = np.clip(dist / h, 0.0, 1.0)
+            w = (1.0 - w ** 3) ** 3
+            w = w * delta
+            sw = float(w.sum())
+            if sw <= 0:
+                yest[i] = y[i]
+                continue
+            swx = float((w * x).sum())
+            swy = float((w * y).sum())
+            swxx = float((w * x * x).sum())
+            swxy = float((w * x * y).sum())
+            det = sw * swxx - swx * swx
+            if abs(det) < 1e-12:
+                yest[i] = swy / sw
+                continue
+            a0 = (swy * swxx - swxy * swx) / det
+            a1 = (swxy * sw - swy * swx) / det
+            yest[i] = a0 + a1 * x[i]
+        # robust reweighting
+        res = y - yest
+        mad = float(np.median(np.abs(res)))
+        if mad == 0:
+            break
+        d = np.clip(res / (6.0 * mad), -1.0, 1.0)
+        delta = (1.0 - d * d) ** 2
+    return yest
 
 
 # method 이름 → scipy RBFInterpolator kernel 이름
@@ -70,13 +136,25 @@ class RadialInterp:
     rotation symmetric). 측정값 v 를 `r = √(x²+y²)` 의 함수로 모델링.
     라인 방향 / 오프셋 무관.
 
-    Smoothing 은 **매우 공격적**. 나이테 (동심원 밴드) 아티팩트 방지 목적으로
-    `UnivariateSpline` `s = n × noise² × smoothing_factor` 에서 factor 기본 10.0.
-    radial 프로파일은 물리적으로 매끈해야 해서 detail 보존보다 smooth 우선.
-    경험적으로 factor ≥ 3 부터 시각 차이 없음 → 10 은 여유 있는 safe 값.
+    method 별 동작:
+    - "Univariate Spline": `UnivariateSpline` k=3 + smoothing s (factor 주입)
+    - "Cubic Spline":      `CubicSpline` natural, exact
+    - "PCHIP":             `PchipInterpolator`, shape-preserving exact
+    - "Akima":             `Akima1DInterpolator`, 로컬 결정 exact
+    - "Savitzky-Golay":    `savgol_filter` → interp1d(cubic) 래핑
+    - "LOWESS":            자체 구현 `_lowess_1d` → interp1d(linear) 래핑
+
+    공통: r_q < r_min / r_q > r_max 는 edge 값 clamp (모든 method).
     """
 
-    def __init__(self, x, y, v, *, smoothing_factor: float = 10.0):
+    def __init__(
+        self, x, y, v, *,
+        method: str = "Univariate Spline",
+        smoothing_factor: float = 10.0,
+        savgol_window: int = 11,
+        savgol_polyorder: int = 3,
+        lowess_frac: float = 0.3,
+    ):
         x = np.asarray(x, dtype=float)
         y = np.asarray(y, dtype=float)
         v = np.asarray(v, dtype=float)
@@ -93,6 +171,7 @@ class RadialInterp:
 
         self._r_u = r_u
         self._v_u = v_u
+        self._method = method
 
         if r_u.size == 0:
             self._fn = lambda rq: np.zeros_like(rq)
@@ -102,27 +181,66 @@ class RadialInterp:
             self._fn = lambda rq: np.full_like(rq, const_v, dtype=float)
             return
         if r_u.size < 4:
-            # 점 너무 적으면 linear interp + 끝단 constant extrapolation
             self._fn = interp1d(
                 r_u, v_u, kind="linear", bounds_error=False,
                 fill_value=(float(v_u[0]), float(v_u[-1])),
             )
             return
 
-        # 공격적 smoothing — factor 배수로 잔잔한 wiggle 제거
-        noise = _estimate_noise_1d(v_u)
-        # noise 가 0 이어도 최소한의 smoothing 이 걸리도록 floor 값 추가
-        # (floor = (데이터 range) × 0.005 → 스케일 비례, 튐 방지)
-        v_range = float(v_u.max() - v_u.min())
-        noise_floor = v_range * 5e-3
-        noise_eff = max(noise, noise_floor)
-        s_val = float(r_u.size) * (noise_eff ** 2) * float(smoothing_factor)
+        v_lo = float(v_u[0])
+        v_hi = float(v_u[-1])
+        self._fn = self._build_fn(
+            r_u, v_u, v_lo, v_hi, method,
+            smoothing_factor, savgol_window, savgol_polyorder, lowess_frac,
+        )
+
+    @staticmethod
+    def _build_fn(
+        r_u, v_u, v_lo, v_hi, method,
+        smoothing_factor, savgol_window, savgol_polyorder, lowess_frac,
+    ):
         try:
-            self._fn = UnivariateSpline(r_u, v_u, k=3, s=s_val, ext=3)
+            if method == "Cubic Spline":
+                return CubicSpline(r_u, v_u, bc_type="natural", extrapolate=True)
+            if method == "PCHIP":
+                return PchipInterpolator(r_u, v_u, extrapolate=True)
+            if method == "Akima":
+                # Akima 는 extrapolate 지원 안 함 → interp1d fallback 구간을 __call__ 에서 clamp
+                return Akima1DInterpolator(r_u, v_u)
+            if method == "Savitzky-Golay":
+                w = int(savgol_window)
+                p = int(savgol_polyorder)
+                # w 는 홀수 + <= len(r_u) + > polyorder
+                w = min(w, r_u.size)
+                if w % 2 == 0:
+                    w -= 1
+                if w < p + 1:
+                    w = p + 1 if (p + 1) % 2 == 1 else p + 2
+                if w > r_u.size:
+                    w = r_u.size if r_u.size % 2 == 1 else r_u.size - 1
+                v_sm = savgol_filter(v_u, w, p)
+                return interp1d(
+                    r_u, v_sm, kind="cubic", bounds_error=False,
+                    fill_value=(float(v_sm[0]), float(v_sm[-1])),
+                )
+            if method == "LOWESS":
+                frac = float(np.clip(lowess_frac, 0.05, 1.0))
+                v_sm = _lowess_1d(r_u, v_u, frac=frac, iters=3)
+                return interp1d(
+                    r_u, v_sm, kind="linear", bounds_error=False,
+                    fill_value=(float(v_sm[0]), float(v_sm[-1])),
+                )
+            # 기본: Univariate Spline (smoothing factor)
+            noise = _estimate_noise_1d(v_u)
+            v_range = float(v_u.max() - v_u.min())
+            noise_floor = v_range * 5e-3
+            noise_eff = max(noise, noise_floor)
+            s_val = float(r_u.size) * (noise_eff ** 2) * float(smoothing_factor)
+            return UnivariateSpline(r_u, v_u, k=3, s=s_val, ext=3)
         except Exception:
-            self._fn = interp1d(
+            return interp1d(
                 r_u, v_u, kind="cubic", bounds_error=False,
-                fill_value=(float(v_u[0]), float(v_u[-1])),
+                fill_value=(v_lo, v_hi),
             )
 
     def __call__(self, pts):
@@ -130,7 +248,16 @@ class RadialInterp:
         if pts.ndim == 1:
             pts = pts.reshape(1, -1)
         r_q = np.sqrt(pts[:, 0] ** 2 + pts[:, 1] ** 2)
-        z = self._fn(r_q)
+        # 모든 method 공통: [r_min, r_max] 밖은 edge 값 clamp.
+        # (UnivariateSpline ext=3 / CubicSpline natural 은 이미 처리하지만
+        # Akima 는 NaN 이고 PCHIP/LOWESS/SavGol 은 부자연스러운 외삽 가능)
+        if self._r_u.size >= 2:
+            r_min = float(self._r_u[0])
+            r_max = float(self._r_u[-1])
+            r_c = np.clip(r_q, r_min, r_max)
+            z = self._fn(r_c)
+        else:
+            z = self._fn(r_q)
         return np.asarray(z, dtype=float)
 
 
@@ -139,19 +266,28 @@ def make_interp(
     method: str = "RBF-ThinPlate",
     smoothing: float = 0.0,
     radial_line_width_mm: float = 45.0,
+    radial_method: str = "Univariate Spline",
     radial_smoothing_factor: float = 5.0,
+    savgol_window: int = 11,
+    savgol_polyorder: int = 3,
+    lowess_frac: float = 0.3,
 ):
     """통합 보간기 팩토리 — 1D radial scan 자동 감지 → `RadialInterp` 또는 `make_rbf`.
 
     모두 `instance(pts_Nx2) → values_N` 인터페이스 제공.
 
-    - 1D radial scan (`is_radial_scan` 통과): `RadialInterp` — 1D spline on r.
-      `radial_smoothing_factor` (1~15) 로 스무스 정도 조절. 낮을수록 산점도
-      추종, 높을수록 스무스 (나이테 방지). Settings 에서 조정 가능.
+    - 1D radial scan: `RadialInterp(method=...)` — Settings 에서 6종 알고리즘 선택.
     - 그 외: `make_rbf` — 2D RBF (기존 동작).
     """
     if is_radial_scan(x, y, line_width_mm=radial_line_width_mm):
-        return RadialInterp(x, y, v, smoothing_factor=radial_smoothing_factor)
+        return RadialInterp(
+            x, y, v,
+            method=radial_method,
+            smoothing_factor=radial_smoothing_factor,
+            savgol_window=savgol_window,
+            savgol_polyorder=savgol_polyorder,
+            lowess_frac=lowess_frac,
+        )
     return make_rbf(x, y, v, method=method, smoothing=smoothing)
 
 

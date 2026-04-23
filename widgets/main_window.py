@@ -929,7 +929,11 @@ class MainWindow(QMainWindow):
         cfg = _ls().get("chart_common", {})
         method = str(cfg.get("interp_method", "RBF-ThinPlate"))
         radial_width = float(cfg.get("radial_line_width_mm", 45.0))
-        radial_smooth = float(cfg.get("radial_smoothing_factor", 5))
+        radial_method = str(cfg.get("radial_method", "Univariate Spline"))
+        radial_smooth = float(cfg.get("radial_smoothing_factor", 5.0))
+        savgol_w = int(cfg.get("savgol_window", 11))
+        savgol_p = int(cfg.get("savgol_polyorder", 3))
+        lowess_f = float(cfg.get("lowess_frac", 0.3))
         rings = max(5, int(cfg.get("radial_rings", 20)))
         seg = max(60, int(cfg.get("radial_seg", 180)))
         r_arr = np.linspace(0.0, R, rings + 1)
@@ -962,7 +966,11 @@ class MainWindow(QMainWindow):
                 rbf = make_interp(
                     x_arr[m], y_arr[m], v_arr[m], method=method,
                     radial_line_width_mm=radial_width,
+                    radial_method=radial_method,
                     radial_smoothing_factor=radial_smooth,
+                    savgol_window=savgol_w,
+                    savgol_polyorder=savgol_p,
+                    lowess_frac=lowess_f,
                 )
                 z = rbf(sample_pts)
                 zf = z[np.isfinite(z)]
