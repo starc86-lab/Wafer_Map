@@ -779,12 +779,11 @@ class MainWindow(QMainWindow):
                 self._save_used_pair_to_library(library, w, v, x, y)
 
             title = f"{w.lot_id}.{_pad_slot(w.slot_id)} – {v}"
-            if is_collinear(x_mm, y_mm):
-                title += " (Radial)"
             displays.append(WaferDisplay(
                 title=title,
                 meta_label=f"{w.lot_id} / {_pad_slot(w.slot_id)}",
                 x_mm=x_mm, y_mm=y_mm, values=val_n,
+                is_radial=bool(is_collinear(x_mm, y_mm)),
             ))
 
         self._enforce_library_limits(library)
@@ -831,12 +830,11 @@ class MainWindow(QMainWindow):
         displays = []
         for d in dr.deltas:
             title = f"{d.lot_a}.{_pad_slot(d.slot_a)} – Δ {v}"
-            if is_collinear(d.x_mm, d.y_mm):
-                title += " (Radial)"
             displays.append(WaferDisplay(
                 title=title,
                 meta_label=f"{d.lot_a} / {_pad_slot(d.slot_a)}  ←  {d.lot_b} / {_pad_slot(d.slot_b)}",
                 x_mm=d.x_mm, y_mm=d.y_mm, values=d.delta_v,
+                is_radial=bool(is_collinear(d.x_mm, d.y_mm)),
             ))
         # A/B 의 대표 RECIPE 비교 — 다르면 summary 에 안내 (차단 말고 알림만).
         # 의도적으로 다른 레시피 DELTA 도 사용자 케이스 있음.

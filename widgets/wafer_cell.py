@@ -385,6 +385,7 @@ class WaferDisplay:
     values: np.ndarray
     z_range: tuple[float, float] | None = None          # 2D/3D map Y range (rendered RBF 값 기반)
     z_range_1d: tuple[float, float] | None = None       # 1D radial graph Y range (실측 v 값 기반)
+    is_radial: bool = False                             # 직선/방사 스캔 자동 감지 여부 (badge 표시용)
 
 
 def _fmt(v, decimals: int) -> str:
@@ -521,6 +522,24 @@ class WaferCell(QFrame):
         self._applied_azim_3d: float = azim_3d
 
         self._chart_widget: QWidget = self._gl_2d  # 활성 위젯 추적
+
+        # r-symmetry 모드 배지 — 직선 스캔 자동 감지 시 좌상단에 표시.
+        # 각 GL 위젯의 자식으로 두 개 배치 (stacked layout 토글 시 각자 보임).
+        # GL native surface 위에 QLabel 이지만 Windows + AA_ShareOpenGLContexts
+        # 조합에서는 합성 정상. 카드 2D/3D 토글 시 자식 배지가 각각 활성.
+        def _make_badge(parent: QWidget) -> QLabel:
+            b = QLabel("r-symmetry mode", parent)
+            b.setStyleSheet(
+                "background: rgba(255,255,255,210); color: #555; "
+                "padding: 2px 6px; border: 1px solid #bbb; border-radius: 4px; "
+                "font-size: 11px;"
+            )
+            b.hide()
+            b.move(8, 8)
+            b.adjustSize()
+            return b
+        self._badge_2d = _make_badge(self._gl_2d)
+        self._badge_3d = _make_badge(self._gl_3d)
 
         # 1D Radial Graph — 2D/3D 그래프와 Summary 표 사이. 체크 시에만 보임.
         # X: r (-5~155 표시, 눈금 0/50/100/150), Y: 실측 min/max 기반.
@@ -804,6 +823,12 @@ class WaferCell(QFrame):
 
         common = settings.get("chart_common", {})
         chart = settings.get("chart_2d", {})
+
+        # r-symmetry mode 배지 — 직선/방사 스캔 자동 감지된 경우 좌상단 표시.
+        is_rad = bool(getattr(self._display, "is_radial", False))
+        self._badge_2d.setVisible(is_rad)
+        if is_rad:
+            self._badge_2d.raise_()
         rings = max(5, int(common.get("radial_rings", 20)))
         seg = max(60, int(common.get("radial_seg", 180)))
         edge_cut_mm = float(common.get("edge_cut_mm", 0.0))
@@ -982,6 +1007,12 @@ class WaferCell(QFrame):
 
         common = settings.get("chart_common", {})
         chart3d = settings.get("chart_3d", {})
+
+        # r-symmetry mode 배지 — 2D 와 동일 로직.
+        is_rad = bool(getattr(self._display, "is_radial", False))
+        self._badge_3d.setVisible(is_rad)
+        if is_rad:
+            self._badge_3d.raise_()
 
         # 카메라 distance / elevation / azimuth — Settings 값이 **바뀔 때만** 반영
         # (사용자의 휠 zoom / 드래그 회전 보존). opts 대신 _applied_* 트래커와 비교.

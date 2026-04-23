@@ -370,7 +370,7 @@ class Chart1DRadialGroup(QGroupBox):
     changed = Signal()
 
     def __init__(self, cfg: dict[str, Any], parent: QWidget | None = None) -> None:
-        super().__init__("1D Radial Graph 설정", parent)
+        super().__init__("1D Graph, Radial Symmetry 설정", parent)
         self._cfg_snapshot: dict[str, Any] = dict(cfg)
 
         self.chk_1d_radial = _fix_width(QCheckBox())
@@ -424,7 +424,7 @@ class Chart1DRadialGroup(QGroupBox):
             (self.lbl_smooth, self.sp_radial_smooth),
             (self.lbl_savgol_win, self.sp_savgol_win),
             (self.lbl_savgol_poly, self.sp_savgol_poly),
-            ("Radial 방법", self.cb_radial_method),
+            ("Fitting 방법", self.cb_radial_method),
             (self.lbl_lowess_frac, self.sp_lowess_frac),
             (self.lbl_polyfit, self.sp_polyfit_deg),
             ("", placeholder),
