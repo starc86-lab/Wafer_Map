@@ -1064,11 +1064,15 @@ class WaferCell(QFrame):
 
         gview = self._gl_3d
 
-        # 바닥 grid — 재사용
+        # 바닥 grid — 재사용.
+        # size 는 spacing 의 **짝수 배수** 여야 원점(0,0) 대칭 + 0 통과 선 생성.
+        # pyqtgraph GLGridItem 은 np.arange(-x/2, x/2, xs) 로 선을 찍어서,
+        # 예전 320/50 조합은 [-160, 140] 비대칭 → 12/3시 방향에서 웨이퍼(R=150) 가
+        # 그리드 바깥으로 튀어나오는 문제. 400/50 은 [-200~200] 대칭 + 여유 50mm.
         if chart3d.get("show_grid", True):
             if self._gl_grid is None:
                 self._gl_grid = gl.GLGridItem()
-                self._gl_grid.setSize(x=320, y=320)
+                self._gl_grid.setSize(x=400, y=400)
                 self._gl_grid.setSpacing(x=50, y=50)
                 self._gl_grid.setColor((205, 205, 205, 150))
                 gview.addItem(self._gl_grid)
