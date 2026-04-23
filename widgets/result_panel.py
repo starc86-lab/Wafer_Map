@@ -107,8 +107,11 @@ class ResultPanel(QWidget):
         self._container.hide()
         try:
             new_cells = []
-            for d in displays:
-                cell = WaferCell(d, value_name, view_mode=view_mode, defer_render=True)
+            for i, d in enumerate(displays):
+                cell = WaferCell(
+                    d, value_name, view_mode=view_mode, defer_render=True,
+                    is_master=(i == 0),
+                )
                 new_cells.append(cell)
                 self._cells.append(cell)
 

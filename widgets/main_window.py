@@ -367,16 +367,35 @@ class MainWindow(QMainWindow):
         if not results:
             return {}, {}, 0
 
-        # 공통 PARAMETER 집합
-        param_sets: list[set[str]] = []
-        for r in results:
+        # 공통 PARAMETER 집합 — DELTA 모드에서는 실제 계산 대상인 A∩B 매칭 웨이퍼
+        # 만 기준. 매칭 안 된 웨이퍼의 PARAMETER 누락은 VALUE 후보에 영향 없음.
+        # Single 모드는 기존 그대로 (해당 result 의 모든 웨이퍼 교집합).
+        if a is not None and b is not None:
+            matched_ids = set(a.wafers) & set(b.wafers)
+            if matched_ids:
+                per_wafer_params = (
+                    [set(a.wafers[w].parameters) for w in matched_ids] +
+                    [set(b.wafers[w].parameters) for w in matched_ids]
+                )
+                common = set.intersection(*per_wafer_params)
+            else:
+                common = set()
+        else:
+            r = results[0]
             per_result = [set(w.parameters) for w in r.wafers.values()]
-            if per_result:
-                param_sets.append(set.intersection(*per_result))
-        common = set.intersection(*param_sets) if param_sets else set()
+            common = set.intersection(*per_result) if per_result else set()
 
+        # first_wafer 는 메타 샘플 — 매칭 모드에선 매칭 웨이퍼 중 첫 번째가 자연.
         first_result = results[0]
-        first_wafer = next(iter(first_result.wafers.values())) if first_result.wafers else None
+        if a is not None and b is not None:
+            matched_ids = set(a.wafers) & set(b.wafers)
+            if matched_ids:
+                first_wid = next(iter(matched_ids))
+                first_wafer = a.wafers.get(first_wid)
+            else:
+                first_wafer = None
+        else:
+            first_wafer = next(iter(first_result.wafers.values())) if first_result.wafers else None
         if first_wafer is None:
             return {}, {}, 0
         available_ns = {
@@ -827,6 +846,7 @@ class MainWindow(QMainWindow):
 
         self._apply_z_scale_mode(displays, view_mode)
         self._result_panel.set_displays(displays, v, view_mode=view_mode, summary_line="")
+        self._connect_cell_er_signals()
 
     def _visualize_delta(
         self, a: ParseResult, b: ParseResult, v: str, x: str, y: str,
@@ -859,21 +879,100 @@ class MainWindow(QMainWindow):
                 meta_label=f"{d.lot_a} / {_pad_slot(d.slot_a)}  ←  {d.lot_b} / {_pad_slot(d.slot_b)}",
                 x_mm=d.x_mm, y_mm=d.y_mm, values=d.delta_v,
                 is_radial=bool(is_collinear(d.x_mm, d.y_mm)),
+                is_delta=True,
             ))
         # A/B 의 대표 RECIPE 비교 — 다르면 summary 에 안내 (차단 말고 알림만).
-        # 의도적으로 다른 레시피 DELTA 도 사용자 케이스 있음.
+        # RECIPE 불일치 경고만 남기고, 매칭 개수/DELTA 라벨은 제거 — ER Time 입력란이
+        # 그래프 영역 위에 오는데 summary 라벨이 추가 공간 차지해 그래프 잘리는 문제.
         recipe_a = self._dominant_recipe(a)
         recipe_b = self._dominant_recipe(b)
-        recipe_note = ""
+        summary = ""
         if recipe_a and recipe_b and recipe_a.strip().lower() != recipe_b.strip().lower():
-            recipe_note = f"  ·  ⚠ RECIPE 불일치: A={recipe_a} / B={recipe_b}"
-        summary = (
-            f"매칭 {dr.matched} / A {dr.count_a} vs B {dr.count_b}  "
-            f"·  DELTA (A − B){recipe_note}"
-        )
+            summary = f"⚠ RECIPE 불일치: A={recipe_a} / B={recipe_b}"
         view_mode = self.cb_view.currentText() or "2D"
         self._apply_z_scale_mode(displays, view_mode)
         self._result_panel.set_displays(displays, v, view_mode=view_mode, summary_line=summary)
+        self._connect_cell_er_signals()
+
+    def _connect_cell_er_signals(self) -> None:
+        """set_displays 직후 각 cell 의 ER 관련 signal 연결 + 초기 master/slave 상태 적용.
+
+        DELTA 모드 cell 만 er_row 보임. master (index 0) chk_apply_all default 체크 →
+        slave 입력 disable. 이후 editingFinished/toggled 은 아래 핸들러가 처리.
+        """
+        cells = self._result_panel.cells
+        if not cells:
+            return
+        for c in cells:
+            c.er_time_changed.connect(
+                lambda t, cell=c: self._on_cell_er_time_changed(cell, t)
+            )
+        master = cells[0]
+        if master.chk_apply_all is not None:
+            master.apply_all_toggled.connect(self._on_apply_all_toggled)
+            # 초기 상태 — default 체크 → slave input disable
+            initial = master.chk_apply_all.isChecked()
+            for c in cells[1:]:
+                c.le_time.setEnabled(not initial)
+                c.lbl_time.setEnabled(not initial)
+
+    def _on_cell_er_time_changed(self, cell, t) -> None:
+        """cell 에서 ER time 값 변경 signal.
+
+        - master + apply_all 체크 → slave 에 값 전파 + 모든 cell 재렌더
+        - 그 외 → Z-Scale 모드에 따라 해당 cell or 전체 재렌더
+        공통 Z-Scale 은 전체 z_range 재계산 필요 → refresh_all.
+        """
+        cells = self._result_panel.cells
+        if not cells:
+            return
+        is_master = cell is cells[0] and cell.chk_apply_all is not None
+        apply_all_on = is_master and cell.chk_apply_all.isChecked()
+        if apply_all_on:
+            for c in cells[1:]:
+                c.set_er_time(t)
+
+        is_common = self.cb_zscale.currentText() == "공통"
+        if is_common:
+            view_mode = self.cb_view.currentText() or "2D"
+            displays = [c.display for c in cells]
+            self._apply_z_scale_mode(displays, view_mode)
+            self._result_panel.refresh_all()
+        else:
+            if apply_all_on:
+                for c in cells:
+                    c.refresh()
+            else:
+                cell.refresh()
+
+    def _on_apply_all_toggled(self, checked: bool) -> None:
+        """master 의 '전체 적용' 체크 토글.
+
+        체크 → slave 입력 disable + master 값으로 덮어쓰기 + 전체 재렌더.
+        해제 → slave 입력 enable (값은 이미 동기된 상태, 재렌더 없음).
+        """
+        cells = self._result_panel.cells
+        if not cells:
+            return
+        master = cells[0]
+        if master.chk_apply_all is None:
+            return
+        master_t = master.display.er_time_sec
+        for c in cells[1:]:
+            c.le_time.setEnabled(not checked)
+            c.lbl_time.setEnabled(not checked)
+            if checked:
+                c.set_er_time(master_t)
+        if checked:
+            is_common = self.cb_zscale.currentText() == "공통"
+            if is_common:
+                view_mode = self.cb_view.currentText() or "2D"
+                displays = [c.display for c in cells]
+                self._apply_z_scale_mode(displays, view_mode)
+                self._result_panel.refresh_all()
+            else:
+                for c in cells:
+                    c.refresh()
 
     @staticmethod
     def _dominant_recipe(result: ParseResult) -> str:
@@ -979,6 +1078,11 @@ class MainWindow(QMainWindow):
             x_arr = np.asarray(d.x_mm, dtype=float)
             y_arr = np.asarray(d.y_mm, dtype=float)
             v_arr = np.asarray(d.values, dtype=float)
+            # ER Time 적용 — display.er_time_sec > 0 이면 v_arr 을 나누어 ER/RR 값으로
+            # z_range 계산. cell render 경로와 일치하도록 동일 변환.
+            _t = getattr(d, "er_time_sec", None)
+            if _t and _t > 0:
+                v_arr = v_arr / float(_t)
             m = ~np.isnan(v_arr) & ~np.isnan(x_arr) & ~np.isnan(y_arr)
             if m.sum() < 2:
                 per_d_render.append(None); per_d_measured.append(None)

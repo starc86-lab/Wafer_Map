@@ -11,15 +11,15 @@ import numpy as np
 
 import pyqtgraph as pg
 import pyqtgraph.opengl as gl
-from PySide6.QtCore import QMimeData, QPoint, QRect, QRectF, Qt
+from PySide6.QtCore import QMimeData, QPoint, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import (
-    QColor, QFont, QFontMetrics, QImage, QLinearGradient, QPainter, QPalette, QPen,
-    QPixmap,
+    QColor, QDoubleValidator, QFont, QFontMetrics, QImage, QLinearGradient,
+    QPainter, QPalette, QPen, QPixmap,
 )
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QFrame, QHBoxLayout, QHeaderView, QLabel,
-    QMenu, QStackedLayout, QStyledItemDelegate, QTableWidget, QTableWidgetItem,
-    QVBoxLayout, QWidget,
+    QAbstractItemView, QApplication, QCheckBox, QFrame, QHBoxLayout, QHeaderView,
+    QLabel, QLineEdit, QMenu, QStackedLayout, QStyledItemDelegate, QTableWidget,
+    QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from core import settings as settings_io
@@ -386,6 +386,8 @@ class WaferDisplay:
     z_range: tuple[float, float] | None = None          # 2D/3D map Y range (rendered RBF 값 기반)
     z_range_1d: tuple[float, float] | None = None       # 1D radial graph Y range (실측 v 값 기반)
     is_radial: bool = False                             # 직선/방사 스캔 자동 감지 여부 (badge 표시용)
+    is_delta: bool = False                              # DELTA 모드(A-B) 여부 — ER Time 입력 가시성용
+    er_time_sec: float | None = None                    # ER/RR 변환용 time (초). None/0 = 변환 안 함
 
 
 def _fmt(v, decimals: int) -> str:
@@ -433,6 +435,11 @@ class WaferCell(QFrame):
     title + chart_box + table 전체가 하나의 패널 (border 박스)로 묶임.
     """
 
+    # ER Map 변환 Time 변경 — MainWindow 가 연결해서 Z-Scale 모드에 맞춰 재렌더 결정.
+    er_time_changed = Signal(object)   # emit: float | None
+    # "전체 적용" 체크박스 토글 (master 에서만 emit). slave cell enable/disable 용.
+    apply_all_toggled = Signal(bool)
+
     def __init__(
         self,
         display: WaferDisplay,
@@ -440,20 +447,97 @@ class WaferCell(QFrame):
         view_mode: str = "2D",
         parent: QWidget | None = None,
         defer_render: bool = False,
+        is_master: bool = False,
     ) -> None:
         super().__init__(parent)
         self._display = display
         self._value_name = value_name
         self._view_mode = view_mode  # "2D" | "3D"
         self._deferred = defer_render
+        self._is_master = is_master
 
-        # cell 전체를 하나의 흰 패널 + 테두리로 묶음 (ID selector로 자식 위젯 영향 차단)
-        self.setObjectName("waferCell")
-        self.setStyleSheet(
+        # outer — border 없는 투명 컨테이너. er_row(캡처 밖) + _capture_container(캡처 대상)
+        # 를 세로로 묶음. Copy Graph 는 _capture_container 만 crop 대상.
+        outer_lay = QVBoxLayout(self)
+        outer_lay.setContentsMargins(0, 0, 0, 0)
+        outer_lay.setSpacing(2)
+
+        # ───── _capture_container (Copy Graph 대상) ─────
+        # 기존 WaferCell 이 갖던 border/배경/내용을 이 컨테이너로 이동.
+        self._capture_container = QFrame()
+        self._capture_container.setObjectName("waferCell")
+        self._capture_container.setStyleSheet(
             "#waferCell { background: white; border: 1px solid #bfbfbf; }"
         )
+        outer_lay.addWidget(self._capture_container)
 
-        lay = QVBoxLayout(self)
+        # ───── er_row (캡처 영역 밖, 셀 하단) — 2 row ─────
+        # Row 1: Time: [___]  전체 적용 [체크]  (slave 는 체크 없음)
+        # Row 2: *입력 시 ΔTHK/Time 값으로 변환 (ER, RR 계산용도).  (slave 는 빈 placeholder)
+        # 폰트는 전역 QWidget body 상속 (Settings 글자크기 연동). QCheckBox 만 전역
+        # QSS 에서 small 이라 인라인 body 강제 (refresh 시 재적용).
+        from core.themes import FONT_SIZES
+        _body_px = FONT_SIZES.get("body", 14)
+
+        self._er_row = QWidget()
+        er_outer = QVBoxLayout(self._er_row)
+        er_outer.setContentsMargins(8, 2, 8, 2)
+        er_outer.setSpacing(0)
+
+        # Row 1
+        row1 = QHBoxLayout()
+        row1.setContentsMargins(0, 0, 0, 0)
+        row1.setSpacing(6)
+        self.lbl_time = QLabel("Time:")
+        row1.addWidget(self.lbl_time)
+        self.le_time = QLineEdit()
+        _v = QDoubleValidator(0.0, 99999.0, 2)
+        _v.setNotation(QDoubleValidator.Notation.StandardNotation)
+        self.le_time.setValidator(_v)
+        self.le_time.setFixedWidth(60)
+        self.le_time.setPlaceholderText("sec")
+        row1.addWidget(self.le_time)
+        if is_master:
+            self.chk_apply_all = QCheckBox("전체 적용")
+            self.chk_apply_all.setChecked(True)  # default: 전체 적용 ON
+            self.chk_apply_all.setStyleSheet(
+                f"QCheckBox {{ font-size: {_body_px}px; }}"
+            )
+            row1.addWidget(self.chk_apply_all)
+        else:
+            self.chk_apply_all = None
+        row1.addStretch(1)
+        er_outer.addLayout(row1)
+
+        # Row 2 — master 는 부연설명, slave 는 빈 placeholder (높이 맞춤)
+        row2 = QHBoxLayout()
+        row2.setContentsMargins(0, 0, 0, 0)
+        row2.setSpacing(0)
+        _small_px = FONT_SIZES.get("small", 12)
+        if is_master:
+            self.lbl_desc = QLabel("*입력 시 ΔTHK/Time 값으로 변환 (ER, RR 계산용도).")
+            self.lbl_desc.setStyleSheet(
+                f"color: #888; font-size: {_small_px}px;"
+            )
+        else:
+            self.lbl_desc = QLabel(" ")  # placeholder — Row 2 높이 유지
+            self.lbl_desc.setStyleSheet(f"font-size: {_small_px}px;")
+        row2.addWidget(self.lbl_desc)
+        row2.addStretch(1)
+        er_outer.addLayout(row2)
+
+        self._er_row.setVisible(bool(getattr(display, "is_delta", False)))
+        outer_lay.addWidget(self._er_row)
+
+        # signal 연결 — editingFinished (엔터/포커스 아웃) 만 emit (textChanged 는
+        # 타이핑 매 키마다라 과함)
+        self.le_time.editingFinished.connect(self._on_time_edit_finished)
+        if self.chk_apply_all is not None:
+            self.chk_apply_all.toggled.connect(self.apply_all_toggled)
+
+        # 기존 "lay" 이름 유지 — 아래 모든 addWidget 이 이 레이아웃 참조. 단, 부모가
+        # self(기존) 에서 self._capture_container 로 변경됨.
+        lay = QVBoxLayout(self._capture_container)
         lay.setContentsMargins(6, 6, 6, 6)
         lay.setSpacing(4)
 
@@ -625,7 +709,8 @@ class WaferCell(QFrame):
 
         self._x_in = np.array([])
         self._y_in = np.array([])
-        self._v_in = np.array([])
+        self._v_in = np.array([])    # effective (ER time 적용 후 — render 경로가 이 값 사용)
+        self._v_raw = np.array([])   # 원본 delta — ER time 변경 시 재계산 기준
         # 렌더 캐시 — 한 번 그려진 모드는 재계산 없이 인덱스 토글만
         self._rendered_2d = False
         self._rendered_3d = False
@@ -649,7 +734,8 @@ class WaferCell(QFrame):
         y_mm = np.asarray(d.y_mm[:n], dtype=float)
         v = np.asarray(d.values[:n], dtype=float)
         x_in, y_in, v_in, _ = filter_in_wafer(x_mm, y_mm, v)
-        self._x_in, self._y_in, self._v_in = x_in, y_in, v_in
+        self._x_in, self._y_in, self._v_raw = x_in, y_in, v_in
+        self._recompute_v_eff()
 
     def render_initial(self) -> None:
         """defer된 초기 렌더를 수행. ResultPanel이 병렬 prefetch 후 호출."""
@@ -691,11 +777,19 @@ class WaferCell(QFrame):
         radial_h = radial_h_px if show_radial else 0
         # Table 폭 — cell 컨텐츠 폭에서 좌우 8px 씩 축소, layout 에서 가운데 정렬
         self._table.setFixedWidth(w + bar_w - 16)
+        # _capture_container (QFrame, border) 만 고정 크기 — 그래프 영역 보존.
+        # cell outer (self) 는 layout 이 자동 합산 (_capture_container + er_row).
+        # 이전에 self.setFixedSize 로 total_h 를 계산했는데 inner layout 의 spacing 수
+        # (radial 숨김 여부 등) 가 동적이라 계산이 어긋나 chart 가 잘리는 버그.
         title_h = self._title.sizeHint().height()
         table_h = self._table.height()
-        total_h = title_h + h + radial_h + table_h + 6 * 2 + 4 * 2
-        total_w = w + bar_w + 6 * 2  # show_bar 무관 고정
-        self.setFixedSize(total_w, total_h)
+        cap_w = w + bar_w + 6 * 2              # inner margin 6+6
+        cap_h = title_h + h + radial_h + table_h + 6 * 2 + 4 * 2
+        self._capture_container.setFixedSize(cap_w, cap_h)
+        # cell outer — 폭은 capture 와 동일, 높이는 자유 (layout 이 capture + er_row 합산)
+        self.setFixedWidth(cap_w)
+        self.setMaximumHeight(16777215)        # 이전 setFixedSize 로 생긴 height 제약 해제
+        self.adjustSize()
 
     # ── 외부 API ───────────────────────────────────
     @property
@@ -731,7 +825,27 @@ class WaferCell(QFrame):
         self._title.setStyleSheet(
             f"font-weight: bold; color: #111; font-size: {_title_px}px;"
         )
+        # er_row 내 위젯 폰트 재적용 — Settings 글자크기 변경 시 따라감.
+        # - chk_apply_all: 전역 QSS 가 small 이라 body 강제
+        # - lbl_desc: 부연설명은 body 한 단계 아래 small (한국어 긴 문장 우측 잘림 방지)
+        _body_px = FONT_SIZES.get("body", 14)
+        _small_px = FONT_SIZES.get("small", 12)
+        if self.chk_apply_all is not None:
+            self.chk_apply_all.setStyleSheet(
+                f"QCheckBox {{ font-size: {_body_px}px; }}"
+            )
+        if self.lbl_desc is not None:
+            if self._is_master:
+                self.lbl_desc.setStyleSheet(
+                    f"color: #888; font-size: {_small_px}px;"
+                )
+            else:
+                self.lbl_desc.setStyleSheet(f"font-size: {_small_px}px;")
         self._apply_chart_size(settings.get("chart_common", {}))
+        # Summary 표 재계산 — v_in 변경 (ER time 적용 등) 반영. 빠뜨리면 map/1D 만
+        # 갱신되고 표만 stale.
+        if self._v_in.size > 0:
+            self._update_table(self._v_in, settings)
         self._activate_current_view()
 
     def prefetch_interp(self) -> None:
@@ -779,7 +893,8 @@ class WaferCell(QFrame):
         v = np.asarray(d.values[:n], dtype=float)
 
         x_in, y_in, v_in, _ = filter_in_wafer(x_mm, y_mm, v)
-        self._x_in, self._y_in, self._v_in = x_in, y_in, v_in
+        self._x_in, self._y_in, self._v_raw = x_in, y_in, v_in
+        self._recompute_v_eff()
 
         # 새 데이터 — 렌더 캐시 무효화
         self._rendered_2d = False
@@ -796,6 +911,60 @@ class WaferCell(QFrame):
                     self._gl_boundary, self._gl_grid):
             if it is not None:
                 it.setVisible(False)
+
+    # ── ER Time 제어 ────────────────────────────────
+    def _recompute_v_eff(self) -> None:
+        """_v_raw → _v_in 계산. display.er_time_sec 이 있으면 `v / t` 적용."""
+        t = getattr(self._display, "er_time_sec", None)
+        if t and t > 0 and self._v_raw.size > 0:
+            self._v_in = self._v_raw / float(t)
+        else:
+            self._v_in = self._v_raw.copy()
+
+    def set_er_time(self, t: float | None) -> None:
+        """외부 (master → slave 동기화 / MainWindow) 에서 ER time 주입.
+
+        값 갱신 + LineEdit 텍스트 동기 + v_eff 재계산. 재렌더는 호출자 책임
+        (공통 Z-Scale 에선 전체 재렌더 필요해 개별 cell refresh 트리거 안 함).
+        signal emit 하지 않음 (재진입 방지).
+        """
+        self._display.er_time_sec = t if (t and t > 0) else None
+        txt = "" if self._display.er_time_sec is None else f"{self._display.er_time_sec:g}"
+        if self.le_time.text() != txt:
+            self.le_time.blockSignals(True)
+            self.le_time.setText(txt)
+            self.le_time.blockSignals(False)
+        self._recompute_v_eff()
+
+    def _on_time_edit_finished(self) -> None:
+        """QLineEdit editingFinished → time 파싱 + display 반영 + er_time_changed emit.
+
+        빈 문자열 / 0 / 음수 → None (변환 off). 값 변경 없으면 emit 안 함.
+        실제 재렌더는 MainWindow 가 Z-Scale 모드 보고 개별 / 전체 결정.
+        """
+        txt = self.le_time.text().strip()
+        new_t: float | None = None
+        if txt:
+            try:
+                val = float(txt)
+                if val > 0:
+                    new_t = val
+            except ValueError:
+                pass
+        prev = getattr(self._display, "er_time_sec", None)
+        if new_t == prev:
+            return
+        self._display.er_time_sec = new_t
+        self._recompute_v_eff()
+        self.er_time_changed.emit(new_t)
+
+    def set_delta_mode(self, is_delta: bool) -> None:
+        """DELTA 모드 여부 외부 주입 — er_row visibility 제어 + cell 높이 재계산."""
+        self._display.is_delta = bool(is_delta)
+        self._er_row.setVisible(bool(is_delta))
+        # setFixedSize 재계산 — er_row 높이 변화 반영
+        common = settings_io.load_settings().get("chart_common", {})
+        self._apply_chart_size(common)
 
     def _activate_current_view(self) -> None:
         """현재 _view_mode 인덱스로 stack 토글, 캐시 없으면 그때 한 번 그림."""
@@ -1408,26 +1577,26 @@ class WaferCell(QFrame):
 
     # ── Copy ──────────────────────────────────────
     def _copy_graph(self) -> None:
-        """WaferCell 영역을 화면에서 직접 픽셀 캡처해 클립보드로.
+        """_capture_container 영역을 화면에서 직접 픽셀 캡처해 클립보드로.
 
-        `QScreen.grabWindow`는 OS 합성 결과를 그대로 가져와서 Qt 일반 grab의
-        GL-transparent 이슈(검은 fb)와 grabFramebuffer의 alpha/jaggies 이슈를
-        모두 우회. 화면에 보이는 픽셀 그대로 = paste 결과.
+        ER 입력 등 캡처 외 UI 위젯 (er_row) 은 outer 레이아웃에 있어 crop 범위
+        밖 → 자동 제외. `QScreen.grabWindow`는 OS 합성 결과를 가져와 GL-transparent
+        / alpha / jaggies 이슈를 우회. 화면 픽셀 그대로 = paste 결과.
         """
+        cap = self._capture_container
         screen = self.screen() or QApplication.primaryScreen()
         if screen is None:
-            QApplication.clipboard().setPixmap(self.grab())
+            QApplication.clipboard().setPixmap(cap.grab())
             return
 
-        # 전체 스크린을 grab한 뒤 WaferCell 영역만 crop (device pixel ratio 반영)
         full_pm = screen.grabWindow(0)
         dpr = full_pm.devicePixelRatio()
-        tl_global = self.mapToGlobal(QPoint(0, 0))
+        tl_global = cap.mapToGlobal(QPoint(0, 0))
         screen_tl = screen.geometry().topLeft()
         x = int((tl_global.x() - screen_tl.x()) * dpr)
         y = int((tl_global.y() - screen_tl.y()) * dpr)
-        w = int(self.width() * dpr)
-        h = int(self.height() * dpr)
+        w = int(cap.width() * dpr)
+        h = int(cap.height() * dpr)
         cropped = full_pm.copy(x, y, w, h)
         cropped.setDevicePixelRatio(dpr)
         QApplication.clipboard().setPixmap(cropped)
