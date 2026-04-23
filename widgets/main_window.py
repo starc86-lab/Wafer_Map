@@ -929,6 +929,7 @@ class MainWindow(QMainWindow):
         cfg = _ls().get("chart_common", {})
         method = str(cfg.get("interp_method", "RBF-ThinPlate"))
         radial_width = float(cfg.get("radial_line_width_mm", 45.0))
+        radial_smooth = float(cfg.get("radial_smoothing_factor", 5))
         rings = max(5, int(cfg.get("radial_rings", 20)))
         seg = max(60, int(cfg.get("radial_seg", 180)))
         r_arr = np.linspace(0.0, R, rings + 1)
@@ -961,6 +962,7 @@ class MainWindow(QMainWindow):
                 rbf = make_interp(
                     x_arr[m], y_arr[m], v_arr[m], method=method,
                     radial_line_width_mm=radial_width,
+                    radial_smoothing_factor=radial_smooth,
                 )
                 z = rbf(sample_pts)
                 zf = z[np.isfinite(z)]

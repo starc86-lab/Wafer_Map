@@ -282,9 +282,16 @@ class ChartCommonGroup(QGroupBox):
         self.sp_rseg.setSingleStep(60)
         self.sp_rseg.setValue(int(cfg.get("radial_seg", 180)))
 
-        # 좌 컬럼: 콤보/체크 (컬러맵·보간·그래프 크기·소수점·1D Radial)
-        # 우 컬럼: 스핀 (Radial rings·Radial seg·Map Size·Edge cut)
-        # _populate_two_columns 는 half split — half=5 로 자동 분배됨.
+        # Radial 1D spline smoothing factor — 1~15. 낮을수록 산점도 추종,
+        # 높을수록 스무스 (나이테/노이즈 방지).
+        self.sp_radial_smooth = _limit_width(QSpinBox())
+        self.sp_radial_smooth.setRange(1, 15)
+        self.sp_radial_smooth.setSingleStep(1)
+        self.sp_radial_smooth.setValue(int(cfg.get("radial_smoothing_factor", 5)))
+
+        # 좌 컬럼: 콤보/체크 (컬러맵·보간·그래프 크기·소수점·1D Radial) — 5개
+        # 우 컬럼: 스핀 (Radial rings·seg·Map Size·Edge cut·Radial Smoothing) — 5개
+        # _populate_two_columns 는 half split — 10 items → half=5 로 균등.
         _populate_two_columns(self, [
             ("컬러맵", self.cb_cmap),
             ("보간 방법", self.cb_interp),
@@ -295,6 +302,7 @@ class ChartCommonGroup(QGroupBox):
             ("Radial: seg", self.sp_rseg),
             ("Map Size", self.sp_cam_dist),
             ("Edge cut", self.sb_edge_cut),
+            ("Radial Smoothing", self.sp_radial_smooth),
         ])
 
         self.cb_cmap.currentIndexChanged.connect(self.changed)
@@ -306,6 +314,7 @@ class ChartCommonGroup(QGroupBox):
         self.sb_edge_cut.valueChanged.connect(self.changed)
         self.chk_1d_radial.toggled.connect(self.changed)
         self.sp_cam_dist.valueChanged.connect(self.changed)
+        self.sp_radial_smooth.valueChanged.connect(self.changed)
 
     def gather(self) -> dict[str, Any]:
         w, h = self.cb_chart_size.currentData()
@@ -324,6 +333,7 @@ class ChartCommonGroup(QGroupBox):
             "edge_cut_mm": float(self.sb_edge_cut.value()),
             "show_1d_radial": self.chk_1d_radial.isChecked(),
             "camera_distance": int(self.sp_cam_dist.value()),
+            "radial_smoothing_factor": int(self.sp_radial_smooth.value()),
         })
         return result
 
@@ -332,7 +342,8 @@ class ChartCommonGroup(QGroupBox):
         widgets = (self.cb_cmap, self.cb_interp,
                    self.sp_rings, self.sp_rseg,
                    self.cb_chart_size, self.cb_decimals,
-                   self.sb_edge_cut, self.chk_1d_radial, self.sp_cam_dist)
+                   self.sb_edge_cut, self.chk_1d_radial, self.sp_cam_dist,
+                   self.sp_radial_smooth)
         for w in widgets:
             w.blockSignals(True)
         try:
@@ -355,6 +366,7 @@ class ChartCommonGroup(QGroupBox):
             self.sb_edge_cut.setValue(float(cfg.get("edge_cut_mm", 0.0)))
             self.chk_1d_radial.setChecked(bool(cfg.get("show_1d_radial", False)))
             self.sp_cam_dist.setValue(int(cfg.get("camera_distance", 550)))
+            self.sp_radial_smooth.setValue(int(cfg.get("radial_smoothing_factor", 5)))
         finally:
             for w in widgets:
                 w.blockSignals(False)

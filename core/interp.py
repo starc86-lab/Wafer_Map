@@ -139,18 +139,19 @@ def make_interp(
     method: str = "RBF-ThinPlate",
     smoothing: float = 0.0,
     radial_line_width_mm: float = 45.0,
+    radial_smoothing_factor: float = 5.0,
 ):
     """통합 보간기 팩토리 — 1D radial scan 자동 감지 → `RadialInterp` 또는 `make_rbf`.
 
     모두 `instance(pts_Nx2) → values_N` 인터페이스 제공.
 
     - 1D radial scan (`is_radial_scan` 통과): `RadialInterp` — 1D spline on r.
-      smoothing 은 내부 상수 (factor=10.0). 나이테 방지 목적. CMP 같은 radial
-      symmetric 공정에 최적.
+      `radial_smoothing_factor` (1~15) 로 스무스 정도 조절. 낮을수록 산점도
+      추종, 높을수록 스무스 (나이테 방지). Settings 에서 조정 가능.
     - 그 외: `make_rbf` — 2D RBF (기존 동작).
     """
     if is_radial_scan(x, y, line_width_mm=radial_line_width_mm):
-        return RadialInterp(x, y, v)
+        return RadialInterp(x, y, v, smoothing_factor=radial_smoothing_factor)
     return make_rbf(x, y, v, method=method, smoothing=smoothing)
 
 

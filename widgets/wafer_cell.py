@@ -833,10 +833,12 @@ class WaferCell(QFrame):
             return
         method = str(common.get("interp_method", "RBF-ThinPlate"))
         radial_width = float(common.get("radial_line_width_mm", 45.0))
+        radial_smooth = float(common.get("radial_smoothing_factor", 5))
         try:
             rbf = make_interp(
                 pts[m, 0], pts[m, 1], vals[m], method=method,
                 radial_line_width_mm=radial_width,
+                radial_smoothing_factor=radial_smooth,
             )
         except Exception:
             return
@@ -1005,10 +1007,12 @@ class WaferCell(QFrame):
             return
         method = str(common.get("interp_method", "RBF-ThinPlate"))
         radial_width = float(common.get("radial_line_width_mm", 45.0))
+        radial_smooth = float(common.get("radial_smoothing_factor", 5))
         try:
             rbf = make_interp(
                 pts[mask, 0], pts[mask, 1], vals[mask], method=method,
                 radial_line_width_mm=radial_width,
+                radial_smoothing_factor=radial_smooth,
             )
         except Exception:
             return
@@ -1227,7 +1231,10 @@ class WaferCell(QFrame):
         # (데이터 없는 구간을 flat 또는 외삽으로 표시하지 않음 = 과학 시각화 관례).
         from core.interp import RadialInterp
         try:
-            ri = RadialInterp(xm, ym, vm)
+            ri = RadialInterp(
+                xm, ym, vm,
+                smoothing_factor=float(common.get("radial_smoothing_factor", 5)),
+            )
             r_min = float(r.min())
             r_max = float(r.max())
             r_q = np.linspace(r_min, r_max, 200)
