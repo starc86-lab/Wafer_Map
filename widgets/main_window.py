@@ -69,6 +69,10 @@ class MainWindow(QMainWindow):
 
         self._result_a: ParseResult | None = None
         self._result_b: ParseResult | None = None
+        # 마지막 Run signature — 동일 입력 재Run 시 재렌더 skip (cell 재생성/RBF 재계산
+        # 비용 제거 + 카메라 각도·ER time 등 cell 내부 상태 보존). Settings/r-symmetry/
+        # Z-Scale 등 Run 과 무관한 변경은 즉시 반영 경로라 영향 없음.
+        self._last_run_signature: tuple | None = None
         self._main_splitter_restored = False
         self._preset_override: CoordPreset | None = None
 
@@ -682,6 +686,19 @@ class MainWindow(QMainWindow):
         y = xy[1] if xy else ""
         if not v:
             return
+
+        # Run 변경 감지 — 같은 입력이면 skip (cell 재생성 안 함 → 카메라/휠 zoom/
+        # ER time 등 cell 상태 유지 + RBF 재계산 비용 제거). signature 는 paste
+        # 텍스트 + 콤보 선택 조합. 좌표 preset/라이브러리 자동 적용은 paste+VALUE
+        # 로부터 결정론적이라 포함 불필요.
+        signature = (
+            self.paste_a.text(),
+            self.paste_b.text(),
+            v, x, y,
+        )
+        if signature == self._last_run_signature and self._result_panel.cells:
+            return
+        self._last_run_signature = signature
         # 좌표 콤보 비어있음 → 팝업 안내. 입력에 X/Y 없고 라이브러리 매칭도 없는 케이스.
         if not (x and y):
             QMessageBox.warning(

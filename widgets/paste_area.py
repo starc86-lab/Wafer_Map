@@ -140,6 +140,10 @@ class PasteArea(QWidget):
         if text:
             self._editor.setPlainText(text)
 
+    def text(self) -> str:
+        """현재 입력 텍스트 (strip 전). Run 변경 감지 용 signature 입력."""
+        return self._editor.toPlainText()
+
     def _on_text_changed(self) -> None:
         text = self._editor.toPlainText().strip()
         if not text:
