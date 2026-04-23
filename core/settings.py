@@ -77,6 +77,12 @@ def _migrate_chart_common(loaded: dict[str, Any]) -> None:
         c3d.pop("shading", None)
         c3d.pop("camera_fov", None)
         c3d.pop("x_stretch", None)
+        # camera_distance 는 chart_3d → chart_common 이동. chart_common 에 값이
+        # 없으면 chart_3d 값을 옮기고, 있으면 chart_3d 쪽만 제거.
+        if "camera_distance" in c3d:
+            if "camera_distance" not in common:
+                common["camera_distance"] = c3d["camera_distance"]
+            c3d.pop("camera_distance", None)
         # z_exaggeration None(자동) → 1.0 (동등 결과)
         if c3d.get("z_exaggeration") is None:
             c3d["z_exaggeration"] = 1.0

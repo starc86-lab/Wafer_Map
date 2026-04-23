@@ -215,6 +215,11 @@ class ChartCommonGroup(QGroupBox):
     def __init__(self, cfg: dict[str, Any], parent: QWidget | None = None) -> None:
         super().__init__("MAP 공통 설정", parent)
 
+        # UI 제거된 개발자 고정값 키들(show_circle/show_notch/notch_depth_mm/
+        # boundary_r_mm/show_scale_bar/radial_line_width_mm 등)을 gather() 때 다시
+        # 돌려주기 위한 원본 snapshot. reload() 시에도 갱신.
+        self._cfg_snapshot: dict[str, Any] = dict(cfg)
+
         self.cb_cmap = _limit_width(QComboBox())
         self.cb_cmap.addItems(HEATMAP_COLORMAPS)
         idx = self.cb_cmap.findText(cfg.get("colormap", "Turbo"))
@@ -301,7 +306,11 @@ class ChartCommonGroup(QGroupBox):
 
     def gather(self) -> dict[str, Any]:
         w, h = self.cb_chart_size.currentData()
-        return {
+        # UI 미관리 키(show_circle/notch/boundary_r_mm/...) 는 snapshot 에서 유지.
+        # DesignTab.gather() 가 chart_common 을 **통째 교체**하므로 snapshot merge
+        # 없이는 개발자 고정값들이 날아가서 DEFAULT fallback 됨.
+        result = dict(self._cfg_snapshot)
+        result.update({
             "colormap": self.cb_cmap.currentText(),
             "interp_method": self.cb_interp.currentText(),
             "radial_rings": int(self.sp_rings.value()),
@@ -312,9 +321,11 @@ class ChartCommonGroup(QGroupBox):
             "edge_cut_mm": float(self.sb_edge_cut.value()),
             "show_1d_radial": self.chk_1d_radial.isChecked(),
             "camera_distance": int(self.sp_cam_dist.value()),
-        }
+        })
+        return result
 
     def reload(self, cfg: dict[str, Any]) -> None:
+        self._cfg_snapshot = dict(cfg)
         widgets = (self.cb_cmap, self.cb_interp,
                    self.sp_rings, self.sp_rseg,
                    self.cb_chart_size, self.cb_decimals,
