@@ -289,10 +289,10 @@ DEFAULT_SETTINGS = {
     "font": "Segoe UI",
     "font_scale": 1.0,          # FONT_SIZES 전체 배율 (0.85 / 1.0 / 1.15 등)
 
-    # r-asymmetry (== force radial symmetric) 모드 — 메인 윈도우 체크박스 토글.
-    # 정상 2D 데이터를 1D fitting 곡선의 360° 회전으로 강제 radial 처리.
-    # collinear 자동 감지된 데이터는 체크해도 변화 없음.
-    "r_asymmetry_mode": False,
+    # r-symmetry mode — 메인 윈도우 체크박스 토글. **세션 휘발** (settings.json
+    # 저장 안 함, 앱 재시작 시 항상 False). 정상 2D 데이터를 1D fitting 곡선의
+    # 360° 회전으로 강제 radial 처리. collinear 자동 감지 데이터는 영향 없음.
+    "r_symmetry_mode": False,
 
     # 창 크기 (None이면 runtime 해상도 티어로 auto 결정)
     "window": {

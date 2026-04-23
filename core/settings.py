@@ -59,6 +59,11 @@ def _migrate_chart_common(loaded: dict[str, Any]) -> None:
 
     호환성 1회 마이그레이션. 다음 Save 시 정리됨.
     """
+    # r-symmetry 관련 키는 **세션 휘발** 원칙 — 저장돼 있으면 제거하고 항상 False 로
+    # 시작. 구 이름 `r_asymmetry_mode` 도 함께 청소.
+    loaded.pop("r_asymmetry_mode", None)
+    loaded.pop("r_symmetry_mode", None)
+
     common_keys = ("colormap", "interp_method", "grid_resolution", "show_circle")
     common = loaded.setdefault("chart_common", {})
     for src in ("chart_2d", "chart_3d"):
