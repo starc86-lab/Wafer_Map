@@ -456,8 +456,8 @@ class Chart1DRadialGroup(QGroupBox):
     def _sync_param_enable(self) -> None:
         """Fitting 방법 선택에 따라 관련 파라만 활성. 나머지는 라벨·위젯 회색.
 
-        Moving Avg Window 는 exact 보간 3종 + Univariate Spline 에서만 활성
-        (SavGol/LOWESS 는 내부 sliding 과 중복, Polynomial 은 전역 fit 이라 무의미).
+        Moving Avg Window 는 모든 method 에서 항상 활성 — 사용자가 0 입력하면
+        비활성이라 method-aware 로직 불필요 (사용자 판단에 맡김).
         """
         m = self.cb_radial_method.currentText()
         mapping = {
@@ -468,17 +468,13 @@ class Chart1DRadialGroup(QGroupBox):
             "Polynomial":        {self.lbl_polyfit, self.sp_polyfit_deg},
         }
         active = mapping.get(m, set())
-        # Moving Avg Window — exact 보간 3종 + Univariate 에서만 활성
-        bin_active_methods = {"Cubic Spline", "PCHIP", "Akima", "Univariate Spline"}
-        if m in bin_active_methods:
-            active = active | {self.lbl_bin_size, self.sp_bin_size}
+        # method 별 disable 대상 (Moving Avg Window 는 제외 — 항상 활성)
         all_items = (
             self.lbl_smooth, self.sp_radial_smooth,
             self.lbl_savgol_win, self.sp_savgol_win,
             self.lbl_savgol_poly, self.sp_savgol_poly,
             self.lbl_lowess_frac, self.sp_lowess_frac,
             self.lbl_polyfit, self.sp_polyfit_deg,
-            self.lbl_bin_size, self.sp_bin_size,
         )
         for w in all_items:
             w.setEnabled(w in active)
