@@ -282,12 +282,13 @@ class ChartCommonGroup(QGroupBox):
         self.sp_rseg.setSingleStep(60)
         self.sp_rseg.setValue(int(cfg.get("radial_seg", 180)))
 
-        # Radial 1D spline smoothing factor — 1~15. 낮을수록 산점도 추종,
-        # 높을수록 스무스 (나이테/노이즈 방지).
-        self.sp_radial_smooth = _limit_width(QSpinBox())
-        self.sp_radial_smooth.setRange(1, 15)
-        self.sp_radial_smooth.setSingleStep(1)
-        self.sp_radial_smooth.setValue(int(cfg.get("radial_smoothing_factor", 5)))
+        # Radial 1D spline smoothing factor — 0.0~15.0 (0.1 step).
+        # 낮을수록 산점도 추종, 높을수록 스무스. 0 = 정확 보간 (nearly zero smoothing).
+        self.sp_radial_smooth = _limit_width(QDoubleSpinBox())
+        self.sp_radial_smooth.setRange(0.0, 15.0)
+        self.sp_radial_smooth.setSingleStep(0.1)
+        self.sp_radial_smooth.setDecimals(1)
+        self.sp_radial_smooth.setValue(float(cfg.get("radial_smoothing_factor", 5.0)))
 
         # 좌 컬럼: 콤보/체크 (컬러맵·보간·그래프 크기·소수점·1D Radial) — 5개
         # 우 컬럼: 스핀 (Radial rings·seg·Map Size·Edge cut·Radial Smoothing) — 5개
@@ -333,7 +334,7 @@ class ChartCommonGroup(QGroupBox):
             "edge_cut_mm": float(self.sb_edge_cut.value()),
             "show_1d_radial": self.chk_1d_radial.isChecked(),
             "camera_distance": int(self.sp_cam_dist.value()),
-            "radial_smoothing_factor": int(self.sp_radial_smooth.value()),
+            "radial_smoothing_factor": float(self.sp_radial_smooth.value()),
         })
         return result
 
@@ -366,7 +367,7 @@ class ChartCommonGroup(QGroupBox):
             self.sb_edge_cut.setValue(float(cfg.get("edge_cut_mm", 0.0)))
             self.chk_1d_radial.setChecked(bool(cfg.get("show_1d_radial", False)))
             self.sp_cam_dist.setValue(int(cfg.get("camera_distance", 550)))
-            self.sp_radial_smooth.setValue(int(cfg.get("radial_smoothing_factor", 5)))
+            self.sp_radial_smooth.setValue(float(cfg.get("radial_smoothing_factor", 5.0)))
         finally:
             for w in widgets:
                 w.blockSignals(False)

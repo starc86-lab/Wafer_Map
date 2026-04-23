@@ -321,9 +321,9 @@ DEFAULT_SETTINGS = {
         # 직사각형에 모든 측정점 fit 되면 1D radial scan 으로 간주 → 1D spline 보간.
         # 그 외는 2D RBF. CMP 등 rotation symmetric 공정 라인 스캔이 주 사용처.
         "radial_line_width_mm": 45.0,
-        # Radial 1D spline smoothing factor — 1~15. 낮을수록 산점도 변화 추종,
-        # 높을수록 스무스(나이테/노이즈 방지). s = n × noise² × factor.
-        "radial_smoothing_factor": 5,
+        # Radial 1D spline smoothing factor — 0.0~15.0 (0.1 step). 낮을수록
+        # 산점도 추종, 높을수록 스무스. s = n × noise² × factor. 0 = 정확 보간.
+        "radial_smoothing_factor": 5.0,
         # 1D Radial Graph 표시 — 체크 시 2D/3D 그래프와 Summary 표 사이에 (r, v)
         # 산점도 + spline 실선 위젯 추가. Y축은 2D/3D 와 독립, 실측 min/max 기반.
         # 개별/공통 Z-scale 모드와 Z-Margin 은 1D 그래프끼리 동작 (2D/3D 와 별도 계산).
