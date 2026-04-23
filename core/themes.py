@@ -326,6 +326,9 @@ DEFAULT_SETTINGS = {
         # 산점도 + spline 실선 위젯 추가. Y축은 2D/3D 와 독립, 실측 min/max 기반.
         # 개별/공통 Z-scale 모드와 Z-Margin 은 1D 그래프끼리 동작 (2D/3D 와 별도 계산).
         "show_1d_radial": False,
+        # Map Size — 카메라 거리 (작을수록 확대). 2D top view / 3D 공통 적용.
+        # 기존 chart_3d.camera_distance 에서 이동 (2D/3D 공통 성격).
+        "camera_distance": 550,
     },
 
     # 2D MAP 전용 (공통은 chart_common 참조)
@@ -341,7 +344,9 @@ DEFAULT_SETTINGS = {
         "smooth": True,
         "z_exaggeration": 0.8,     # Z 과장 배율 (0.5~3.0, 1.0=기준)
         "show_grid": True,         # 바닥 그리드
-        "camera_distance": 550,    # 카메라 거리 (작을수록 확대, 400~800)
+        # View angle — 사용자 조정 가능 (이전엔 하드코딩). FOV=45 고정.
+        "elevation": 28,           # 수직 각도 (-90~90°)
+        "azimuth": -135,           # 수평 회전 (-180~180°). notch 4~5시 방향
     },
 
     # Summary 표

@@ -484,8 +484,12 @@ class WaferCell(QFrame):
 
         lay.addWidget(self._chart_box, stretch=1)
 
-        s = settings_io.load_settings().get("chart_3d", {})
-        cam_dist = float(s.get("camera_distance", 550))
+        _sfull = settings_io.load_settings()
+        _scommon = _sfull.get("chart_common", {})
+        _s3d = _sfull.get("chart_3d", {})
+        cam_dist = float(_scommon.get("camera_distance", 550))
+        elev_3d = float(_s3d.get("elevation", 28))
+        azim_3d = float(_s3d.get("azimuth", -135))
 
         # 2D top-view (radial) — plain GLViewWidget (Shift 동기 없음, 2D 는 의미 X).
         # 카메라는 3D 와 동일 파라미터 (distance, fov) — elevation 만 90 (top-down),
@@ -502,16 +506,19 @@ class WaferCell(QFrame):
         # 3D radial view
         self._gl_3d = _LockedGLView()
         self._gl_3d.setBackgroundColor("w")
-        self._gl_3d.setCameraPosition(distance=cam_dist, elevation=28, azimuth=-135)
+        self._gl_3d.setCameraPosition(distance=cam_dist, elevation=elev_3d, azimuth=azim_3d)
         self._gl_3d.opts["fov"] = 45
         self._gl_3d.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._gl_3d.customContextMenuRequested.connect(self._show_plot_menu)
         self._chart_box_layout.addWidget(self._gl_3d)    # index 1
 
-        # 마지막으로 settings 에서 적용한 camera_distance — 사용자 zoom 보존용.
-        # render 시 opts['distance'] 와 비교하면 zoom 때마다 초기화됨 → settings 값
-        # 변화 감지만 하도록 별도 추적.
+        # 마지막으로 settings 에서 적용한 값 — Settings 변경 감지용 tracker.
+        # render 시 opts['distance'] 와 비교하면 사용자 zoom 때마다 초기화 되는 버그
+        # 있어 별도 추적. 3D view angle 도 같이 추적 (Settings elevation/azimuth 변경
+        # 시 3D 카메라 재설정).
         self._applied_cam_dist: float = cam_dist
+        self._applied_elev_3d: float = elev_3d
+        self._applied_azim_3d: float = azim_3d
 
         self._chart_widget: QWidget = self._gl_2d  # 활성 위젯 추적
 
@@ -806,10 +813,9 @@ class WaferCell(QFrame):
 
         gview = self._gl_2d
 
-        # 카메라 distance — 3D 와 동일 값으로 동기화 (top view 가 3D 크기와 일치).
-        # Settings 값이 **바뀔 때만** 리셋 (사용자의 zoom 상태 보존).
-        chart3d = settings.get("chart_3d", {})
-        dist = float(chart3d.get("camera_distance", 550))
+        # Map Size (camera_distance) — 2D/3D 공통. Settings 값이 **바뀔 때만** 리셋
+        # (사용자의 zoom 상태 보존).
+        dist = float(common.get("camera_distance", 550))
         if dist != self._applied_cam_dist:
             gview.setCameraPosition(distance=dist)
             self._gl_3d.setCameraPosition(distance=dist)
@@ -971,13 +977,21 @@ class WaferCell(QFrame):
         common = settings.get("chart_common", {})
         chart3d = settings.get("chart_3d", {})
 
-        # 카메라 distance — Settings 값이 **바뀔 때만** 반영 (사용자의 휠 zoom 보존).
-        # opts['distance'] 대신 _applied_cam_dist 와 비교해야 함.
-        dist = float(chart3d.get("camera_distance", 550))
+        # 카메라 distance / elevation / azimuth — Settings 값이 **바뀔 때만** 반영
+        # (사용자의 휠 zoom / 드래그 회전 보존). opts 대신 _applied_* 트래커와 비교.
+        dist = float(common.get("camera_distance", 550))
         if dist != self._applied_cam_dist:
             self._gl_3d.setCameraPosition(distance=dist)
             self._gl_2d.setCameraPosition(distance=dist)
             self._applied_cam_dist = dist
+            self._gl_3d.update()
+
+        elev_3d = float(chart3d.get("elevation", 28))
+        azim_3d = float(chart3d.get("azimuth", -135))
+        if elev_3d != self._applied_elev_3d or azim_3d != self._applied_azim_3d:
+            self._gl_3d.setCameraPosition(elevation=elev_3d, azimuth=azim_3d)
+            self._applied_elev_3d = elev_3d
+            self._applied_azim_3d = azim_3d
             self._gl_3d.update()
 
         rings = max(5, int(common.get("radial_rings", 20)))
@@ -1288,8 +1302,12 @@ class WaferCell(QFrame):
         a_data = menu.addAction("Copy Data")
         chosen = menu.exec(chart.mapToGlobal(pos))
         if chosen is a_reset:
-            s = settings_io.load_settings().get("chart_3d", {})
-            dist = float(s.get("camera_distance", 550))
+            sall = settings_io.load_settings()
+            scom = sall.get("chart_common", {})
+            s3d = sall.get("chart_3d", {})
+            dist = float(scom.get("camera_distance", 550))
+            elev_3d = float(s3d.get("elevation", 28))
+            azim_3d = float(s3d.get("azimuth", -135))
             from pyqtgraph import Vector
             if chart is self._gl_2d:
                 chart.setCameraPosition(
@@ -1299,12 +1317,15 @@ class WaferCell(QFrame):
             else:  # _gl_3d
                 chart.setCameraPosition(
                     pos=Vector(0, 0, 0),
-                    distance=dist, elevation=28, azimuth=-135,
+                    distance=dist, elevation=elev_3d, azimuth=azim_3d,
                 )
             chart.opts["fov"] = 45
             chart.update()
             # Reset 시 applied 값도 동기 — 이후 render 에서 또 리셋 안 걸리게.
             self._applied_cam_dist = dist
+            if chart is self._gl_3d:
+                self._applied_elev_3d = elev_3d
+                self._applied_azim_3d = azim_3d
         elif chosen is a_graph:
             self._copy_graph()
         elif chosen is a_data:

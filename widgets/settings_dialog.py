@@ -242,15 +242,6 @@ class ChartCommonGroup(QGroupBox):
         self.sb_edge_cut.setValue(float(cfg.get("edge_cut_mm", 0.0)))
         _limit_width(self.sb_edge_cut)
 
-        self.chk_circle = _fix_width(QCheckBox())
-        self.chk_circle.setChecked(bool(cfg.get("show_circle", True)))
-
-        self.chk_notch = _fix_width(QCheckBox())
-        self.chk_notch.setChecked(bool(cfg.get("show_notch", True)))
-
-        self.chk_scale_bar = _fix_width(QCheckBox())
-        self.chk_scale_bar.setChecked(bool(cfg.get("show_scale_bar", True)))
-
         self.chk_1d_radial = _fix_width(QCheckBox())
         self.chk_1d_radial.setChecked(bool(cfg.get("show_1d_radial", False)))
 
@@ -268,27 +259,12 @@ class ChartCommonGroup(QGroupBox):
                 break
         self.cb_chart_size.setCurrentIndex(match_idx)
 
-        # Notch Depth 콤보 + "mm" 단위 라벨
-        self.cb_notch_depth = QComboBox()
-        for v in (3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0):
-            self.cb_notch_depth.addItem(f"{v:g}", v)
-        idx = self.cb_notch_depth.findData(float(cfg.get("notch_depth_mm", 5.0)))
-        self.cb_notch_depth.setCurrentIndex(idx if idx >= 0 else 4)
-        depth_row = QWidget()
-        _row = QHBoxLayout(depth_row)
-        _row.setContentsMargins(0, 0, 0, 0); _row.setSpacing(4)
-        _row.addWidget(_limit_width(self.cb_notch_depth))
-        _row.addWidget(QLabel("mm"))
-        _row.addStretch(1)
-
-        # 경계 원 반지름 — 150(mesh 와 동일) ~ 160 (mesh 바깥 여유). notch 는 이 원에만 표시
-        self.sb_boundary_r = QDoubleSpinBox()
-        self.sb_boundary_r.setRange(150.0, 160.0)
-        self.sb_boundary_r.setSingleStep(0.5)
-        self.sb_boundary_r.setDecimals(1)
-        self.sb_boundary_r.setSuffix(" mm")
-        self.sb_boundary_r.setValue(float(cfg.get("boundary_r_mm", 150.0)))
-        _limit_width(self.sb_boundary_r)
+        # Map Size — 카메라 거리 (작을수록 확대). 2D top view / 3D 공통 적용.
+        # 사용자 관점에서 "Map 크기" 가 직관적이라 라벨을 이렇게 표기.
+        self.sp_cam_dist = _limit_width(QSpinBox())
+        self.sp_cam_dist.setRange(400, 800)
+        self.sp_cam_dist.setSingleStep(10)
+        self.sp_cam_dist.setValue(int(cfg.get("camera_distance", 550)))
 
         # radial mesh 밀도 (2D·3D 공통)
         self.sp_rings = _limit_width(QSpinBox())
@@ -301,74 +277,48 @@ class ChartCommonGroup(QGroupBox):
         self.sp_rseg.setSingleStep(60)
         self.sp_rseg.setValue(int(cfg.get("radial_seg", 180)))
 
-        # 1D radial scan 자동 감지 폭 — 원점 중심 직사각형의 전체 폭 (mm).
-        # 내부적으로 half_width = width/2 로 쓰임. CMP 등 rotation symmetric
-        # 공정의 라인 스캔 감지용. 이 폭 안에 모든 점 fit → 1D spline 경로.
-        self.sb_radial_width = _limit_width(QDoubleSpinBox())
-        self.sb_radial_width.setRange(10.0, 150.0)
-        self.sb_radial_width.setSingleStep(5.0)
-        self.sb_radial_width.setDecimals(1)
-        self.sb_radial_width.setSuffix(" mm")
-        self.sb_radial_width.setValue(float(cfg.get("radial_line_width_mm", 45.0)))
-
         _populate_two_columns(self, [
             ("컬러맵", self.cb_cmap),
+            ("소수점 자릿수", self.cb_decimals),
+            ("1D Radial Graph", self.chk_1d_radial),
+            ("그래프 크기", self.cb_chart_size),
+            ("Map Size", self.sp_cam_dist),
             ("보간 방법", self.cb_interp),
-            ("경계 원", self.chk_circle),
-            ("Notch 표시", self.chk_notch),
-            ("Notch Depth", depth_row),
-            ("경계 원 반지름", self.sb_boundary_r),
             ("Radial: rings", self.sp_rings),
             ("Radial: seg", self.sp_rseg),
-            ("스케일바 표시", self.chk_scale_bar),
-            ("그래프 크기", self.cb_chart_size),
-            ("소수점 자릿수", self.cb_decimals),
             ("Edge cut", self.sb_edge_cut),
-            ("1D Scan 폭", self.sb_radial_width),
-            ("1D Radial Graph", self.chk_1d_radial),
         ])
 
         self.cb_cmap.currentIndexChanged.connect(self.changed)
         self.cb_interp.currentIndexChanged.connect(self.changed)
-        self.chk_circle.toggled.connect(self.changed)
-        self.chk_notch.toggled.connect(self.changed)
-        self.cb_notch_depth.currentIndexChanged.connect(self.changed)
-        self.sb_boundary_r.valueChanged.connect(self.changed)
         self.sp_rings.valueChanged.connect(self.changed)
         self.sp_rseg.valueChanged.connect(self.changed)
-        self.chk_scale_bar.toggled.connect(self.changed)
         self.cb_chart_size.currentIndexChanged.connect(self.changed)
         self.cb_decimals.currentIndexChanged.connect(self.changed)
         self.sb_edge_cut.valueChanged.connect(self.changed)
-        self.sb_radial_width.valueChanged.connect(self.changed)
         self.chk_1d_radial.toggled.connect(self.changed)
+        self.sp_cam_dist.valueChanged.connect(self.changed)
 
     def gather(self) -> dict[str, Any]:
         w, h = self.cb_chart_size.currentData()
         return {
             "colormap": self.cb_cmap.currentText(),
             "interp_method": self.cb_interp.currentText(),
-            "show_circle": self.chk_circle.isChecked(),
-            "show_notch": self.chk_notch.isChecked(),
-            "notch_depth_mm": float(self.cb_notch_depth.currentData()),
-            "boundary_r_mm": float(self.sb_boundary_r.value()),
             "radial_rings": int(self.sp_rings.value()),
             "radial_seg": int(self.sp_rseg.value()),
-            "show_scale_bar": self.chk_scale_bar.isChecked(),
             "chart_width": int(w),
             "chart_height": int(h),
             "decimals": int(self.cb_decimals.currentData()),
             "edge_cut_mm": float(self.sb_edge_cut.value()),
-            "radial_line_width_mm": float(self.sb_radial_width.value()),
             "show_1d_radial": self.chk_1d_radial.isChecked(),
+            "camera_distance": int(self.sp_cam_dist.value()),
         }
 
     def reload(self, cfg: dict[str, Any]) -> None:
-        widgets = (self.cb_cmap, self.cb_interp, self.chk_circle,
-                   self.chk_notch, self.cb_notch_depth, self.sb_boundary_r,
+        widgets = (self.cb_cmap, self.cb_interp,
                    self.sp_rings, self.sp_rseg,
-                   self.chk_scale_bar, self.cb_chart_size, self.cb_decimals,
-                   self.sb_edge_cut, self.sb_radial_width, self.chk_1d_radial)
+                   self.cb_chart_size, self.cb_decimals,
+                   self.sb_edge_cut, self.chk_1d_radial, self.sp_cam_dist)
         for w in widgets:
             w.blockSignals(True)
         try:
@@ -376,14 +326,8 @@ class ChartCommonGroup(QGroupBox):
             if idx >= 0: self.cb_cmap.setCurrentIndex(idx)
             idx = self.cb_interp.findText(cfg.get("interp_method", "RBF-ThinPlate"))
             if idx >= 0: self.cb_interp.setCurrentIndex(idx)
-            self.chk_circle.setChecked(bool(cfg.get("show_circle", True)))
-            self.chk_notch.setChecked(bool(cfg.get("show_notch", True)))
-            idx = self.cb_notch_depth.findData(float(cfg.get("notch_depth_mm", 5.0)))
-            if idx >= 0: self.cb_notch_depth.setCurrentIndex(idx)
-            self.sb_boundary_r.setValue(float(cfg.get("boundary_r_mm", 150.0)))
             self.sp_rings.setValue(int(cfg.get("radial_rings", 20)))
             self.sp_rseg.setValue(int(cfg.get("radial_seg", 180)))
-            self.chk_scale_bar.setChecked(bool(cfg.get("show_scale_bar", True)))
             cur_w = int(cfg.get("chart_width", 360))
             cur_h = int(cfg.get("chart_height", 280))
             for i in range(self.cb_chart_size.count()):
@@ -395,8 +339,8 @@ class ChartCommonGroup(QGroupBox):
             if idx >= 0:
                 self.cb_decimals.setCurrentIndex(idx)
             self.sb_edge_cut.setValue(float(cfg.get("edge_cut_mm", 0.0)))
-            self.sb_radial_width.setValue(float(cfg.get("radial_line_width_mm", 45.0)))
             self.chk_1d_radial.setChecked(bool(cfg.get("show_1d_radial", False)))
+            self.sp_cam_dist.setValue(int(cfg.get("camera_distance", 550)))
         finally:
             for w in widgets:
                 w.blockSignals(False)
@@ -501,34 +445,48 @@ class Chart3DGroup(QGroupBox):
         self.chk_grid = _fix_width(QCheckBox())
         self.chk_grid.setChecked(bool(cfg.get("show_grid", True)))
 
-        # 카메라 distance — SpinBox, 400~800, step 10
-        self.sp_cam_dist = _limit_width(QSpinBox())
-        self.sp_cam_dist.setRange(400, 800)
-        self.sp_cam_dist.setSingleStep(10)
-        self.sp_cam_dist.setValue(int(cfg.get("camera_distance", 550)))
+        # View angle: Elevation — 수직 시점각 (-90~90°). 0=수평, 90=정면위.
+        self.sp_elevation = _limit_width(QDoubleSpinBox())
+        self.sp_elevation.setRange(-90.0, 90.0)
+        self.sp_elevation.setSingleStep(1.0)
+        self.sp_elevation.setDecimals(0)
+        self.sp_elevation.setSuffix("°")
+        self.sp_elevation.setValue(float(cfg.get("elevation", 28)))
+
+        # View angle: Azimuth — 수평 회전 (-180~180°). -135=notch 4~5시 방향.
+        self.sp_azimuth = _limit_width(QDoubleSpinBox())
+        self.sp_azimuth.setRange(-180.0, 180.0)
+        self.sp_azimuth.setSingleStep(1.0)
+        self.sp_azimuth.setDecimals(0)
+        self.sp_azimuth.setSuffix("°")
+        self.sp_azimuth.setValue(float(cfg.get("azimuth", -135)))
 
         _populate_two_columns(self, [
             ("부드럽게 (smooth)", self.chk_smooth),
             ("Z-Height", self.sp_zexag),
             ("바닥 그리드", self.chk_grid),
-            ("카메라 거리", self.sp_cam_dist),
+            ("View angle: Elevation", self.sp_elevation),
+            ("View angle: Azimuth", self.sp_azimuth),
         ])
 
         self.chk_smooth.toggled.connect(self.changed)
         self.sp_zexag.valueChanged.connect(self.changed)
         self.chk_grid.toggled.connect(self.changed)
-        self.sp_cam_dist.valueChanged.connect(self.changed)
+        self.sp_elevation.valueChanged.connect(self.changed)
+        self.sp_azimuth.valueChanged.connect(self.changed)
 
     def gather(self) -> dict[str, Any]:
         return {
             "smooth": self.chk_smooth.isChecked(),
             "z_exaggeration": float(self.sp_zexag.value()),
             "show_grid": self.chk_grid.isChecked(),
-            "camera_distance": int(self.sp_cam_dist.value()),
+            "elevation": float(self.sp_elevation.value()),
+            "azimuth": float(self.sp_azimuth.value()),
         }
 
     def reload(self, cfg: dict[str, Any]) -> None:
-        widgets = (self.chk_smooth, self.sp_zexag, self.chk_grid, self.sp_cam_dist)
+        widgets = (self.chk_smooth, self.sp_zexag, self.chk_grid,
+                   self.sp_elevation, self.sp_azimuth)
         for w in widgets:
             w.blockSignals(True)
         try:
@@ -536,7 +494,8 @@ class Chart3DGroup(QGroupBox):
             cur_z = cfg.get("z_exaggeration", 1.0)
             self.sp_zexag.setValue(1.0 if cur_z is None else float(cur_z))
             self.chk_grid.setChecked(bool(cfg.get("show_grid", True)))
-            self.sp_cam_dist.setValue(int(cfg.get("camera_distance", 550)))
+            self.sp_elevation.setValue(float(cfg.get("elevation", 28)))
+            self.sp_azimuth.setValue(float(cfg.get("azimuth", -135)))
         finally:
             for w in widgets:
                 w.blockSignals(False)
