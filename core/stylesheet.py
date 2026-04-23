@@ -52,6 +52,18 @@ QWidget {{
     font-size: {F['body']}px;
 }}
 QLabel {{ background: transparent; }}
+QLabel:disabled {{ color: {t['text_sub']}; }}
+QSpinBox:disabled, QDoubleSpinBox:disabled,
+QComboBox:disabled, QLineEdit:disabled {{
+    background-color: {t['surface_alt']};
+    color: {t['text_sub']};
+    border: 1px solid {t['border']};
+}}
+QCheckBox:disabled {{ color: {t['text_sub']}; }}
+QCheckBox::indicator:disabled {{
+    background: {t['surface_alt']};
+    border-color: {t['border']};
+}}
 QListWidget {{
     background-color: {t['surface']};
     color: {t['text']};

@@ -331,6 +331,9 @@ DEFAULT_SETTINGS = {
         "savgol_polyorder": 3,
         # LOWESS — frac (로컬 창 비율, 0.05~1.0). 낮을수록 로컬, 높을수록 전역 스무스.
         "lowess_frac": 0.3,
+        # Polynomial fit — radial 1D 데이터에 단일 다항식 피팅. 차수 1~6.
+        # 반도체 radial profile 은 물리적으로 2~4차 패턴이라 3 기본.
+        "polyfit_degree": 3,
         # 1D Radial Graph 표시 — 체크 시 2D/3D 그래프와 Summary 표 사이에 (r, v)
         # 산점도 + spline 실선 위젯 추가. Y축은 2D/3D 와 독립, 실측 min/max 기반.
         # 개별/공통 Z-scale 모드와 Z-Margin 은 1D 그래프끼리 동작 (2D/3D 와 별도 계산).

@@ -29,6 +29,7 @@ RADIAL_METHODS = [
     "Akima",              # exact, 로컬 결정, 튜닝 없음
     "Savitzky-Golay",     # savgol_window + savgol_polyorder
     "LOWESS",             # lowess_frac
+    "Polynomial",         # polyfit_degree (차수만 튜닝)
 ]
 
 
@@ -154,6 +155,7 @@ class RadialInterp:
         savgol_window: int = 11,
         savgol_polyorder: int = 3,
         lowess_frac: float = 0.3,
+        polyfit_degree: int = 3,
     ):
         x = np.asarray(x, dtype=float)
         y = np.asarray(y, dtype=float)
@@ -192,12 +194,14 @@ class RadialInterp:
         self._fn = self._build_fn(
             r_u, v_u, v_lo, v_hi, method,
             smoothing_factor, savgol_window, savgol_polyorder, lowess_frac,
+            polyfit_degree,
         )
 
     @staticmethod
     def _build_fn(
         r_u, v_u, v_lo, v_hi, method,
         smoothing_factor, savgol_window, savgol_polyorder, lowess_frac,
+        polyfit_degree,
     ):
         try:
             if method == "Cubic Spline":
@@ -230,6 +234,11 @@ class RadialInterp:
                     r_u, v_sm, kind="linear", bounds_error=False,
                     fill_value=(float(v_sm[0]), float(v_sm[-1])),
                 )
+            if method == "Polynomial":
+                deg = max(1, min(int(polyfit_degree), r_u.size - 1))
+                coefs = np.polyfit(r_u, v_u, deg)
+                poly = np.poly1d(coefs)
+                return lambda rq: poly(rq)
             # 기본: Univariate Spline (smoothing factor)
             noise = _estimate_noise_1d(v_u)
             v_range = float(v_u.max() - v_u.min())
@@ -271,12 +280,13 @@ def make_interp(
     savgol_window: int = 11,
     savgol_polyorder: int = 3,
     lowess_frac: float = 0.3,
+    polyfit_degree: int = 3,
 ):
     """통합 보간기 팩토리 — 1D radial scan 자동 감지 → `RadialInterp` 또는 `make_rbf`.
 
     모두 `instance(pts_Nx2) → values_N` 인터페이스 제공.
 
-    - 1D radial scan: `RadialInterp(method=...)` — Settings 에서 6종 알고리즘 선택.
+    - 1D radial scan: `RadialInterp(method=...)` — Settings 에서 7종 알고리즘 선택.
     - 그 외: `make_rbf` — 2D RBF (기존 동작).
     """
     if is_radial_scan(x, y, line_width_mm=radial_line_width_mm):
@@ -287,6 +297,7 @@ def make_interp(
             savgol_window=savgol_window,
             savgol_polyorder=savgol_polyorder,
             lowess_frac=lowess_frac,
+            polyfit_degree=polyfit_degree,
         )
     return make_rbf(x, y, v, method=method, smoothing=smoothing)
 
