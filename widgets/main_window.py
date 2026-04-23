@@ -223,29 +223,21 @@ class MainWindow(QMainWindow):
         self.cb_zscale = QComboBox(); self.cb_zscale.addItems(["공통", "개별"])
         self.cb_zscale.setCurrentText("개별")  # 세션 디폴트 (저장 X)
 
-        # Z-Margin (%) — 공통 모드에서만 활성. matplotlib `ax.margins()` 관례:
-        # 데이터 min/max 양쪽에 padding 을 %로 추가. 중심값 midpoint 고정,
-        # range 를 (1 + pct/100) 배로 확장. 각 wafer 가 palette 전체를 덜 쓰게
-        # 되어 여러 wafer 비교 시 색/높이 대비가 부드러워짐.
-        _stored_pct = int(load_settings().get("chart_common", {}).get(
-            "z_range_expand_pct", 50
-        ))
-        self._z_range_pct_stored = _stored_pct   # 개별 모드 복귀 시 복원용
+        # Z-Margin (%) — matplotlib `ax.margins()` 관례. midpoint 고정 + range*(1+pct/100).
+        # 공통 / 개별 모드 각각 별도 세션 저장: 공통 default 20%, 개별 default 0%.
+        # 저장 안 함 (세션 휘발 — 앱 재시작 시 default).
+        self._z_margin_pct_common = 20
+        self._z_margin_pct_indiv = 0
+        self._last_zscale_mode = self.cb_zscale.currentText()  # "개별"
         self.lbl_z_range = QLabel("Z-Margin:")
         self.sp_z_range = QSpinBox()
         self.sp_z_range.setRange(0, 200)
         self.sp_z_range.setSingleStep(10)
         self.sp_z_range.setSuffix("%")
-        self.sp_z_range.setValue(_stored_pct if self.cb_zscale.currentText() == "공통" else 0)
+        _init_pct = (self._z_margin_pct_common if self._last_zscale_mode == "공통"
+                     else self._z_margin_pct_indiv)
+        self.sp_z_range.setValue(_init_pct)
         self.sp_z_range.setFixedWidth(72)
-        # 비활성 시 내부 배경도 회색처리 (Fusion 기본은 흰색 유지)
-        self.sp_z_range.setStyleSheet(
-            "QSpinBox:disabled { background-color: #e8e8e8; color: #999; }"
-        )
-        # 라벨도 같이 disable — 텍스트 자동 회색 (Qt 팔레트 disabled 색)
-        _is_common = self.cb_zscale.currentText() == "공통"
-        self.sp_z_range.setEnabled(_is_common)
-        self.lbl_z_range.setEnabled(_is_common)
         self.sp_z_range.valueChanged.connect(self._on_z_range_changed)
 
         self.btn_visualize = QPushButton("▶  Run Analysis")
@@ -924,9 +916,14 @@ class MainWindow(QMainWindow):
         1D radial graph (`z_range_1d`): 각 wafer 의 **실측 v** min/max 수집 후 공통 범위.
         Z-Margin pct 는 두 범위 각각 독립 적용 (midpoint 고정).
 
-        개별: 둘 다 None reset (cell이 자체 데이터로 계산).
+        개별: pct=0 이면 cell 이 자체 계산 (z_range=None). pct>0 이면 각 display
+        별 자체 min/max + margin 적용해서 z_range 주입 (공통과 같은 margin 메커니즘,
+        단 범위만 wafer 자체).
         """
-        if self.cb_zscale.currentText() != "공통":
+        is_common = self.cb_zscale.currentText() == "공통"
+        pct = int(self.sp_z_range.value())
+        if not is_common and pct == 0:
+            # 개별 + margin 없음 → cell 자체 계산 (기존 경로, 비용 절약)
             for d in displays:
                 d.z_range = None
                 d.z_range_1d = None
@@ -957,26 +954,25 @@ class MainWindow(QMainWindow):
         sample_pts = np.column_stack([(Rm * np.cos(Tm)).ravel(),
                                        (Rm * np.sin(Tm)).ravel()])
 
-        # 각 wafer 의 **개별 렌더 범위** (min/max) 수집 → 그 중 최소 min / 최대 max
-        # 로 공통 범위 결정. 개별 모드가 각 wafer 에 쓰는 범위와 동일 기준 사용.
-        # 동시에 실측 v 의 min/max 도 수집 → 1D radial graph Y 공통 범위.
-        all_mins: list[float] = []
-        all_maxes: list[float] = []
-        all_v_mins: list[float] = []
-        all_v_maxes: list[float] = []
+        # 각 wafer 의 **개별 렌더 범위** (min/max) 수집. 공통 모드 → 전체 min/max 로
+        # 공통 범위. 개별 모드 → 각 wafer 자체 범위 그대로 사용.
+        per_d_render: list[tuple[float, float] | None] = []
+        per_d_measured: list[tuple[float, float] | None] = []
         for d in displays:
             x_arr = np.asarray(d.x_mm, dtype=float)
             y_arr = np.asarray(d.y_mm, dtype=float)
             v_arr = np.asarray(d.values, dtype=float)
             m = ~np.isnan(v_arr) & ~np.isnan(x_arr) & ~np.isnan(y_arr)
             if m.sum() < 2:
+                per_d_render.append(None); per_d_measured.append(None)
                 continue
-            # 실측 v 범위 (1D graph Y 공통용)
             valid = v_arr[m]
-            if valid.size > 0:
-                all_v_mins.append(float(valid.min()))
-                all_v_maxes.append(float(valid.max()))
-            # 렌더 범위 (2D/3D 공통용)
+            # 실측 v 범위 (1D graph Y)
+            per_d_measured.append(
+                (float(valid.min()), float(valid.max())) if valid.size > 0 else None
+            )
+            # 렌더 범위 (2D/3D map Y)
+            rend: tuple[float, float] | None = None
             try:
                 rbf = make_interp(
                     x_arr[m], y_arr[m], v_arr[m], method=method,
@@ -993,21 +989,14 @@ class MainWindow(QMainWindow):
                 z = rbf(sample_pts)
                 zf = z[np.isfinite(z)]
                 if zf.size > 0:
-                    all_mins.append(float(zf.min()))
-                    all_maxes.append(float(zf.max()))
-                    continue
+                    rend = (float(zf.min()), float(zf.max()))
             except Exception:
                 pass
-            # RBF 실패 시 input 값 폴백
-            if valid.size > 0:
-                all_mins.append(float(valid.min()))
-                all_maxes.append(float(valid.max()))
+            if rend is None and valid.size > 0:
+                rend = (float(valid.min()), float(valid.max()))
+            per_d_render.append(rend)
 
         # Z-Margin — matplotlib margins() 관례. midpoint 고정 + range*(1+pct/100).
-        # pct=0 → 원본 min~max, pct=50 → range*1.5, pct=100 → range*2.0.
-        # 2D/3D 공통 z_range 와 1D graph z_range_1d 에 독립 적용.
-        pct = int(self.sp_z_range.value()) if self.sp_z_range.isEnabled() else 0
-
         def _margin(vmin: float, vmax: float) -> tuple[float, float]:
             if vmax <= vmin:
                 vmax = vmin + 1e-9
@@ -1017,12 +1006,21 @@ class MainWindow(QMainWindow):
                 return midpoint - half, midpoint + half
             return vmin, vmax
 
-        rendered_range = _margin(min(all_mins), max(all_maxes)) if all_mins else None
-        measured_range = _margin(min(all_v_mins), max(all_v_maxes)) if all_v_mins else None
-
-        for d in displays:
-            d.z_range = rendered_range
-            d.z_range_1d = measured_range
+        if is_common:
+            rend_vals = [r for r in per_d_render if r is not None]
+            meas_vals = [m for m in per_d_measured if m is not None]
+            rendered_range = _margin(min(r[0] for r in rend_vals),
+                                     max(r[1] for r in rend_vals)) if rend_vals else None
+            measured_range = _margin(min(m[0] for m in meas_vals),
+                                     max(m[1] for m in meas_vals)) if meas_vals else None
+            for d in displays:
+                d.z_range = rendered_range
+                d.z_range_1d = measured_range
+        else:
+            # 개별 + pct>0 — 각 wafer 자체 범위에 margin 적용
+            for d, rend, meas in zip(displays, per_d_render, per_d_measured):
+                d.z_range = _margin(*rend) if rend is not None else None
+                d.z_range_1d = _margin(*meas) if meas is not None else None
 
     def _open_settings(self) -> None:
         from widgets.settings_dialog import SettingsDialog
@@ -1066,19 +1064,22 @@ class MainWindow(QMainWindow):
         if mode:
             self._result_panel.set_view_mode(mode)
 
-    def _on_zscale_toggle(self, _mode: str) -> None:
-        """Z scale 콤보 변경 — z_range 갱신 후 2D/3D 양쪽 재렌더.
+    def _on_zscale_toggle(self, mode: str) -> None:
+        """Z scale 콤보 변경 — 이전 모드 Z-Margin 값 저장 + 새 모드 값 로드 + 재렌더.
 
-        z_range는 2D ImageItem levels(+colorbar)와 3D surface colors 모두에
-        영향. 양쪽 렌더 캐시 reset 필요 (보간 캐시는 유지되므로 빠름).
+        공통 / 개별 각각 별도 세션 저장 → 모드 간 전환 시 각자 마지막 값 복원.
         """
-        # Z-Margin 스핀박스 활성/비활성 + 값 토글 (개별 모드 → 0 회색, 공통 복귀 → 저장값)
-        is_common = self.cb_zscale.currentText() == "공통"
+        prev_pct = int(self.sp_z_range.value())
+        if self._last_zscale_mode == "공통":
+            self._z_margin_pct_common = prev_pct
+        else:
+            self._z_margin_pct_indiv = prev_pct
+        new_pct = (self._z_margin_pct_common if mode == "공통"
+                   else self._z_margin_pct_indiv)
         self.sp_z_range.blockSignals(True)
-        self.sp_z_range.setEnabled(is_common)
-        self.lbl_z_range.setEnabled(is_common)
-        self.sp_z_range.setValue(self._z_range_pct_stored if is_common else 0)
+        self.sp_z_range.setValue(new_pct)
         self.sp_z_range.blockSignals(False)
+        self._last_zscale_mode = mode
 
         cells = self._result_panel.cells
         if not cells:
@@ -1107,15 +1108,11 @@ class MainWindow(QMainWindow):
         self._result_panel.refresh_all()
 
     def _on_z_range_changed(self, value: int) -> None:
-        """Z-Margin 스핀박스 변경 — 저장값 갱신 + 재렌더. 공통 모드에서만 호출됨."""
-        if self.cb_zscale.currentText() != "공통":
-            return
-        self._z_range_pct_stored = int(value)
-        # settings.json 즉시 반영 (Settings 다이얼로그 경유 없이 직접 저장)
-        from core.settings import load_settings as _ls, save_settings as _ss
-        s = _ls()
-        s.setdefault("chart_common", {})["z_range_expand_pct"] = int(value)
-        _ss(s)
+        """Z-Margin 스핀박스 변경 — 현재 모드 세션값 갱신 + 재렌더. 저장 안 함."""
+        if self.cb_zscale.currentText() == "공통":
+            self._z_margin_pct_common = int(value)
+        else:
+            self._z_margin_pct_indiv = int(value)
         cells = self._result_panel.cells
         if not cells:
             return

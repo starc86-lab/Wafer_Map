@@ -63,6 +63,10 @@ def _migrate_chart_common(loaded: dict[str, Any]) -> None:
     # 시작. 구 이름 `r_asymmetry_mode` 도 함께 청소.
     loaded.pop("r_asymmetry_mode", None)
     loaded.pop("r_symmetry_mode", None)
+    # Z-Margin 도 세션 휘발 — 과거 저장돼 있으면 제거. 메인 윈도우 default 사용.
+    _cc_stale = loaded.get("chart_common")
+    if isinstance(_cc_stale, dict):
+        _cc_stale.pop("z_range_expand_pct", None)
 
     common_keys = ("colormap", "interp_method", "grid_resolution", "show_circle")
     common = loaded.setdefault("chart_common", {})
