@@ -1071,10 +1071,13 @@ class WaferCell(QFrame):
         # 웨이퍼 R=150 대비 10mm 여유.
         if chart3d.get("show_grid", True):
             if self._gl_grid is None:
-                self._gl_grid = gl.GLGridItem()
+                # glOptions='opaque' → depth write on → Min 값 근처에서 surface 가
+                # 그리드 위를 덮어도 grid 가 비쳐 보이지 않음 (default 'translucent'
+                # 는 depth write off 라서 항상 보임).
+                self._gl_grid = gl.GLGridItem(glOptions='opaque')
                 self._gl_grid.setSize(x=320, y=320)
                 self._gl_grid.setSpacing(x=40, y=40)
-                self._gl_grid.setColor((205, 205, 205, 150))
+                self._gl_grid.setColor((210, 210, 210, 255))
                 gview.addItem(self._gl_grid)
             self._gl_grid.setVisible(True)
         elif self._gl_grid is not None:

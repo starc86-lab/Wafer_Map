@@ -282,15 +282,18 @@ class ChartCommonGroup(QGroupBox):
         self.sp_rseg.setSingleStep(60)
         self.sp_rseg.setValue(int(cfg.get("radial_seg", 180)))
 
+        # 좌 컬럼: 콤보/체크 (컬러맵·보간·그래프 크기·소수점·1D Radial)
+        # 우 컬럼: 스핀 (Radial rings·Radial seg·Map Size·Edge cut)
+        # _populate_two_columns 는 half split — half=5 로 자동 분배됨.
         _populate_two_columns(self, [
             ("컬러맵", self.cb_cmap),
+            ("보간 방법", self.cb_interp),
+            ("그래프 크기", self.cb_chart_size),
             ("소수점 자릿수", self.cb_decimals),
             ("1D Radial Graph", self.chk_1d_radial),
-            ("그래프 크기", self.cb_chart_size),
-            ("Map Size", self.sp_cam_dist),
-            ("보간 방법", self.cb_interp),
             ("Radial: rings", self.sp_rings),
             ("Radial: seg", self.sp_rseg),
+            ("Map Size", self.sp_cam_dist),
             ("Edge cut", self.sb_edge_cut),
         ])
 
@@ -390,10 +393,11 @@ class Chart2DGroup(QGroupBox):
                 best_d, best_i = d, i
         self.cb_label_scale.setCurrentIndex(best_i)
 
+        # 좌: 체크(측정 좌표 표시·라벨 표시) / 우: 콤보(점 크기·라벨 크기)
         _populate_two_columns(self, [
-            ("측정점 표시", self.chk_points),
-            ("점 크기", self.cb_point),
+            ("측정 좌표 표시", self.chk_points),
             ("라벨 표시", self.chk_value_labels),
+            ("점 크기", self.cb_point),
             ("라벨 크기", self.cb_label_scale),
         ])
 
@@ -472,12 +476,14 @@ class Chart3DGroup(QGroupBox):
         self.sp_azimuth.setSuffix("°")
         self.sp_azimuth.setValue(float(cfg.get("azimuth", -135)))
 
+        # 좌: 스핀(Elevation·Azimuth·Z-Height) / 우: 체크(부드럽게·그리드)
+        # half=3 → 좌 3개, 우 2개.
         _populate_two_columns(self, [
-            ("부드럽게 (smooth)", self.chk_smooth),
-            ("Z-Height", self.sp_zexag),
-            ("바닥 그리드", self.chk_grid),
             ("View angle: Elevation", self.sp_elevation),
             ("View angle: Azimuth", self.sp_azimuth),
+            ("Z-Height", self.sp_zexag),
+            ("부드럽게 (smooth)", self.chk_smooth),
+            ("바닥 그리드", self.chk_grid),
         ])
 
         self.chk_smooth.toggled.connect(self.changed)

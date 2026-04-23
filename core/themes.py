@@ -342,11 +342,11 @@ DEFAULT_SETTINGS = {
     # 3D MAP 전용 (공통은 chart_common, Z 스케일은 메인 윈도우 컨트롤)
     "chart_3d": {
         "smooth": True,
-        "z_exaggeration": 0.8,     # Z 과장 배율 (0.5~3.0, 1.0=기준)
+        "z_exaggeration": 0.6,     # Z 과장 배율 (0.5~3.0, 1.0=기준)
         "show_grid": True,         # 바닥 그리드
         # View angle — 사용자 조정 가능 (이전엔 하드코딩). FOV=45 고정.
-        "elevation": 28,           # 수직 각도 (-90~90°)
-        "azimuth": -135,           # 수평 회전 (-180~180°). notch 4~5시 방향
+        "elevation": 45,           # 수직 각도 (-90~90°)
+        "azimuth": -90,            # 수평 회전 (-180~180°). notch 6시 방향
     },
 
     # Summary 표
