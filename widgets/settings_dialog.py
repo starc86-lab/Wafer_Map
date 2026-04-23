@@ -408,13 +408,17 @@ class Chart1DRadialGroup(QGroupBox):
         self.sp_polyfit_deg.setSingleStep(1)
         self.sp_polyfit_deg.setValue(int(cfg.get("polyfit_degree", 3)))
 
-        # Bin Average 전처리 — 0 = 비활성, 1~25 mm 구간별 평균 후 fitting.
-        # 모든 fitting 방법에 공통 적용 (method 선택과 독립).
+        # Moving Avg Window 전처리 — 각 측정점 중심 ±w/2 mm 내 평균으로 v 치환.
+        # 0 = 비활성, 1~25 mm. exact 보간 3종 (Cubic/PCHIP/Akima) + Univariate
+        # Spline 에서만 활성. SavGol/LOWESS 는 내부가 이미 sliding 이라 중복,
+        # Polynomial 은 전역 fit 이라 효과 미미 → 비활성 처리.
         self.sp_bin_size = _limit_width(QSpinBox())
         self.sp_bin_size.setRange(0, 25)
         self.sp_bin_size.setSingleStep(1)
         self.sp_bin_size.setSuffix(" mm")
         self.sp_bin_size.setValue(int(cfg.get("radial_bin_size_mm", 0)))
+
+        self.lbl_bin_size = _label("Moving Avg Window")
 
         # 라벨 인스턴스 — setEnabled(False) 시 QSS :disabled 규칙으로 회색화
         self.lbl_smooth = _label("Univariate Smoothing")
@@ -425,15 +429,14 @@ class Chart1DRadialGroup(QGroupBox):
 
         # 8 items, half=4 → 좌 4 / 우 4.
         # 좌: 1D Graph 표시 · Univariate Smoothing · SavGol Window · SavGol Polyorder
-        # 우: Fitting 방법    · Bin Average         · LOWESS Frac    · Polyfit Degree
-        # Bin Average 는 전처리라 모든 fitting 방법과 공통 적용 — 항상 활성.
+        # 우: Fitting 방법    · Moving Avg Window   · LOWESS Frac    · Polyfit Degree
         _populate_two_columns(self, [
             ("1D Graph 표시", self.chk_1d_radial),
             (self.lbl_smooth, self.sp_radial_smooth),
             (self.lbl_savgol_win, self.sp_savgol_win),
             (self.lbl_savgol_poly, self.sp_savgol_poly),
             ("Fitting 방법", self.cb_radial_method),
-            ("Bin Average", self.sp_bin_size),
+            (self.lbl_bin_size, self.sp_bin_size),
             (self.lbl_lowess_frac, self.sp_lowess_frac),
             (self.lbl_polyfit, self.sp_polyfit_deg),
         ])
@@ -451,7 +454,11 @@ class Chart1DRadialGroup(QGroupBox):
         self.sp_bin_size.valueChanged.connect(self.changed)
 
     def _sync_param_enable(self) -> None:
-        """Radial 방법 선택에 따라 관련 파라만 활성. 나머지는 라벨·위젯 회색."""
+        """Fitting 방법 선택에 따라 관련 파라만 활성. 나머지는 라벨·위젯 회색.
+
+        Moving Avg Window 는 exact 보간 3종 + Univariate Spline 에서만 활성
+        (SavGol/LOWESS 는 내부 sliding 과 중복, Polynomial 은 전역 fit 이라 무의미).
+        """
         m = self.cb_radial_method.currentText()
         mapping = {
             "Univariate Spline": {self.lbl_smooth, self.sp_radial_smooth},
@@ -461,12 +468,17 @@ class Chart1DRadialGroup(QGroupBox):
             "Polynomial":        {self.lbl_polyfit, self.sp_polyfit_deg},
         }
         active = mapping.get(m, set())
+        # Moving Avg Window — exact 보간 3종 + Univariate 에서만 활성
+        bin_active_methods = {"Cubic Spline", "PCHIP", "Akima", "Univariate Spline"}
+        if m in bin_active_methods:
+            active = active | {self.lbl_bin_size, self.sp_bin_size}
         all_items = (
             self.lbl_smooth, self.sp_radial_smooth,
             self.lbl_savgol_win, self.sp_savgol_win,
             self.lbl_savgol_poly, self.sp_savgol_poly,
             self.lbl_lowess_frac, self.sp_lowess_frac,
             self.lbl_polyfit, self.sp_polyfit_deg,
+            self.lbl_bin_size, self.sp_bin_size,
         )
         for w in all_items:
             w.setEnabled(w in active)

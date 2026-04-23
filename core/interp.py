@@ -172,22 +172,22 @@ class RadialInterp:
         with np.errstate(divide="ignore", invalid="ignore"):
             v_u = v_u / cnt
 
-        # Bin average 전처리 — 선택적. bin_size_mm > 0 이면 r 을 N mm 구간으로
-        # 분할해 각 구간 내 평균 v 로 치환 (비어있는 bin 은 건너뜀). 선택된
-        # fitting 방법은 이 binned 산점도에 그대로 적용.
+        # Moving Avg Window 전처리 — 선택적. bin_size_mm > 0 이면 각 측정점
+        # r_i 를 중심으로 ±w/2 범위 내 측정값 평균으로 v 를 치환. r 값 자체는
+        # 유지되므로 포인트 개수 / 위치 모두 원본 그대로, v 만 부드럽게.
+        #
+        # 비균일 r 간격에서도 자연스럽게 작동 (조밀 구간 → 평균 참여 점 많음,
+        # 희박 구간 → 적음). r_u 는 이미 정렬되어 있으므로 searchsorted 로
+        # 각 i 의 window bound 를 O(log n) 에 찾고, cumulative sum 으로 range
+        # 평균을 O(1) 에 계산 (총 O(n log n)).
         if bin_size_mm and bin_size_mm > 0 and r_u.size >= 2:
-            bw = float(bin_size_mm)
-            bin_idx = np.floor(r_u / bw).astype(int)
-            uniq_bins, inv_b = np.unique(bin_idx, return_inverse=True)
-            r_bin = np.zeros(uniq_bins.size, dtype=float)
-            v_bin = np.zeros(uniq_bins.size, dtype=float)
-            cnt_b = np.zeros(uniq_bins.size, dtype=float)
-            np.add.at(r_bin, inv_b, r_u)
-            np.add.at(v_bin, inv_b, v_u)
-            np.add.at(cnt_b, inv_b, 1)
+            half = float(bin_size_mm) / 2.0
+            lo = np.searchsorted(r_u, r_u - half, side="left")
+            hi = np.searchsorted(r_u, r_u + half, side="right")
+            cs = np.concatenate([[0.0], np.cumsum(v_u)])
+            cnt_win = (hi - lo).astype(float)
             with np.errstate(divide="ignore", invalid="ignore"):
-                r_u = r_bin / cnt_b
-                v_u = v_bin / cnt_b
+                v_u = (cs[hi] - cs[lo]) / np.maximum(cnt_win, 1.0)
 
         self._r_u = r_u
         self._v_u = v_u

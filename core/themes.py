@@ -334,9 +334,9 @@ DEFAULT_SETTINGS = {
         # Polynomial fit — radial 1D 데이터에 단일 다항식 피팅. 차수 1~6.
         # 반도체 radial profile 은 물리적으로 2~4차 패턴이라 3 기본.
         "polyfit_degree": 3,
-        # Fitting 전처리 — r 을 N mm 구간으로 binning 후 각 bin 내 평균값의
-        # 산점도로 치환 (선택된 fitting 방법은 그대로 적용). 0 = 비활성 (원본).
-        # 1~25 mm, step 1. 노이즈 많은 측정에서 1차 스무싱 용도.
+        # Moving Avg Window 전처리 — 각 측정점 r_i 중심 ±w/2 mm 내 평균으로 v 를
+        # 치환 (r 위치 유지, 값만 스무스). 0 = 비활성. exact 보간 3종 + Univariate
+        # 에서만 유효 (SavGol/LOWESS 는 내부 sliding 과 중복, Polynomial 은 전역 fit).
         "radial_bin_size_mm": 0,
         # 1D Radial Graph 표시 — 체크 시 2D/3D 그래프와 Summary 표 사이에 (r, v)
         # 산점도 + spline 실선 위젯 추가. Y축은 2D/3D 와 독립, 실측 min/max 기반.
