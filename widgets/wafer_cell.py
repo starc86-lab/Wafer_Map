@@ -1071,13 +1071,16 @@ class WaferCell(QFrame):
         # 웨이퍼 R=150 대비 10mm 여유.
         if chart3d.get("show_grid", True):
             if self._gl_grid is None:
-                # glOptions='opaque' → depth write on → Min 값 근처에서 surface 가
-                # 그리드 위를 덮어도 grid 가 비쳐 보이지 않음 (default 'translucent'
-                # 는 depth write off 라서 항상 보임).
+                # glOptions='opaque' → depth write on → surface 가 grid 위 덮을 때
+                # grid 가 숨음. default 'translucent' 는 depth write off 라서 항상 뚫림.
                 self._gl_grid = gl.GLGridItem(glOptions='opaque')
                 self._gl_grid.setSize(x=320, y=320)
                 self._gl_grid.setSpacing(x=40, y=40)
                 self._gl_grid.setColor((210, 210, 210, 255))
+                # Surface 의 z_disp = (z_raw - vmin_h) * factor 라 Min 지점이 z=0.
+                # grid 도 z=0 평면이라 정확히 겹쳐 z-fighting 으로 grid 가 뚫려 보임.
+                # grid 를 2mm 아래로 translate → surface 최저점이 grid 위에 확실히 위치.
+                self._gl_grid.translate(0, 0, -2.0)
                 gview.addItem(self._gl_grid)
             self._gl_grid.setVisible(True)
         elif self._gl_grid is not None:

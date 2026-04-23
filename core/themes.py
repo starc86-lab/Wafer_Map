@@ -345,7 +345,7 @@ DEFAULT_SETTINGS = {
         "z_exaggeration": 0.6,     # Z 과장 배율 (0.5~3.0, 1.0=기준)
         "show_grid": True,         # 바닥 그리드
         # View angle — 사용자 조정 가능 (이전엔 하드코딩). FOV=45 고정.
-        "elevation": 45,           # 수직 각도 (-90~90°)
+        "elevation": 40,           # 수직 각도 (-90~90°)
         "azimuth": -90,            # 수평 회전 (-180~180°). notch 6시 방향
     },
 
