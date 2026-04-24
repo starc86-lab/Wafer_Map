@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-현재 버전: **0.1.0** (첫 사용 가능 배포, 2026-04-20). 버전 이력은 [CHANGELOG.md](CHANGELOG.md) 참고, 사용자 가이드는 [USER_GUIDE.md](USER_GUIDE.md).
+현재 버전: **0.2.0** (FBO Copy Graph + 1D Radial + 3D radial mesh 등, 2026-04-25). 버전 이력은 [CHANGELOG.md](CHANGELOG.md) 참고, 사용자 가이드는 [USER_GUIDE.md](USER_GUIDE.md).
 
 ## 개발자 정보
 - 한국인, 코딩 중급 수준
@@ -392,7 +392,7 @@ Wafer Map/
 - Z-Height(`z_exaggeration`): 0.5~3.0, 0.1 step, 기본 1.0 (자동 옵션은 1.0과 동치라 제거)
 - 2D/3D 휠 zoom 활성 — pyqtgraph 기본 `wheelEvent` (distance 변경). 예전엔 `_LockedGLView.wheelEvent.ignore()` 로 3D 차단했었는데 `_applied_cam_dist` 트래커 도입 후 불필요해져 제거. `_render_*` 에서 Settings Map Size 와 `_applied_cam_dist` 비교 — 값 바뀔 때만 `setCameraPosition(distance=...)` 호출, 그 외엔 사용자 휠 zoom 상태 유지. Reset 메뉴로 카메라 초기화
 - 경계 원 `GLLinePlotItem`은 `glOptions='opaque'`로 둬야 뒤쪽이 가려짐 (기본 `translucent`는 depth-write off라 항상 보임)
-- **Copy Graph는 `QScreen.grabWindow(0)` + crop 방식** (WYSIWYG — MSAA/QSS/테마 그대로). `grabFramebuffer` + painter 합성은 jaggies/알파 leak 문제로 폐기. **Settings 창이 위에 뜨면 캡처에 포함되는 한계** 있어 임시로 `SettingsDialog(parent=None)`+`Qt.Window`로 transient owner 끊어 뒤로 가게 함 (tech debt — offscreen FBO 2x 렌더로 제대로 고치면 parent 원복)
+- **Copy Graph 는 offscreen FBO 렌더 방식** (0.2.0). `wafer_cell._capture_gl_offscreen(gl_view, scale=1)` 가 `QOpenGLFramebufferObject(MSAA=4)` 로 `gl_view.paint(region, viewport)` 호출 → `toImage()`. widget 이 스크롤에 가리거나 다른 창이 덮어도 완전 렌더. MSAA 4x 는 FBO format 에서 강제라 화면 `samples()=0` 환경도 캡처는 AA 적용. 합성: `_capture_container.grab()` 바탕 위에 FBO 이미지를 `chart.mapTo(cap)` 위치에 drawImage, 그 후 overlay (title / _colorbar / _badge_2d/3d) 를 각자 `.grab()` 해 drawPixmap 해 z-order 복원. `GLTextItem` 은 pyqtgraph 가 `QPainter(self.view())` 로 widget 에 직접 그려 FBO 에 반영 안 됨 → FBO 후처리에서 `compute_projection + align_text` 재현해 QImage 위에 `drawText`, QSS-resolved widget font family 를 `QFont.setFamily` 로 전파. `scale=1` 전제 (pxMode scatter/label 크기 보존 + widget.rect == FBO size). FBO 실패 시 기존 `QScreen.grabWindow(0)` crop 방식 폴백.
 - **Shift+좌클릭 다중 셀 동기**: press 순간 클릭 셀의 카메라(`elevation/azimuth/distance/center/fov`)를 전 셀에 복사 → 이어서 Shift 유지 드래그하면 실시간 전파. WeakSet 레지스트리로 인스턴스 자동 추적, `update()`만 재호출해 캐시 영향 없음
 - 2D `PlotWidget`: `setMouseEnabled(False, False)` + `setMenuEnabled(False)` + **`hideButtons()`로 좌하단 auto-range [A] 버튼 숨김** (누르면 크기 변화)
 - 렌더 AA: `app.py`에서 `QSurfaceFormat.setDefaultFormat(samples=4)` + `_LockedGLView.setFormat(samples=4)` — 드라이버/pyqtgraph 조합에 따라 안 먹을 수 있음
@@ -496,7 +496,7 @@ Wafer Map/
 - 디자인 설정 탭: `Default` 버튼 **탭 내부 좌측 하단 sticky** (다른 탭엔 안 보임)
 - 좌표 라이브러리 탭: 정렬 콤보 삭제 (헤더 클릭 정렬). `Default` 없음
 - 공통 하단 버튼: Save / Close만. Save는 저장만 (close 안 함)
-- **SettingsDialog(parent=None) + setMainWindow(self) 주입 + Qt.Window 플래그** — Copy Graph가 화면 캡처 방식이라 Settings 창이 위에 떠있으면 캡처에 포함되는 문제 회피. 3D Copy를 offscreen FBO 방식으로 고치면 parent=self 원복해야 함 (tech debt)
+- **SettingsDialog(parent=self)** — 0.2.0 FBO Copy Graph 전환으로 tech debt 해결. 이전엔 Settings 창이 위에 뜨면 화면 캡처에 포함되어 `parent=None + Qt.Window` 로 transient owner 끊었으나, FBO 는 화면 독립이라 원복. `_main_window` / `setMainWindow` 필드는 호환성 위해 유지하되 `parent()` fallback 만 동작.
 
 **렌더링 최적화 전반**
 상세 이력·측정 결과·실패·롤백 사례·pyqtgraph 내부 의존성은 **[docs/rendering_optimizations.md](docs/rendering_optimizations.md)** 참고 필수. 새 최적화 시도 전 "실패·롤백" 섹션부터 확인 — 같은 실수 반복 금지.

@@ -11,16 +11,21 @@ import numpy as np
 
 import pyqtgraph as pg
 import pyqtgraph.opengl as gl
-from PySide6.QtCore import QMimeData, QPoint, QRect, QRectF, Qt, Signal
+from PySide6.QtCore import QMimeData, QPoint, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import (
     QColor, QDoubleValidator, QFont, QFontMetrics, QImage, QLinearGradient,
     QPainter, QPalette, QPen, QPixmap,
+)
+from PySide6.QtOpenGL import (
+    QOpenGLFramebufferObject, QOpenGLFramebufferObjectFormat,
 )
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QFrame, QHBoxLayout, QHeaderView,
     QLabel, QLineEdit, QMenu, QStackedLayout, QStyledItemDelegate, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
+
+from OpenGL import GL as _GL
 
 from core import settings as settings_io
 from core.coords import WAFER_RADIUS_MM, filter_in_wafer
@@ -213,6 +218,77 @@ def _build_smooth_cylinder_wall(
     alpha = np.ones((rgb.shape[0], 1), dtype=np.float32)
     colors = np.concatenate([rgb, alpha], axis=1)
     return verts, faces, colors
+
+
+def _capture_gl_offscreen(gl_view: gl.GLViewWidget, scale: int = 1) -> QImage:
+    """GLViewWidget 을 offscreen FBO 에 렌더 → QImage.
+
+    - FBO format: MSAA 4x + CombinedDepthStencil
+    - 크기: `widget_size * scale` (scale=1 기본 — GLScatterPlotItem / GLTextItem
+      의 pxMode size 가 supersampling 시 상대적으로 작아지는 문제 회피)
+    - `paint(region, viewport)` 로 viewport override (pyqtgraph 0.14+ 공개 API)
+    - **GLTextItem 후처리**: pyqtgraph GLTextItem.paint 는 `QPainter(self.view())`
+      로 widget 본체에 직접 그림 → FBO 에 반영 안 됨. paint() 직후 GL state 가
+      FBO 기준으로 설정된 상태에서 GLTextItem 들을 QPainter 로 QImage 에 수동 재그림.
+
+    화면 표시 상태와 무관하게 paintGL 로직을 offscreen FBO 에 찍음.
+    스크롤에 가려지거나 다른 창이 덮어도 완전한 렌더 결과 확보.
+
+    실패 시 빈 QImage 반환 (호출자가 폴백 처리).
+    """
+    if gl_view is None:
+        return QImage()
+    try:
+        gl_view.makeCurrent()
+        try:
+            fmt = QOpenGLFramebufferObjectFormat()
+            fmt.setSamples(4)  # MSAA 4x (FBO 레벨 강제)
+            fmt.setAttachment(
+                QOpenGLFramebufferObject.Attachment.CombinedDepthStencil,
+            )
+            w = max(1, int(gl_view.width()) * scale)
+            h = max(1, int(gl_view.height()) * scale)
+            fbo = QOpenGLFramebufferObject(QSize(w, h), fmt)
+            if not fbo.bind():
+                return QImage()
+            _GL.glViewport(0, 0, w, h)
+            gl_view.paint(region=(0, 0, w, h), viewport=(0, 0, w, h))
+            img = fbo.toImage()  # MSAA auto-resolve → single-sample
+            fbo.release()
+
+            # GLTextItem 재그림 — scale=1 전제 (widget.rect == FBO size)
+            text_items = [
+                it for it in gl_view.items
+                if isinstance(it, gl.GLTextItem) and getattr(it, "text", "")
+            ]
+            if text_items and scale == 1:
+                from PySide6.QtGui import QFont, QVector3D
+                painter = QPainter(img)
+                painter.setRenderHints(
+                    QPainter.RenderHint.Antialiasing
+                    | QPainter.RenderHint.TextAntialiasing
+                )
+                # QSS 로 resolve 된 widget font family 를 FBO painter 에 전파.
+                # QImage painter 는 QApplication.font() 만 상속하고 widget font 는
+                # 모르므로, item.font 의 family 를 widget 기준으로 교체.
+                widget_family = gl_view.font().family()
+                for item in text_items:
+                    project = item.compute_projection()
+                    vec3 = QVector3D(*item.pos)
+                    text_pos = item.align_text(project.map(vec3).toPointF())
+                    font = QFont(item.font)
+                    if widget_family:
+                        font.setFamily(widget_family)
+                    painter.setPen(item.color)
+                    painter.setFont(font)
+                    painter.drawText(text_pos, item.text)
+                painter.end()
+
+            return img
+        finally:
+            gl_view.doneCurrent()
+    except Exception:
+        return QImage()
 
 
 class _LockedGLView(gl.GLViewWidget):
@@ -1658,29 +1734,85 @@ class WaferCell(QFrame):
 
     # ── Copy ──────────────────────────────────────
     def _copy_graph(self) -> None:
-        """_capture_container 영역을 화면에서 직접 픽셀 캡처해 클립보드로.
+        """_capture_container 합성 이미지를 클립보드로.
 
-        ER 입력 등 캡처 외 UI 위젯 (er_row) 은 outer 레이아웃에 있어 crop 범위
-        밖 → 자동 제외. `QScreen.grabWindow`는 OS 합성 결과를 가져와 GL-transparent
-        / alpha / jaggies 이슈를 우회. 화면 픽셀 그대로 = paste 결과.
+        - non-GL 부분 (QFrame border, 제목, 컬러바, 1D 라디얼, Summary 표):
+          `_capture_container.grab()` 으로 한 번에 캡처.
+        - GL 부분 (`_chart_widget` = _gl_2d 또는 _gl_3d):
+          `_capture_gl_offscreen(scale=2)` 로 MSAA 4x + 2x supersampling 렌더
+          → widget 크기로 downscale → QPainter 로 non-GL 픽맵 위에 덮어씌움.
+
+        장점:
+          - 화면 표시 상태 무관 (스크롤에 가려지거나 다른 창이 덮어도 정상)
+          - MSAA 4x 강제 (화면 widget 은 samples=0 인 환경도 FBO 는 4 확보)
+          - 2x supersampling 으로 edge 품질 개선
+
+        실패 시 기존 화면 캡처 경로 (grabWindow + crop) 로 폴백.
         """
         cap = self._capture_container
-        screen = self.screen() or QApplication.primaryScreen()
-        if screen is None:
-            QApplication.clipboard().setPixmap(cap.grab())
+        dpr = float(cap.devicePixelRatioF())
+
+        # 1. non-GL 부분 grab — GL widget 영역은 검정/최근 framebuffer 로 남지만
+        #    아래에서 FBO 이미지로 덮어씀. title/colorbar/badge 도 여기서 찍힘 (z-order)
+        #    이지만 drawImage 로 GL 영역 덮을 때 overlap 된 overlay 가 함께 지워지므로
+        #    마지막에 재그림.
+        pm = cap.grab()
+
+        # 2. GL widget FBO offscreen 렌더 (MSAA 4x, scale=1)
+        chart = self._chart_widget
+        gl_img = _capture_gl_offscreen(chart, scale=1) if chart is not None else QImage()
+
+        if gl_img.isNull():
+            # FBO 실패 — 기존 화면 캡처 방식 폴백
+            screen = self.screen() or QApplication.primaryScreen()
+            if screen is None:
+                QApplication.clipboard().setPixmap(pm)
+                return
+            full_pm = screen.grabWindow(0)
+            dpr2 = full_pm.devicePixelRatio()
+            tl_global = cap.mapToGlobal(QPoint(0, 0))
+            screen_tl = screen.geometry().topLeft()
+            x = int((tl_global.x() - screen_tl.x()) * dpr2)
+            y = int((tl_global.y() - screen_tl.y()) * dpr2)
+            w = int(cap.width() * dpr2)
+            h = int(cap.height() * dpr2)
+            cropped = full_pm.copy(x, y, w, h)
+            cropped.setDevicePixelRatio(dpr2)
+            QApplication.clipboard().setPixmap(cropped)
             return
 
-        full_pm = screen.grabWindow(0)
-        dpr = full_pm.devicePixelRatio()
-        tl_global = cap.mapToGlobal(QPoint(0, 0))
-        screen_tl = screen.geometry().topLeft()
-        x = int((tl_global.x() - screen_tl.x()) * dpr)
-        y = int((tl_global.y() - screen_tl.y()) * dpr)
-        w = int(cap.width() * dpr)
-        h = int(cap.height() * dpr)
-        cropped = full_pm.copy(x, y, w, h)
-        cropped.setDevicePixelRatio(dpr)
-        QApplication.clipboard().setPixmap(cropped)
+        # 3. GL 이미지를 chart 위치에 덮음 (chart_area 크기 = title 영역 포함 overlap)
+        gl_pos = chart.mapTo(cap, QPoint(0, 0))
+        painter = QPainter(pm)
+        painter.drawImage(
+            QPoint(int(gl_pos.x() * dpr), int(gl_pos.y() * dpr)),
+            gl_img,
+        )
+
+        # 4. Overlay 복원 — GL 이미지에 덮여 사라진 title/colorbar/badge 를 다시 그림
+        #    (z-order 의 "GL 위에 Qt widget overlay" 순서 보존)
+        overlays: list[QWidget] = []
+        if getattr(self, "_title", None) is not None:
+            overlays.append(self._title)
+        if getattr(self, "_colorbar", None) is not None:
+            overlays.append(self._colorbar)
+        for badge_attr in ("_badge_2d", "_badge_3d"):
+            b = getattr(self, badge_attr, None)
+            if b is not None and b.isVisible():
+                overlays.append(b)
+
+        for w in overlays:
+            if not w.isVisible():
+                continue
+            pos = w.mapTo(cap, QPoint(0, 0))
+            w_pm = w.grab()
+            painter.drawPixmap(
+                QPoint(int(pos.x() * dpr), int(pos.y() * dpr)),
+                w_pm,
+            )
+
+        painter.end()
+        QApplication.clipboard().setPixmap(pm)
 
     def _copy_data(self) -> None:
         lines = [f"X\tY\t{self._value_name}"]

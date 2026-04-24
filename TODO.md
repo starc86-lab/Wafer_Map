@@ -4,7 +4,20 @@
 
 ---
 
-## 1. 3D Copy Graph 품질 이슈 (최우선)
+## 1. ~~3D Copy Graph 품질 이슈~~ ✅ 0.2.0 해결
+
+**0.2.0 에서 시나리오 A (직접 FBO 관리) 로 해결**. `wafer_cell._capture_gl_offscreen` 참고.
+
+- ✅ jaggies: FBO format `setSamples(4)` 로 MSAA 4x 강제 (화면 `samples()=0` 환경 무관)
+- ✅ Settings 창 포함: FBO 는 화면 독립 → `SettingsDialog(parent=self)` 원복
+- ✅ floor/boundary 누락: `gl_view.paint(region, viewport)` 직접 호출로 `drawItemTree()` 그대로 실행
+- ✅ 스크롤/창 가림 (P1): widget 표시 상태 무관하게 paintGL 호출 가능
+- ✅ GLTextItem 누락: FBO 후처리로 `compute_projection + align_text` 재현 + widget font family 전파
+- ✅ 측정점 / 라벨 크기: `scale=1` 전제로 pxMode size 유지
+
+아래 원본 분석은 향후 동일 이슈 재발 시 참고용으로 보존.
+
+## 1-archive. (원본) 3D Copy Graph 품질 이슈
 
 ### 1.1 현상 두 가지
 
@@ -291,7 +304,7 @@ gl_view.paintGL = patched
 ## 5. 알려진 작은 버그 / 개선
 
 - [ ] 페이스트 시 RECIPE 가 공백만 있을 때 `find_by_recipe` 가 빈 문자열 매칭해서 엉뚱한 프리셋 주입할 위험 — 공백 체크 강화
-- [ ] `SettingsDialog(parent=None)` 로 인해 Settings 창이 실수로 메인 창보다 먼저 닫히면 refresh_graph 콜백이 안 갈 수 있는지 검증
+- ~~`SettingsDialog(parent=None)` 로 인해 Settings 창이 실수로 메인 창보다 먼저 닫히면 refresh_graph 콜백이 안 갈 수 있는지 검증~~ ✅ 0.2.0 에서 `parent=self` 원복으로 해결
 - [ ] 다크 테마 + PPT paste 에서 title/table 글자 색이 진한 회색(#444)/진한 회색(#222) 으로 괜찮은지 사용자 피드백 수집
 - [ ] **"데이터 0개인 파라미터가 1로 표시되는 케이스" 예외처리** — 실제 장비 데이터에서 흔함. `_row_values` 가 빈 셀만 있는 행에서도 한 개로 세거나 `MAX_DATA_ID=1` 등으로 표기되는 경우. 대응:
   - `n_actual == 0` (유효 값 없음) 또는 유효 값이 전부 NaN 이면 해당 PARAMETER 를 스킵하고 경고 누적

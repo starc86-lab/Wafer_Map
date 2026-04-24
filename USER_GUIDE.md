@@ -4,7 +4,7 @@
 
 ## 빠른 시작
 
-1. `Wafer_Map_0.1.0.zip` 압축 풀기 → 폴더 안의 `Wafer Map.exe` 실행 (무설치).
+1. `Wafer_Map_0.2.0.zip` 압축 풀기 → 폴더 안의 `Wafer Map.exe` 실행 (무설치).
 2. 계측 장비·Excel에서 **long-form CSV** (헤더 포함)를 전체 선택 → Ctrl+C.
 3. 앱의 **Input A** 영역에 Ctrl+V.
 4. VALUE / X / Y 콤보가 자동 선택됨. 필요 시 수동 변경.
@@ -48,7 +48,7 @@ VALUE 파싱은 되지만 X/Y 좌표가 입력에 없는 경우 대비.
 
 **그래프 우클릭 메뉴**:
 - **Copy Graph** — 그래프 + Summary 표 전체를 이미지로 Copy. PPT에 Ctrl+V로 사진 붙여넣기.
-  - 화면에 보이는 그대로 캡처되므로 **그래프가 다른 창에 가려지지 않도록 주의**.
+  - **0.2.0 부터 offscreen 렌더 방식**: 그래프가 다른 창에 가려지거나 스크롤에 숨어 있어도 완전한 이미지가 복사됨. MSAA 4x 로 가장자리도 부드럽게.
 - **Copy Data** — 측정점 raw 값 (X / Y / VALUE) → TSV. Excel 셀에 바로 붙여넣기.
 - **Copy Table** — Summary 표 → PPT 표로. HTML+TSV dual MIME.
 

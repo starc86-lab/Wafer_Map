@@ -1000,16 +1000,9 @@ class SettingsDialog(QDialog):
         self.setWindowTitle("Settings")
         self.resize(760, 740)
         self.setModal(False)
-        # QDialog 기본은 Qt.Dialog (parent에 transient로 묶여 항상 위). Window로 완전 대체해야
-        # 메인 윈도우 뒤로 갈 수 있음. 최소화·닫기 버튼 포함.
-        self.setWindowFlags(
-            Qt.WindowType.Window
-            | Qt.WindowType.WindowTitleHint
-            | Qt.WindowType.WindowSystemMenuHint
-            | Qt.WindowType.WindowMinimizeButtonHint
-            | Qt.WindowType.WindowCloseButtonHint
-        )
-        self._main_window: QWidget | None = None  # setMainWindow로 주입
+        # FBO 캡처 경로 도입으로 Settings 창이 Copy Graph 에 포함되던 이슈 해결됨.
+        # QDialog 기본 windowFlags (Qt.Dialog + transient owner 관계) 사용.
+        self._main_window: QWidget | None = None  # setMainWindow 호환성용 (현재 parent() 사용)
 
         settings = settings_io.load_settings()
         self._initial = dict(settings)

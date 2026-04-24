@@ -1157,12 +1157,11 @@ class MainWindow(QMainWindow):
 
     def _open_settings(self) -> None:
         from widgets.settings_dialog import SettingsDialog
-        # 논모달 + parent=None — Windows의 transient owner 관계 끊어 메인 뒤로 갈 수 있게.
-        # 파이썬 참조는 self._settings_dialog에 보관해 GC 방지.
+        # 논모달 + parent=self — FBO 캡처 경로로 전환되어 Settings 창이 위에 떠있어도
+        # Copy Graph 에 포함되지 않음. transient owner 우회 제거, 표준 Dialog 관계 복원.
         dlg = getattr(self, "_settings_dialog", None)
         if dlg is None or not dlg.isVisible():
-            dlg = SettingsDialog(parent=None)
-            dlg.setMainWindow(self)
+            dlg = SettingsDialog(parent=self)
             self._settings_dialog = dlg
         dlg.show()
         dlg.raise_()
