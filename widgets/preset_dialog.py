@@ -62,7 +62,9 @@ class PresetSelectDialog(QDialog):
         hdr = self._table.horizontalHeader()
         hdr.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         hdr.setStretchLastSection(True)
-        self._table.doubleClicked.connect(self.accept)
+        # 행 더블클릭 → 좌표 프리뷰 다이얼로그 (맵 + 좌표 표).
+        # 프리셋 적용(accept) 은 OK 버튼으로만 — 더블클릭은 "내용 보기" 용.
+        self._table.doubleClicked.connect(self._on_row_dbl_click)
 
         for i, p in enumerate(filtered):
             sim = recipe_similarity(p.recipe, current_recipe)
@@ -103,6 +105,20 @@ class PresetSelectDialog(QDialog):
         if sim > 0:
             return f"토큰 {sim}개"
         return "—"
+
+    def _on_row_dbl_click(self, index) -> None:
+        """행 더블클릭 → 좌표 프리뷰. 프리셋 적용은 OK 버튼으로만."""
+        row = index.row() if index is not None else -1
+        if row < 0 or row >= len(self._presets):
+            return
+        p = self._presets[row]
+        from widgets.coord_preview_dialog import CoordPreviewDialog
+        dlg = CoordPreviewDialog(
+            p.x_mm, p.y_mm,
+            title=f"{p.recipe} · {p.x_name}/{p.y_name} · {p.n_points}pt",
+            parent=self,
+        )
+        dlg.exec()
 
     def selected_preset(self) -> CoordPreset | None:
         row = self._table.currentRow()

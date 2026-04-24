@@ -817,6 +817,8 @@ class CoordLibraryTab(QWidget):
         self.btn_add.clicked.connect(self._on_add)
         self.btn_recipe.clicked.connect(self._on_recipe)
         self.btn_delete.clicked.connect(self._on_delete)
+        # 행 더블클릭 → 좌표 프리뷰 다이얼로그 (맵 + 좌표 표)
+        self._table.doubleClicked.connect(self._on_row_dbl_click)
 
         limits_box = QGroupBox("자동 정리")
         limits_form = QFormLayout(limits_box)
@@ -908,6 +910,23 @@ class CoordLibraryTab(QWidget):
             if isinstance(p, CoordPreset):
                 out.append(p)
         return out
+
+    def _on_row_dbl_click(self, index) -> None:
+        """행 더블클릭 → 좌표 프리뷰 (웨이퍼 맵 + 좌표 표) 다이얼로그."""
+        row = index.row() if index is not None else -1
+        if row < 0:
+            return
+        it = self._table.item(row, 0)
+        p = it.data(Qt.ItemDataRole.UserRole) if it is not None else None
+        if not isinstance(p, CoordPreset):
+            return
+        from widgets.coord_preview_dialog import CoordPreviewDialog
+        dlg = CoordPreviewDialog(
+            p.x_mm, p.y_mm,
+            title=f"{p.recipe} · {p.x_name}/{p.y_name} · {p.n_points}pt",
+            parent=self,
+        )
+        dlg.exec()
 
     def _on_add(self) -> None:
         from widgets.preset_add_dialog import PresetAddDialog
