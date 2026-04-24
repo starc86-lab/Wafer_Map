@@ -283,9 +283,15 @@ class _ColorBar(QWidget):
     _N_STOPS = 20   # QLinearGradient stop 수
     _N_TICKS = 5    # 라벨 수
 
-    def __init__(self) -> None:
-        super().__init__()
-        self.setFixedWidth(60)
+    _MIN_WIDTH = 60   # 기본 폭 (텍스트 짧을 때)
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setFixedWidth(self._MIN_WIDTH)
+        # 전역 QSS 의 QWidget { background-color } 규칙이 child 에도 적용돼 회색
+        # 배경이 되므로 인라인 QSS 로 투명 강제. WA_TranslucentBackground 는
+        # top-level 전용이라 child widget 에선 효과 없음.
+        self.setStyleSheet("background: transparent;")
         self._cmap: pg.ColorMap | None = None
         self._vmin: float = 0.0
         self._vmax: float = 1.0
@@ -300,14 +306,49 @@ class _ColorBar(QWidget):
         self._vmin = float(vmin)
         self._vmax = float(vmax)
         self._has_data = True
+        # 텍스트 최대 폭 실측 후 widget 폭 동적 조정 — 자릿수 많아지면 왼쪽으로
+        # 확장. parent (chart_box) 기준 오른쪽 정렬은 _reposition 이 처리.
+        import math as _math
+        tick_step = (self._vmax - self._vmin) / (self._N_TICKS - 1)
+        if tick_step > 0:
+            decimals = max(0, -int(_math.floor(_math.log10(tick_step))))
+        else:
+            decimals = 2
+        fmt = f"{{:.{decimals}f}}"
+        font = QFont("Arial")
+        font.setPixelSize(12)
+        fm = QFontMetrics(font)
+        max_text_w = 0
+        for i in range(self._N_TICKS):
+            t = i / (self._N_TICKS - 1)
+            val = self._vmax - t * (self._vmax - self._vmin)
+            max_text_w = max(max_text_w, fm.horizontalAdvance(fmt.format(val)))
+        needed_w = (self._BAR_RIGHT + self._BAR_W + self._LABEL_GAP
+                    + max_text_w + 4)
+        needed_w = max(self._MIN_WIDTH, needed_w)
+        if self.width() != needed_w:
+            self.setFixedWidth(needed_w)
+            self._reposition()
         self.update()
+
+    def _reposition(self) -> None:
+        """parent(chart_box) 오른쪽 정렬 + raise_ (chart 위 overlay).
+
+        y 좌표는 기존 값 유지 — cell 이 title_h 만큼 아래로 배치한 경우 그대로.
+        """
+        p = self.parent()
+        if p is None:
+            return
+        self.move(p.width() - self.width(), self.y())
+        self.raise_()
 
     def paintEvent(self, ev) -> None:
         if not self._has_data or self._cmap is None:
             return
         p = QPainter(self)
         try:
-            p.fillRect(self.rect(), QColor("white"))
+            # 배경 투명 — chart_box 의 child overlay 라 chart 가 뒤에서 비침.
+            # (WA_TranslucentBackground + fillRect 생략)
             w = self.width()
             h = self.height()
             bar_top = self._MARGIN_V
@@ -541,38 +582,46 @@ class WaferCell(QFrame):
         lay.setContentsMargins(6, 6, 6, 6)
         lay.setSpacing(4)
 
-        self._title = QLabel(display.title)
+        # title_stack — title + chart_box 를 같은 영역 absolute overlay. chart 가
+        # title 영역 침범 가능 (원이 title 뒤로 침투), title 은 raise_() 로 항상 위.
+        self._title_stack = QWidget()
+        self._title_stack.setStyleSheet("background: transparent;")
+        lay.addWidget(self._title_stack)
+
+        from core.themes import FONT_SIZES
+        self._title = QLabel(display.title, self._title_stack)
         self._title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         # 전역 QSS의 QWidget { font-size } 가 setFont()를 이기므로 인라인 CSS로 강제.
         # FONT_SIZES['body']는 font_scale 반영된 값이라 +4도 스케일 따라감.
-        from core.themes import FONT_SIZES
         title_px = FONT_SIZES.get("body", 14) + 3
         self._title.setStyleSheet(
             f"font-weight: bold; color: #111; font-size: {title_px}px;"
+            "background: transparent;"
         )
-        lay.addWidget(self._title)
+        self._title.move(0, 0)  # title_stack 내 상단 pin
 
-        # 차트 컨테이너 — [stacked(2D/3D)] + [colorbar] 좌우 배치. 하나의 패널로 통합.
-        # stacked: 2D/3D 위젯 둘 다 미리 생성, QStackedLayout으로 인덱스만 토글.
-        # colorbar: 2D/3D 공통, 매 렌더 시 (cmap, vmin, vmax)로 업데이트.
-        self._chart_box = QWidget()
-        _hbox = QHBoxLayout(self._chart_box)
-        _hbox.setContentsMargins(0, 0, 0, 0); _hbox.setSpacing(0)
-
-        self._chart_area = QWidget()
+        # 차트 컨테이너 — chart_area + colorbar 를 **absolute 배치**. chart_box 는
+        # title_stack 의 자식 (title 과 동일 영역) → chart 가 title 위로 침범 가능.
+        # colorbar 는 chart_box 오른쪽 끝 pin, 숫자 길면 왼쪽으로 확장 (overlay).
+        self._chart_box = QWidget(self._title_stack)
+        # chart_box 자체 투명 — 전역 QSS QWidget { background-color: bg } 가 회색
+        # 으로 보이는 걸 방지. capture_container 흰 배경이 뒤로 비침.
+        self._chart_box.setStyleSheet("background: transparent;")
+        self._chart_box.move(0, 0)   # title_stack 내 상단 pin (title 과 같은 y)
+        self._chart_area = QWidget(self._chart_box)
+        self._chart_area.move(0, 0)
         self._chart_box_layout = QStackedLayout(self._chart_area)
         self._chart_box_layout.setContentsMargins(0, 0, 0, 0)
-        _hbox.addWidget(self._chart_area, stretch=1)
 
-        self._colorbar = _ColorBar()
-        _hbox.addWidget(self._colorbar)
+        self._colorbar = _ColorBar(self._chart_box)   # chart_box 의 overlay 자식
 
-        lay.addWidget(self._chart_box, stretch=1)
+        # chart_box 는 title_stack 의 자식 → capture_container layout 에 별도 추가 안 함.
+        # title_stack 이 이미 lay 에 있으므로 chart_box 도 자동 포함.
 
         _sfull = settings_io.load_settings()
         _scommon = _sfull.get("chart_common", {})
         _s3d = _sfull.get("chart_3d", {})
-        cam_dist = float(_scommon.get("camera_distance", 550))
+        cam_dist = float(_scommon.get("camera_distance", 620))
         elev_3d = float(_s3d.get("elevation", 28))
         azim_3d = float(_s3d.get("azimuth", -135))
 
@@ -756,16 +805,41 @@ class WaferCell(QFrame):
         """
         w = int(common.get("chart_width", 360))
         h = int(common.get("chart_height", 280))
-        show_bar = bool(common.get("show_scale_bar", True))
-        bar_w = 60  # colorbar fixed width (0.8× of 75)
-        self._chart_area.setFixedSize(w, h)   # 항상 동일 → 3D viewport 고정
+        bar_w = 60  # colorbar 기본 폭
+        # title_stack 은 title + chart_box overlap container. chart_box 높이를
+        # title_h 만큼 위로 확장 → chart 원이 title 영역까지 침범 가능.
+        # title 은 raise_() 로 z-order 최상 (항상 chart 위).
+        # title 위에 padding_top 여백 — capture_container layout margin 6 위에 추가.
+        # 총 6 + 1 = 7px.
+        padding_top = 1
+        title_h = self._title.sizeHint().height()
+        stack_w = w + bar_w
+        stack_h = padding_top + title_h + h
+
+        self._title_stack.setFixedSize(stack_w, stack_h)
+        self._title.setFixedSize(stack_w, title_h)
+        self._title.move(0, padding_top)   # 상단 padding 만큼 아래로
+
+        self._chart_box.setFixedSize(stack_w, stack_h)
+        self._chart_box.move(0, 0)
+        # chart_area = (w + bar_w/2, stack_h) — chart_box 왼쪽 ¾ 차지. 세로는
+        # padding + title + chart 전체. 원 중심이 chart_area 세로 중앙.
+        self._chart_area.setFixedSize(w + bar_w // 2, stack_h)
+        self._chart_area.move(0, 0)
+
+        # colorbar 는 title 영역 아래부터 시작 — 높이 h, y=padding+title_h. title 침범 X.
         self._colorbar.setFixedHeight(h)
-        # 스케일바 해제 시엔 좌/우 margin으로 chart_area 중앙 정렬
-        hbox = self._chart_box.layout()
-        if show_bar:
-            hbox.setContentsMargins(0, 0, 0, 0)
-        else:
-            hbox.setContentsMargins(bar_w // 2, 0, bar_w // 2, 0)
+        self._colorbar.move(self._colorbar.x(), padding_top + title_h)
+        self._colorbar._reposition()  # x 오른쪽 정렬 (y 는 유지)
+
+        # title 이 chart_box / colorbar 위에 z-order 최상
+        self._title.raise_()
+
+        # r-symmetry 배지 — title 영역 바로 아래 (chart 영역 상단 좌측).
+        # title 위젯에는 침범하지 않음. chart_area 의 자식 GL widget 기준 pos.
+        badge_y = padding_top + title_h + 4
+        for b in (self._badge_2d, self._badge_3d):
+            b.move(8, badge_y)
         # 1D Radial Graph — show_1d_radial 체크 시 보이고, 높이 135px
         # 위젯은 cell content 꽉 채움. 플롯 centering 은 내부 좌/우 축 대칭으로.
         show_radial = bool(common.get("show_1d_radial", False))
@@ -781,10 +855,11 @@ class WaferCell(QFrame):
         # cell outer (self) 는 layout 이 자동 합산 (_capture_container + er_row).
         # 이전에 self.setFixedSize 로 total_h 를 계산했는데 inner layout 의 spacing 수
         # (radial 숨김 여부 등) 가 동적이라 계산이 어긋나 chart 가 잘리는 버그.
+        # title_h + padding_top 은 위 title_stack 과 일관. title 위 6px 여백 포함.
         title_h = self._title.sizeHint().height()
         table_h = self._table.height()
         cap_w = w + bar_w + 6 * 2              # inner margin 6+6
-        cap_h = title_h + h + radial_h + table_h + 6 * 2 + 4 * 2
+        cap_h = padding_top + title_h + h + radial_h + table_h + 6 * 2 + 4 * 2
         self._capture_container.setFixedSize(cap_w, cap_h)
         # cell outer — 폭은 capture 와 동일, 높이는 자유 (layout 이 capture + er_row 합산)
         self.setFixedWidth(cap_w)
@@ -1010,7 +1085,7 @@ class WaferCell(QFrame):
 
         # Map Size (camera_distance) — 2D/3D 공통. Settings 값이 **바뀔 때만** 리셋
         # (사용자의 zoom 상태 보존).
-        dist = float(common.get("camera_distance", 550))
+        dist = float(common.get("camera_distance", 620))
         if dist != self._applied_cam_dist:
             gview.setCameraPosition(distance=dist)
             self._gl_3d.setCameraPosition(distance=dist)
@@ -1189,7 +1264,7 @@ class WaferCell(QFrame):
 
         # 카메라 distance / elevation / azimuth — Settings 값이 **바뀔 때만** 반영
         # (사용자의 휠 zoom / 드래그 회전 보존). opts 대신 _applied_* 트래커와 비교.
-        dist = float(common.get("camera_distance", 550))
+        dist = float(common.get("camera_distance", 620))
         if dist != self._applied_cam_dist:
             self._gl_3d.setCameraPosition(distance=dist)
             self._gl_2d.setCameraPosition(distance=dist)
@@ -1542,7 +1617,7 @@ class WaferCell(QFrame):
             sall = settings_io.load_settings()
             scom = sall.get("chart_common", {})
             s3d = sall.get("chart_3d", {})
-            dist = float(scom.get("camera_distance", 550))
+            dist = float(scom.get("camera_distance", 620))
             elev_3d = float(s3d.get("elevation", 28))
             azim_3d = float(s3d.get("azimuth", -135))
             from pyqtgraph import Vector

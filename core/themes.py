@@ -348,7 +348,7 @@ DEFAULT_SETTINGS = {
         "show_1d_radial": False,
         # Map Size — 카메라 거리 (작을수록 확대). 2D top view / 3D 공통 적용.
         # 기존 chart_3d.camera_distance 에서 이동 (2D/3D 공통 성격).
-        "camera_distance": 550,
+        "camera_distance": 620,
     },
 
     # 2D MAP 전용 (공통은 chart_common 참조)

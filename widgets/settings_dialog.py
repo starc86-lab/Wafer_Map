@@ -289,7 +289,7 @@ class ChartCommonGroup(QGroupBox):
         self.sp_cam_dist = _limit_width(QSpinBox())
         self.sp_cam_dist.setRange(400, 800)
         self.sp_cam_dist.setSingleStep(10)
-        self.sp_cam_dist.setValue(int(cfg.get("camera_distance", 550)))
+        self.sp_cam_dist.setValue(int(cfg.get("camera_distance", 620)))
 
         # radial mesh 밀도 (2D·3D 공통)
         self.sp_rings = _limit_width(QSpinBox())
@@ -366,7 +366,7 @@ class ChartCommonGroup(QGroupBox):
             if idx >= 0:
                 self.cb_decimals.setCurrentIndex(idx)
             self.sb_edge_cut.setValue(float(cfg.get("edge_cut_mm", 0.0)))
-            self.sp_cam_dist.setValue(int(cfg.get("camera_distance", 550)))
+            self.sp_cam_dist.setValue(int(cfg.get("camera_distance", 620)))
         finally:
             for w in widgets:
                 w.blockSignals(False)

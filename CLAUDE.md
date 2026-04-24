@@ -390,10 +390,9 @@ Wafer Map/
 - 셰이더는 `shaded` 하드코딩. (normalColor/heightColor는 콤보 변경해도 시각적 효과 의미 없거나 컬러맵 무시되어 제거)
 - 카메라: FOV=45 고정, x_stretch=1.0 고정 (Settings에서 제거). `camera_distance`(= Map Size, chart_common, 400~800 step 10, 기본 550) · `elevation`(chart_3d, -90~90°, 기본 28) · `azimuth`(chart_3d, -180~180°, 기본 -135) Settings UI 노출
 - Z-Height(`z_exaggeration`): 0.5~3.0, 0.1 step, 기본 1.0 (자동 옵션은 1.0과 동치라 제거)
-- 3D 휠 zoom 비활성: `_LockedGLView.wheelEvent`가 `ev.ignore()` — 사이즈 고정이 깨지지 않게
+- 2D/3D 휠 zoom 활성 — pyqtgraph 기본 `wheelEvent` (distance 변경). 예전엔 `_LockedGLView.wheelEvent.ignore()` 로 3D 차단했었는데 `_applied_cam_dist` 트래커 도입 후 불필요해져 제거. `_render_*` 에서 Settings Map Size 와 `_applied_cam_dist` 비교 — 값 바뀔 때만 `setCameraPosition(distance=...)` 호출, 그 외엔 사용자 휠 zoom 상태 유지. Reset 메뉴로 카메라 초기화
 - 경계 원 `GLLinePlotItem`은 `glOptions='opaque'`로 둬야 뒤쪽이 가려짐 (기본 `translucent`는 depth-write off라 항상 보임)
 - **Copy Graph는 `QScreen.grabWindow(0)` + crop 방식** (WYSIWYG — MSAA/QSS/테마 그대로). `grabFramebuffer` + painter 합성은 jaggies/알파 leak 문제로 폐기. **Settings 창이 위에 뜨면 캡처에 포함되는 한계** 있어 임시로 `SettingsDialog(parent=None)`+`Qt.Window`로 transient owner 끊어 뒤로 가게 함 (tech debt — offscreen FBO 2x 렌더로 제대로 고치면 parent 원복)
-- `_LockedGLView`는 `wheelEvent.ignore()` + `Reset` 메뉴로 카메라 초기화
 - **Shift+좌클릭 다중 셀 동기**: press 순간 클릭 셀의 카메라(`elevation/azimuth/distance/center/fov`)를 전 셀에 복사 → 이어서 Shift 유지 드래그하면 실시간 전파. WeakSet 레지스트리로 인스턴스 자동 추적, `update()`만 재호출해 캐시 영향 없음
 - 2D `PlotWidget`: `setMouseEnabled(False, False)` + `setMenuEnabled(False)` + **`hideButtons()`로 좌하단 auto-range [A] 버튼 숨김** (누르면 크기 변화)
 - 렌더 AA: `app.py`에서 `QSurfaceFormat.setDefaultFormat(samples=4)` + `_LockedGLView.setFormat(samples=4)` — 드라이버/pyqtgraph 조합에 따라 안 먹을 수 있음
@@ -547,7 +546,7 @@ Wafer Map/
 **차트 사이즈 / 셀 통합**
 - `chart_common.chart_width × chart_height` 고정. 비율 360:280 (대 432×336 / 중 360×280 / 소 288×224).
 - `WaferCell(QFrame)` `setObjectName("waferCell")` + `border: 1px solid #bfbfbf` 통합 패널. 제목 + 차트 + 컬러바 + Summary 표를 한 박스로 묶어 Copy Graph가 합성 이미지 한 장.
-- `_chart_box = QStackedLayout(2D pyqtgraph / 3D _LockedGLView)` — `setCurrentIndex`로 즉시 토글, 3D는 휠 zoom 비활성.
+- `_chart_box = QStackedLayout(2D pyqtgraph / 3D _LockedGLView)` — `setCurrentIndex`로 즉시 토글. 2D/3D 모두 휠 zoom 활성.
 
 **웨이퍼 notch 표시**
 - `chart_common.show_notch` (default on) + `notch_depth_mm` (3~6mm, default 5mm). 방향은 6시(3π/2) 고정, V자 폭 ±3°.
