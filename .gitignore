@@ -24,4 +24,6 @@ cache/
 build/
 dist/
 *.spec
+# 표준 빌드 스펙만 track (실험용 임시 spec 들은 계속 무시)
+!Wafer Map.spec
 Wafer_Map_*.zip
