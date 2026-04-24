@@ -1228,11 +1228,11 @@ class WaferCell(QFrame):
         if chart.get("show_value_labels", False):
             tbl = settings.get("table", {})
             decimals = int(common.get("decimals", tbl.get("decimals", 2)))
-            # 라벨 폰트 크기 — chart_2d.label_font_scale (0.85 / 1.0 / 1.15) × base 8pt
+            # 라벨 폰트 크기 — chart_2d.label_font_scale (0.85 / 1.0 / 1.15) × base 9pt
             scale = float(chart.get("label_font_scale", 0.85))
             from PySide6.QtGui import QFont
             label_font = QFont()
-            label_font.setPointSize(max(5, int(round(8 * scale))))
+            label_font.setPointSize(max(5, int(round(9 * scale))))
             for x, y, val in zip(x_in, y_in, v_in):
                 if np.isnan(val):
                     continue
