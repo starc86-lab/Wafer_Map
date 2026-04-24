@@ -331,15 +331,18 @@ class _ColorBar(QWidget):
             self._reposition()
         self.update()
 
+    _RIGHT_PAD = 4   # 오른쪽 여유 4px
+
     def _reposition(self) -> None:
         """parent(chart_box) 오른쪽 정렬 + raise_ (chart 위 overlay).
 
         y 좌표는 기존 값 유지 — cell 이 title_h 만큼 아래로 배치한 경우 그대로.
+        x 는 right padding 적용.
         """
         p = self.parent()
         if p is None:
             return
-        self.move(p.width() - self.width(), self.y())
+        self.move(p.width() - self.width() - self._RIGHT_PAD, self.y())
         self.raise_()
 
     def paintEvent(self, ev) -> None:
@@ -827,17 +830,20 @@ class WaferCell(QFrame):
         self._chart_area.setFixedSize(w + bar_w // 2, stack_h)
         self._chart_area.move(0, 0)
 
-        # colorbar 는 title 영역 아래부터 시작 — 높이 h, y=padding+title_h. title 침범 X.
-        self._colorbar.setFixedHeight(h)
+        # colorbar: y=padding+title_h (title 아래 시작). 높이는 원 하단까지 축소.
+        # 원 하단 y = stack_h/2 + h/2. colorbar 시작 = padding+title_h.
+        # colorbar height = (stack_h + h)/2 - (padding+title_h) = h - (padding+title_h)/2.
+        cb_height = h - (padding_top + title_h) // 2
+        self._colorbar.setFixedHeight(cb_height)
         self._colorbar.move(self._colorbar.x(), padding_top + title_h)
         self._colorbar._reposition()  # x 오른쪽 정렬 (y 는 유지)
 
         # title 이 chart_box / colorbar 위에 z-order 최상
         self._title.raise_()
 
-        # r-symmetry 배지 — title 영역 바로 아래 (chart 영역 상단 좌측).
-        # title 위젯에는 침범하지 않음. chart_area 의 자식 GL widget 기준 pos.
-        badge_y = padding_top + title_h + 4
+        # r-symmetry 배지 — 좌측 하단. chart_area 의 자식 GL widget 기준 pos.
+        bh = self._badge_2d.sizeHint().height()
+        badge_y = stack_h - bh - 4
         for b in (self._badge_2d, self._badge_3d):
             b.move(8, badge_y)
         # 1D Radial Graph — show_1d_radial 체크 시 보이고, 높이 135px
