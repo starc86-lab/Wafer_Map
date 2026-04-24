@@ -367,9 +367,10 @@ class MainWindow(QMainWindow):
         if not results:
             return {}, {}, 0
 
-        # 공통 PARAMETER 집합 — DELTA 모드에서는 실제 계산 대상인 A∩B 매칭 웨이퍼
-        # 만 기준. 매칭 안 된 웨이퍼의 PARAMETER 누락은 VALUE 후보에 영향 없음.
-        # Single 모드는 기존 그대로 (해당 result 의 모든 웨이퍼 교집합).
+        # VALUE 후보 PARAMETER — **합집합(union)** 사용. 일부 웨이퍼만 가진 PARAMETER
+        # 도 콤보에 노출 → 해당 VALUE 선택 시 누락 웨이퍼는 NaN 으로 시각화.
+        # 이전 intersection 방식은 한 웨이퍼라도 누락이면 콤보에서 제외되어 선택
+        # 불가한 버그.
         if a is not None and b is not None:
             matched_ids = set(a.wafers) & set(b.wafers)
             if matched_ids:
@@ -377,36 +378,37 @@ class MainWindow(QMainWindow):
                     [set(a.wafers[w].parameters) for w in matched_ids] +
                     [set(b.wafers[w].parameters) for w in matched_ids]
                 )
-                common = set.intersection(*per_wafer_params)
+                common = set.union(*per_wafer_params)
             else:
                 common = set()
         else:
             r = results[0]
             per_result = [set(w.parameters) for w in r.wafers.values()]
-            common = set.intersection(*per_result) if per_result else set()
+            common = set.union(*per_result) if per_result else set()
 
-        # first_wafer 는 메타 샘플 — 매칭 모드에선 매칭 웨이퍼 중 첫 번째가 자연.
-        first_result = results[0]
+        # 각 PARAMETER 의 n / WaferRecord 는 **그 PARAMETER 를 가진 첫 웨이퍼** 기준.
+        # (first_wafer 고정이 아니라 param 별 개별 탐색 — union 이라 일부 param 은
+        # first_wafer 에 없을 수 있음)
+        all_wafers = []
         if a is not None and b is not None:
             matched_ids = set(a.wafers) & set(b.wafers)
-            if matched_ids:
-                first_wid = next(iter(matched_ids))
-                first_wafer = a.wafers.get(first_wid)
-            else:
-                first_wafer = None
+            for wid in matched_ids:
+                all_wafers.append(a.wafers[wid])
+                all_wafers.append(b.wafers[wid])
         else:
-            first_wafer = next(iter(first_result.wafers.values())) if first_result.wafers else None
-        if first_wafer is None:
+            all_wafers = list(results[0].wafers.values())
+        if not all_wafers:
             return {}, {}, 0
-        available_ns = {
-            name: first_wafer.parameters[name].n
-            for name in common if name in first_wafer.parameters
-        }
-        params = {
-            name: first_wafer.parameters[name]
-            for name in common if name in first_wafer.parameters
-        }
-        return available_ns, params, len(first_result.data_columns)
+
+        available_ns: dict[str, int] = {}
+        params: dict = {}
+        for name in common:
+            for w in all_wafers:
+                if name in w.parameters:
+                    available_ns[name] = w.parameters[name].n
+                    params[name] = w.parameters[name]
+                    break
+        return available_ns, params, len(results[0].data_columns)
 
     def _fill_coord_combo(
         self,
@@ -759,6 +761,7 @@ class MainWindow(QMainWindow):
             f"{x} / {y}: {x_n if x_n == y_n else f'{x_n}/{y_n}'} pt",
         )
 
+
     def _visualize_single(
         self, result: ParseResult, v: str, x: str, y: str,
     ) -> None:
@@ -771,9 +774,11 @@ class MainWindow(QMainWindow):
         override = self._preset_override
 
         for w in result.wafers.values():
-            if v not in w.parameters:
-                continue
-            val = np.asarray(w.parameters[v].values, dtype=float)
+            # VALUE PARAMETER 가 이 wafer 에 없으면 **NaN 으로 표시** (skip 하지 않음).
+            # 일부 wafer 만 특정 PARA 가 누락된 경우에도 cell 자체는 표시.
+            has_value = v in w.parameters
+            val = (np.asarray(w.parameters[v].values, dtype=float)
+                   if has_value else None)
 
             # 우선순위: (1) 사용자가 선택한 프리셋 override
             #          (2) 사용자 콤보 X/Y 선택 (coord_valid 한 경우)
@@ -784,15 +789,12 @@ class MainWindow(QMainWindow):
             from_preset = False
 
             if override is not None:
-                # preset 활성 — 현재 cb_coord 에 해당하는 pair 를 라이브러리에서 조회
-                # (사용자가 콤보에서 다른 pair 로 바꿨을 수 있음)
                 matched = library.find_match_by_names(override.recipe, x, y)
                 if matched is not None:
                     x_mm = np.asarray(matched.x_mm, dtype=float)
                     y_mm = np.asarray(matched.y_mm, dtype=float)
                     library.touch(matched, save=False)
                     from_preset = True
-                # else: preset 모드지만 현재 pair 매칭 없음 → 아래 경로로 폴백
             if x_mm is None and coord_valid and x in w.parameters and y in w.parameters:
                 xr, _ = normalize_to_mm(w.parameters[x].values)
                 yr, _ = normalize_to_mm(w.parameters[y].values)
@@ -800,28 +802,36 @@ class MainWindow(QMainWindow):
                     x_mm, y_mm = xr, yr
 
             if x_mm is None and w.recipe:
-                hits = library.find_by_recipe(w.recipe, n_points=int(len(val)))
+                # val 없으면 n_points 제한 없이 library 조회 (fallback)
+                n_points_arg = int(len(val)) if val is not None else None
+                hits = (library.find_by_recipe(w.recipe, n_points=n_points_arg)
+                        if n_points_arg is not None
+                        else library.find_by_recipe(w.recipe))
                 if hits:
-                    preset = hits[0]  # last_used 최신
+                    preset = hits[0]
                     library.touch(preset, save=False)
                     x_mm = np.asarray(preset.x_mm, dtype=float)
                     y_mm = np.asarray(preset.y_mm, dtype=float)
                     from_lib = True
 
             if x_mm is None:
-                continue  # 좌표 해결 실패 → 스킵
+                continue  # 좌표 해결 실패 → 스킵 (NaN cell 도 좌표 필요)
 
-            n = min(len(x_mm), len(y_mm), len(val))
+            n = min(len(x_mm), len(y_mm))
+            if val is not None:
+                n = min(n, len(val))
             if n == 0:
                 continue
-            x_mm, y_mm, val_n = x_mm[:n], y_mm[:n], val[:n]
+            x_mm, y_mm = x_mm[:n], y_mm[:n]
+            val_n = val[:n] if val is not None else np.full(n, np.nan, dtype=float)
 
-            # 사용자 콤보 좌표일 때만 저장 (override/library 경로는 이미 touch 됨).
-            # 실제 런에 사용된 (x, y) pair 하나만 저장 — n 유효 조합일 때만.
-            if not (from_preset or from_lib):
+            # 좌표 저장은 VALUE 가 있고 실제 사용자 조합일 때만
+            if has_value and not (from_preset or from_lib):
                 self._save_used_pair_to_library(library, w, v, x, y)
 
             title = f"{w.lot_id}.{_pad_slot(w.slot_id)} – {v}"
+            if not has_value:
+                title += " (no data)"
             displays.append(WaferDisplay(
                 title=title,
                 meta_label=f"{w.lot_id} / {_pad_slot(w.slot_id)}",
@@ -874,6 +884,8 @@ class MainWindow(QMainWindow):
         displays = []
         for d in dr.deltas:
             title = f"{d.lot_a}.{_pad_slot(d.slot_a)} – Δ {v}"
+            if np.all(np.isnan(d.delta_v)):
+                title += " (no data)"
             displays.append(WaferDisplay(
                 title=title,
                 meta_label=f"{d.lot_a} / {_pad_slot(d.slot_a)}  ←  {d.lot_b} / {_pad_slot(d.slot_b)}",

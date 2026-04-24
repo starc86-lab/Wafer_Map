@@ -60,38 +60,55 @@ def compute_delta(
         wa = a.wafers[wid]
         wb = b.wafers[wid]
 
+        # 좌표(X/Y)는 양쪽 모두 필수. VALUE 는 optional — 한쪽에라도 없으면
+        # delta_v 를 NaN 으로 채워 cell 은 생성 (사용자가 "누락"임을 인지 가능).
         if not all(
             n in wa.parameters and n in wb.parameters
-            for n in (value_name, x_name, y_name)
+            for n in (x_name, y_name)
         ):
             missing.append(wid)
             continue
 
         xa, _ = normalize_to_mm(wa.parameters[x_name].values)
         ya, _ = normalize_to_mm(wa.parameters[y_name].values)
-        va = np.asarray(wa.parameters[value_name].values, dtype=float)
         xb, _ = normalize_to_mm(wb.parameters[x_name].values)
         yb, _ = normalize_to_mm(wb.parameters[y_name].values)
-        vb = np.asarray(wb.parameters[value_name].values, dtype=float)
 
-        na = min(len(xa), len(ya), len(va))
-        nb = min(len(xb), len(yb), len(vb))
+        has_va = value_name in wa.parameters
+        has_vb = value_name in wb.parameters
+        va = (np.asarray(wa.parameters[value_name].values, dtype=float)
+              if has_va else None)
+        vb = (np.asarray(wb.parameters[value_name].values, dtype=float)
+              if has_vb else None)
+
+        na = min(len(xa), len(ya)) if va is None else min(len(xa), len(ya), len(va))
+        nb = min(len(xb), len(yb)) if vb is None else min(len(xb), len(yb), len(vb))
         if na == 0 or nb == 0:
             continue
-        xa, ya, va = xa[:na], ya[:na], va[:na]
-        xb, yb, vb = xb[:nb], yb[:nb], vb[:nb]
+        xa, ya = xa[:na], ya[:na]
+        xb, yb = xb[:nb], yb[:nb]
+        if va is not None:
+            va = va[:na]
+        if vb is not None:
+            vb = vb[:nb]
 
         ia, ib = match_points(xa, ya, xb, yb, tolerance_mm)
         if len(ia) == 0:
             no_match.append(wid)
             continue
 
+        # VALUE 양쪽 다 있을 때만 실제 delta, 아니면 NaN
+        if va is not None and vb is not None:
+            dv = va[ia] - vb[ib]
+        else:
+            dv = np.full(len(ia), np.nan, dtype=float)
+
         deltas.append(DeltaWafer(
             wafer_id=wid,
             lot_a=wa.lot_id, slot_a=wa.slot_id,
             lot_b=wb.lot_id, slot_b=wb.slot_id,
             x_mm=xa[ia], y_mm=ya[ia],
-            delta_v=va[ia] - vb[ib],
+            delta_v=dv,
         ))
 
     return DeltaResult(
