@@ -1044,11 +1044,13 @@ class SettingsDialog(QDialog):
         lay.addWidget(self._tabs, stretch=1)
         lay.addWidget(btns)
 
-        # 모든 입력 위젯(QSpinBox/QDoubleSpinBox/QComboBox) 의 마우스 휠 차단 —
-        # scrollarea 안에서 실수로 값이 바뀌는 UX 방지.
+        # 모든 입력 위젯(QSpinBox/QDoubleSpinBox/QComboBox/QCheckBox) 의 마우스
+        # 휠 차단 — scrollarea 안에서 스크롤 중 커서가 위젯 위에 올라가도 값이
+        # 바뀌지 않음. QCheckBox 는 기본적으로 휠 이벤트 소비 안 하지만 명시적
+        # 통일을 위해 포함.
         self._no_wheel_filter = _NoWheelFilter(self)
         for w in self.findChildren(QWidget):
-            if isinstance(w, (QSpinBox, QDoubleSpinBox, QComboBox)):
+            if isinstance(w, (QSpinBox, QDoubleSpinBox, QComboBox, QCheckBox)):
                 w.installEventFilter(self._no_wheel_filter)
 
     # ── 현재 다이얼로그의 설정 전체를 모아 반환 ──
