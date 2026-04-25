@@ -26,13 +26,10 @@ from core.auto_select import (
 )
 from core.coord_library import CoordLibrary, CoordPreset
 from core.coords import normalize_to_mm
-from core.delta import compute_delta
-from core.interp import is_collinear
 from core.settings import load_settings
 from main import ParseResult
 
 from widgets.paste_area import PasteArea
-from widgets.preset_dialog import PresetSelectDialog
 from widgets.result_panel import ResultPanel
 from widgets.wafer_cell import WaferDisplay
 
@@ -609,6 +606,7 @@ class MainWindow(QMainWindow):
         n = first_wafer.parameters[v].n
         current_recipe = first_wafer.recipe
 
+        from widgets.preset_dialog import PresetSelectDialog
         library = CoordLibrary()
         dialog = PresetSelectDialog(library, current_recipe, n, parent=self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
@@ -765,6 +763,7 @@ class MainWindow(QMainWindow):
     def _visualize_single(
         self, result: ParseResult, v: str, x: str, y: str,
     ) -> None:
+        from core.interp import is_collinear  # lazy: scipy.interpolate 무거움
         library = CoordLibrary()
         displays: list[WaferDisplay] = []
         # 좌표 선택 유효성: VALUE/X/Y 이름이 서로 달라야 좌표로 취급
@@ -861,6 +860,8 @@ class MainWindow(QMainWindow):
     def _visualize_delta(
         self, a: ParseResult, b: ParseResult, v: str, x: str, y: str,
     ) -> None:
+        from core.delta import compute_delta  # lazy
+        from core.interp import is_collinear  # lazy: scipy.interpolate 무거움
         # DELTA 모드 자동 저장 — A/B 각 웨이퍼에 실제 사용된 (x, y) pair 하나씩 저장
         coord_valid = bool(v and x and y and v != x and v != y and x != y)
         if coord_valid:

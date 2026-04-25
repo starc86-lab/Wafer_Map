@@ -82,6 +82,24 @@ def _render_warmup() -> None:
         pass
 
 
+def _prefetch_lazy_modules() -> None:
+    """창 표시 후 백그라운드로 무거운 모듈을 미리 import.
+
+    `widgets.main_window` 가 module-level import 하지 않아 창 표시는 빨라지되,
+    사용자가 첫 사용 (Run / Settings / Preset Dialog) 까지 보통 3초+ 걸리는
+    틈에 미리 로드해 첫 사용 시 지연 0 보장.
+    """
+    try:
+        import core.interp  # noqa  — scipy.interpolate / scipy.signal 끌어옴 (가장 무거움)
+        import core.delta   # noqa
+        import widgets.preset_dialog        # noqa
+        import widgets.settings_dialog      # noqa
+        import widgets.coord_preview_dialog # noqa
+        import widgets.preset_add_dialog    # noqa
+    except Exception:
+        pass
+
+
 def main() -> int:
     # GL 컨텍스트 공유 (warm-up 컨텍스트와 실제 셀들이 같은 자원 공유)
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
@@ -109,11 +127,18 @@ def main() -> int:
     except Exception:
         pass
 
-    _gl_warmup()      # OpenGL 컨텍스트 정착
-    _render_warmup()  # pyqtgraph/scipy lazy 초기화 → 첫 Run Analysis가 2번째와 동속
-
     win = MainWindow()
     win.show()
+
+    # 창 표시 후 비동기로:
+    # 1) GL/render warmup (lazy 초기화 비용 흡수)
+    # 2) lazy 모듈 prefetch (사용자 첫 사용 시 지연 0)
+    # 사용자 첫 사용까지 보통 2-3초+ 걸리니 그 안에 모두 완료.
+    def _async_warmups() -> None:
+        _gl_warmup()
+        _render_warmup()
+        _prefetch_lazy_modules()
+    QTimer.singleShot(0, _async_warmups)
 
     if "--selftest" in sys.argv:
         # 1.5초 후 자동 종료 — 뼈대 import/QSS/창 빌드 검증용

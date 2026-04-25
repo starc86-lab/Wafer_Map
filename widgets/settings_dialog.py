@@ -226,8 +226,18 @@ INTERP_METHODS = [
     "RBF-ThinPlate", "RBF-Multiquadric", "RBF-Gaussian", "RBF-Quintic",
 ]
 
-# Radial 1D 보간 알고리즘 — core.interp.RADIAL_METHODS 와 동기.
-from core.interp import RADIAL_METHODS  # noqa: E402
+# Radial 1D 보간 알고리즘 콤보 옵션. core.interp.RADIAL_METHODS 와 **반드시 동기 유지**.
+# core.interp 가 scipy.interpolate / signal 전체를 끌어와 무거우므로 (~1초)
+# 단순 문자열 리스트는 settings_dialog 에 inline 으로 둬서 import 회피.
+RADIAL_METHODS = [
+    "Univariate Spline",
+    "Cubic Spline",
+    "PCHIP",
+    "Akima",
+    "Savitzky-Golay",
+    "LOWESS",
+    "Polynomial",
+]
 
 
 class ChartCommonGroup(QGroupBox):
