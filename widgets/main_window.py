@@ -9,8 +9,11 @@
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QAction, QShowEvent
+from PySide6.QtGui import QAction, QGuiApplication, QIcon, QShowEvent
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QGridLayout, QHBoxLayout, QLabel, QMainWindow,
     QMessageBox, QPushButton, QSizePolicy, QSpinBox, QSplitter, QToolBar,
@@ -49,6 +52,16 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Wafer Map")
+        # 창 아이콘 (작업표시줄 / 타이틀바 / Alt+Tab) — frozen exe 와 dev 환경 둘 다 지원.
+        # PyInstaller --onedir 6.x 는 datas 를 `_internal/` 에 넣음 → sys._MEIPASS 가
+        # 해당 경로를 가리킴 (onedir/onefile 공통 동작).
+        if getattr(sys, "frozen", False):
+            _base = Path(getattr(sys, "_MEIPASS", str(Path(sys.executable).resolve().parent)))
+        else:
+            _base = Path(__file__).resolve().parent.parent
+        _icon = _base / "assets" / "icon.ico"
+        if _icon.exists():
+            self.setWindowIcon(QIcon(str(_icon)))
 
         # 저장된 윈도우 크기가 있으면 우선, 없으면 해상도 티어 기반
         s = load_settings()
@@ -75,6 +88,16 @@ class MainWindow(QMainWindow):
 
         self._build_toolbar()
         self._build_central()
+
+        # 화면 정중앙 배치 — PyInstaller splash 가 화면 중앙 hardcoded 라
+        # 메인 윈도우도 중앙에 위치시켜 splash → main 전환 시 위치 일치.
+        # maximized 상태면 영향 없음 (Qt 가 normal geometry 만 변경).
+        screen = QGuiApplication.primaryScreen()
+        if screen is not None:
+            avail = screen.availableGeometry()
+            frame = self.frameGeometry()
+            frame.moveCenter(avail.center())
+            self.move(frame.topLeft())
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)

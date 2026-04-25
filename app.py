@@ -101,6 +101,18 @@ def _prefetch_lazy_modules() -> None:
 
 
 def main() -> int:
+    # Windows 작업표시줄 아이콘 표시 — AppUserModelID 명시 설정.
+    # 미설정 시 dev 에서는 python.exe 의 AUMID 가 사용되어 Python 로고가 작업표시줄에
+    # 표시됨. frozen exe 도 명시하면 동일 그룹 (다중 인스턴스 묶임) 보장.
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                "WaferMap.App"
+            )
+        except Exception:
+            pass
+
     # GL 컨텍스트 공유 (warm-up 컨텍스트와 실제 셀들이 같은 자원 공유)
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
 
@@ -129,6 +141,17 @@ def main() -> int:
 
     win = MainWindow()
     win.show()
+    # Splash 가 닫히면서 메인 창이 다른 활성 창 뒤로 가려지는 문제 방지 —
+    # 강제 foreground / focus.
+    win.raise_()
+    win.activateWindow()
+
+    # Splash screen 닫기 (PyInstaller bundle 만 효과; dev 환경엔 pyi_splash 없음)
+    try:
+        import pyi_splash  # type: ignore[import-not-found]
+        pyi_splash.close()
+    except ImportError:
+        pass
 
     # 창 표시 후 비동기로:
     # 1) GL/render warmup (lazy 초기화 비용 흡수)

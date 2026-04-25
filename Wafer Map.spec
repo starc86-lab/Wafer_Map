@@ -141,12 +141,26 @@ a.datas = [d for d in a.datas if not _skip_data(d)]
 
 pyz = PYZ(a.pure)
 
+# Splash screen — exe 더블클릭 즉시 표시 (PyInstaller bootloader 가 Python 시작
+# 전부터 alloc). win.show() 직후 app.py 의 pyi_splash.close() 로 닫힘.
+# 이미지: 절반 사이즈 PNG (assets/splash.png, 624x416). 원본 1248x832 jpg 는 보관.
+splash = Splash(
+    'assets/splash.png',
+    binaries=a.binaries,
+    datas=a.datas,
+    text_pos=None,           # progress 텍스트 안 표시 (이미지만)
+    minify_script=True,
+    always_on_top=True,
+)
+
 exe = EXE(
     pyz,
     a.scripts,
+    splash,
     [],
     exclude_binaries=True,
     name='Wafer Map',  # 실행 파일명은 버전 미포함 (탐색기 표시 간결)
+    icon='assets/icon.ico',  # exe 파일 아이콘 (Windows 탐색기/바로가기)
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -160,6 +174,7 @@ exe = EXE(
 )
 coll = COLLECT(
     exe,
+    splash.binaries,
     a.binaries,
     a.datas,
     strip=False,
