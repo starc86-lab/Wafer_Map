@@ -33,6 +33,7 @@ from core.settings import load_settings
 from main import ParseResult
 
 from widgets.paste_area import PasteArea
+from widgets.reason_bar import ReasonBar
 from widgets.result_panel import ResultPanel
 from widgets.wafer_cell import WaferDisplay
 
@@ -43,6 +44,19 @@ def _pad_slot(slot: str) -> str:
         return f"{int(slot):02d}"
     except (ValueError, TypeError):
         return str(slot)
+
+
+def _rep_suffix(wafer_id: str) -> str:
+    """`__repN` suffix 가 있으면 `(repN)` 형태로 추출. 없으면 빈 문자열.
+
+    `_group_by_waferid` 가 같은 (wafer, PARA) 재등장 시 wafer_id 에 `__repN`
+    suffix 를 붙인다. 시각화 title 에 사람 친화 형태로 표시.
+    """
+    idx = wafer_id.rfind("__rep")
+    if idx < 0:
+        return ""
+    tail = wafer_id[idx + 2:]   # "rep1", "rep2"
+    return f" ({tail})"
 
 
 PRESET_BUTTON_DEFAULT_TEXT = "좌표 불러오기"
@@ -79,6 +93,9 @@ class MainWindow(QMainWindow):
 
         self._result_a: ParseResult | None = None
         self._result_b: ParseResult | None = None
+        # DELTA 모드 검증 결과 cache — paste 변경 시점에 한 번 계산, _refresh_controls
+        # (Run 활성화) + ReasonBar 양쪽에서 재사용. 단일 입력 / 빈 입력은 빈 list.
+        self._delta_warnings: list = []
         # 마지막 Run signature — 동일 입력 재Run 시 재렌더 skip (cell 재생성/RBF 재계산
         # 비용 제거 + 카메라 각도·ER time 등 cell 내부 상태 보존). Settings/r-symmetry/
         # Z-Scale 등 Run 과 무관한 변경은 즉시 반영 경로라 영향 없음.
@@ -197,7 +214,19 @@ class MainWindow(QMainWindow):
     def _build_central(self) -> None:
         splitter = QSplitter(Qt.Orientation.Vertical)
         splitter.addWidget(self._make_input_panel())
-        splitter.addWidget(self._make_control_panel())
+        # ReasonBar (Input ↔ Control 사이) + Control row 묶음 — splitter 자식 1개.
+        # 사용자가 paste 직후 Run 누르기 전에 검증 결과 인지하도록 paste 가까이 배치.
+        control_section = QWidget()
+        control_section.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed,
+        )
+        cv = QVBoxLayout(control_section)
+        cv.setContentsMargins(0, 0, 0, 0)
+        cv.setSpacing(0)
+        self._reason_bar = ReasonBar()
+        cv.addWidget(self._reason_bar)
+        cv.addWidget(self._make_control_panel())
+        splitter.addWidget(control_section)
         splitter.addWidget(self._make_result_panel())
         splitter.setStretchFactor(0, 2)
         splitter.setStretchFactor(1, 0)   # control은 fixed라 stretch 의미 없음
@@ -327,12 +356,29 @@ class MainWindow(QMainWindow):
     def _on_a_parsed(self, result: ParseResult | None) -> None:
         self._result_a = result
         self._reset_preset_override()
+        self._update_delta_validation()
         self._refresh_controls()
 
     def _on_b_parsed(self, result: ParseResult | None) -> None:
         self._result_b = result
         self._reset_preset_override()
+        self._update_delta_validation()
         self._refresh_controls()
+
+    def _update_delta_validation(self) -> None:
+        """양쪽 ParseResult 가 모두 있으면 DELTA 검증 + cache + ReasonBar 표시.
+
+        한쪽만 있거나 빈 입력이면 cache 비우고 ReasonBar 도 빈 메시지.
+        cache (`self._delta_warnings`) 는 `_refresh_controls` 가 Run 활성화
+        결정에 사용. 결과적으로 paste 변경마다 한 번 계산 + 양쪽 재사용.
+        """
+        from core.delta_validation import validate_delta  # lazy
+        a, b = self._result_a, self._result_b
+        if a and b:
+            self._delta_warnings = validate_delta(a, b)
+        else:
+            self._delta_warnings = []
+        self._reason_bar.set_warnings(self._delta_warnings)
 
     def _refresh_controls(self) -> None:
         """입력 결과를 바탕으로 콤보 리스트·기본값 갱신.
@@ -365,7 +411,15 @@ class MainWindow(QMainWindow):
         self._fill_coord_combo(pairs, (x_sel, y_sel) if x_sel and y_sel else None)
 
         any_input = bool(self._result_a or self._result_b)
-        self.btn_visualize.setEnabled(any_input and bool(available_ns))
+        # Run 분기 — 단일 입력 검증 (case 1/2/3) + DELTA 검증 (no_intersect 등)
+        # 양쪽 모두 반영해 비활성.
+        all_valid = self.paste_a.is_valid and self.paste_b.is_valid
+        delta_blocking = any(
+            w.severity == "error" for w in self._delta_warnings
+        )
+        self.btn_visualize.setEnabled(
+            any_input and bool(available_ns) and all_valid and not delta_blocking
+        )
         self.btn_load_preset.setEnabled(any_input)
 
         # 자동 프리셋 감지 — 입력에 X/Y 없고 RECIPE 로 라이브러리 매칭 되면 자동 적용.
@@ -851,12 +905,13 @@ class MainWindow(QMainWindow):
             if has_value and not (from_preset or from_lib):
                 self._save_used_pair_to_library(library, w, v, x, y)
 
-            title = f"{w.lot_id}.{_pad_slot(w.slot_id)} – {v}"
+            rep = _rep_suffix(w.wafer_id)
+            title = f"{w.lot_id}.{_pad_slot(w.slot_id)}{rep} – {v}"
             if not has_value:
                 title += " (no data)"
             displays.append(WaferDisplay(
                 title=title,
-                meta_label=f"{w.lot_id} / {_pad_slot(w.slot_id)}",
+                meta_label=f"{w.lot_id} / {_pad_slot(w.slot_id)}{rep}",
                 x_mm=x_mm, y_mm=y_mm, values=val_n,
                 is_radial=bool(is_collinear(x_mm, y_mm)),
             ))
@@ -877,7 +932,9 @@ class MainWindow(QMainWindow):
             return
 
         self._apply_z_scale_mode(displays, view_mode)
-        self._result_panel.set_displays(displays, v, view_mode=view_mode, summary_line="")
+        self._result_panel.set_displays(displays, v, view_mode=view_mode)
+        # 단일 시각화는 사유/경고 메시지 없음 — ReasonBar 비움.
+        self._reason_bar.set_message("", severity="info")
         self._connect_cell_er_signals()
 
     def _visualize_delta(
@@ -887,27 +944,34 @@ class MainWindow(QMainWindow):
         from core.interp import is_collinear  # lazy: scipy.interpolate 무거움
         # DELTA 모드 자동 저장 — A/B 각 웨이퍼에 실제 사용된 (x, y) pair 하나씩 저장
         coord_valid = bool(v and x and y and v != x and v != y and x != y)
+        library = CoordLibrary()
         if coord_valid:
-            library = CoordLibrary()
             for result in (a, b):
                 for w in result.wafers.values():
                     self._save_used_pair_to_library(library, w, v, x, y)
             self._enforce_library_limits(library)
 
-        dr = compute_delta(a, b, v, x, y, tolerance_mm=1e-3)
+        # 좌표 결정 (사용자 정책 2026-04-27, A 기준):
+        #   A 전체 좌표 있음 → A 좌표 사용 (wafer 별)
+        #   A 전체 누락 + B 전체 있음 → B 좌표 사용
+        #   A, B 양쪽 누락 → 라이브러리 (A RECIPE → B RECIPE)
+        # 일부 누락은 input_validation case 3 가 paste 단계에서 Run 비활성으로 차단.
+        coords_per_wafer = self._resolve_delta_coords(a, b, x, y, library)
+        if coords_per_wafer is None:
+            # 좌표 결정 실패 (양쪽 누락 + 라이브러리 매칭 X) — paste 시점 delta_validation
+            # 이 이미 error 로 Run 비활성. 방어적 분기.
+            self._result_panel.clear()
+            return
+
+        dr = compute_delta(a, b, v, coords_per_wafer)
         if dr.matched == 0:
-            QMessageBox.warning(
-                self,
-                "DELTA",
-                f"WAFERID 교집합 또는 좌표 일치점이 없어 DELTA를 계산할 수 없습니다.\n"
-                f"A {dr.count_a}장 · B {dr.count_b}장",
-            )
             self._result_panel.clear()
             return
 
         displays = []
         for d in dr.deltas:
-            title = f"{d.lot_a}.{_pad_slot(d.slot_a)} – Δ {v}"
+            rep = _rep_suffix(d.wafer_id)
+            title = f"{d.lot_b}.{_pad_slot(d.slot_b)}{rep} – Δ {v}"
             if np.all(np.isnan(d.delta_v)):
                 title += " (no data)"
             displays.append(WaferDisplay(
@@ -917,17 +981,11 @@ class MainWindow(QMainWindow):
                 is_radial=bool(is_collinear(d.x_mm, d.y_mm)),
                 is_delta=True,
             ))
-        # A/B 의 대표 RECIPE 비교 — 다르면 summary 에 안내 (차단 말고 알림만).
-        # RECIPE 불일치 경고만 남기고, 매칭 개수/DELTA 라벨은 제거 — ER Time 입력란이
-        # 그래프 영역 위에 오는데 summary 라벨이 추가 공간 차지해 그래프 잘리는 문제.
-        recipe_a = self._dominant_recipe(a)
-        recipe_b = self._dominant_recipe(b)
-        summary = ""
-        if recipe_a and recipe_b and recipe_a.strip().lower() != recipe_b.strip().lower():
-            summary = f"⚠ RECIPE 불일치: A={recipe_a} / B={recipe_b}"
         view_mode = self.cb_view.currentText() or "2D"
         self._apply_z_scale_mode(displays, view_mode)
-        self._result_panel.set_displays(displays, v, view_mode=view_mode, summary_line=summary)
+        self._result_panel.set_displays(displays, v, view_mode=view_mode)
+        # ReasonBar 는 paste 시점 delta_validation 결과 (`_delta_warnings`) 그대로 유지.
+        # RECIPE 불일치는 별도 메시지로 덧붙이지 않음 (paste 시점 메시지 보존 우선).
         self._connect_cell_er_signals()
 
     def _connect_cell_er_signals(self) -> None:
@@ -1017,6 +1075,58 @@ class MainWindow(QMainWindow):
             return ""
         first = next(iter(result.wafers.values()))
         return first.recipe or ""
+
+    def _resolve_delta_coords(
+        self,
+        a: ParseResult,
+        b: ParseResult,
+        x_name: str,
+        y_name: str,
+        library: CoordLibrary,
+    ) -> dict[str, tuple[np.ndarray, np.ndarray]] | None:
+        """DELTA 모드 wafer 별 좌표 결정 (사용자 정책 2026-04-27).
+
+        우선순위:
+          1. A 전체 좌표 있음 → A 좌표 (wafer 별)
+          2. A 전체 누락 + B 전체 있음 → B 좌표 (wafer 별)
+          3. 양쪽 누락 → 라이브러리 (A RECIPE → B RECIPE) 좌표 (전체 wafer 동일)
+          4. 라이브러리도 매칭 X → None (좌표 결정 실패)
+
+        일부 wafer 만 누락은 input_validation case 3 가 paste 단계에서 차단했다고
+        가정 (Run 비활성). 본 메서드 호출 도달 시 양쪽 모두 wafer-level 일관 상태.
+        """
+        from core.coords import normalize_to_mm  # lazy
+        common = sorted(set(a.wafers) & set(b.wafers))
+        if not common:
+            return {}
+
+        def _wafer_coord(w):
+            if x_name in w.parameters and y_name in w.parameters:
+                xa, _ = normalize_to_mm(w.parameters[x_name].values)
+                ya, _ = normalize_to_mm(w.parameters[y_name].values)
+                return xa, ya
+            return None
+
+        a_coords = {wid: _wafer_coord(a.wafers[wid]) for wid in common}
+        b_coords = {wid: _wafer_coord(b.wafers[wid]) for wid in common}
+        a_has = all(c is not None for c in a_coords.values())
+        b_has = all(c is not None for c in b_coords.values())
+
+        if a_has:
+            return a_coords
+        if b_has:
+            return b_coords
+
+        # 양쪽 누락 — 라이브러리 (A RECIPE → B RECIPE)
+        for recipe in (self._dominant_recipe(a), self._dominant_recipe(b)):
+            if not recipe:
+                continue
+            hits = library.find_by_recipe(recipe)
+            if hits:
+                lib_x = np.asarray(hits[0].x_mm, dtype=float)
+                lib_y = np.asarray(hits[0].y_mm, dtype=float)
+                return {wid: (lib_x, lib_y) for wid in common}
+        return None
 
     def _save_used_pair_to_library(
         self, library: CoordLibrary, wafer, v_name: str, x_name: str, y_name: str,

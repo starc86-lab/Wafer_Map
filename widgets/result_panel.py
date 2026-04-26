@@ -1,8 +1,8 @@
 """
-결과 패널 — 상단 summary 라벨 + 하단 가로 스크롤 Cell 나열.
+결과 패널 — 가로 스크롤 Cell 나열. 사유/경고 메시지는 ReasonBar 가 별도 표시.
 
 외부 API:
-    panel.set_displays(displays, value_name, summary_line="")
+    panel.set_displays(displays, value_name, view_mode="2D")
     panel.clear()
 """
 from __future__ import annotations
@@ -18,20 +18,13 @@ from widgets.wafer_cell import WaferCell, WaferDisplay
 
 
 class ResultPanel(QWidget):
-    """상단 summary(DELTA 모드용) + 하단 가로 스크롤 Cells."""
+    """가로 스크롤 Cells. 사유/경고 메시지는 ReasonBar 가 처리."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-
-        self._summary_label = QLabel("")
-        self._summary_label.setStyleSheet(
-            "color: #2a9d8f; font-weight: bold; padding: 6px 10px;"
-        )
-        self._summary_label.hide()
-        root.addWidget(self._summary_label)
 
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
@@ -56,7 +49,6 @@ class ResultPanel(QWidget):
         self._show_placeholder()
 
     def _show_placeholder(self) -> None:
-        self._summary_label.hide()
         self._clear_layout()
         ph = QLabel(
             "그래프를 우클릭하여 그래프 이미지나 데이터를 Clipboard로 Copy할 수 있습니다.\n"
@@ -88,19 +80,12 @@ class ResultPanel(QWidget):
         displays: Iterable[WaferDisplay],
         value_name: str,
         view_mode: str = "2D",
-        summary_line: str = "",
     ) -> None:
         displays = list(displays)
         self._clear_layout()
         if not displays:
             self._show_placeholder()
             return
-
-        if summary_line:
-            self._summary_label.setText(summary_line)
-            self._summary_label.show()
-        else:
-            self._summary_label.hide()
 
         # container 전체를 hide한 채 cells 생성·렌더·layout 완료 → 최종 show.
         # hide 동안은 paint/layout activate가 deferred라 "중첩→펼쳐짐" 현상 제거.

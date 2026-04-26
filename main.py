@@ -2,7 +2,7 @@
 Wafer Map long-form CSV 파서.
 
 입력: CSV 파일 경로, 클립보드/파일에서 읽은 원시 텍스트, 또는 이미 만든 DataFrame.
-출력: ParseResult — {WAFERID: WaferData} 딕셔너리 + 컬럼 매핑 + 경고 목록.
+출력: ParseResult — {WAFERID: WaferData} 딕셔너리 + 컬럼 매핑 + raw 처리 메타.
 
 규약 요약 (상세: CLAUDE.md):
 - Long-form: 각 행 = 한 웨이퍼 × 한 PARAMETER 레코드.
@@ -11,6 +11,11 @@ Wafer Map long-form CSV 파서.
 - 헤더 매칭은 대소문자·공백·언더바 무관 정규화 기반.
 - 웨이퍼 그룹핑 키는 WAFERID 문자열 그대로 (LOT.SLOT 분해 금지).
 - 한 웨이퍼의 LOT/SLOT/RECIPE는 최빈값 채택.
+
+책임 경계:
+- 본 모듈은 파싱 자체와 무결성 보장에 필요한 raw 단계 처리만 담당.
+- 처리 과정에서 발견한 사실은 `ParseResult.metadata` 에 구조화해 기록.
+- 사용자 안내 메시지 생성·표시는 `core.input_validation` 의 책임.
 """
 from __future__ import annotations
 
@@ -67,12 +72,23 @@ class WaferData:
 
 
 @dataclass
+class ParseMetadata:
+    """raw 단계 처리 결과의 구조화된 사실.
+
+    `core.input_validation` 이 이 메타를 보고 사용자 메시지를 생성한다.
+    """
+    extra_header_rows: int = 0              # 첫 헤더 행 외에 절단된 헤더 행 수 (paste 2회 의심)
+    repeat_measurement_groups: int = 0      # 같은 (WAFERID, PARA) 재등장으로 분리된 추가 측정 set 수
+                                             # (재측정 / 반복 측정 케이스 — 데이터 보존 + suffix 로 분리)
+
+
+@dataclass
 class ParseResult:
     """파싱 결과 번들."""
     wafers: dict[str, WaferData]
     column_mapping: dict[str, str]   # 논리 키 → 실제 헤더 이름
     data_columns: list[str]          # 정렬된 DATA 컬럼 이름
-    warnings: list[str]              # N 불일치 등 안내 (GUI가 팝업)
+    metadata: ParseMetadata = field(default_factory=ParseMetadata)
 
 
 class MissingColumnsError(Exception):
@@ -92,6 +108,7 @@ def parse_wafer_csv(
     *,
     aliases: dict[str, list[str]] | None = None,
     column_mapping_override: dict[str, str] | None = None,
+    metadata: ParseMetadata | None = None,
 ) -> ParseResult:
     """
     Long-form 웨이퍼 측정 데이터 파싱.
@@ -100,11 +117,18 @@ def parse_wafer_csv(
         source: CSV 경로 / 클립보드·파일에서 읽은 원시 텍스트 / 이미 만든 DataFrame.
         aliases: 사용자 지정 컬럼 이름 별칭 (기본값과 merge됨).
         column_mapping_override: GUI 매핑 다이얼로그가 넘겨주는 {논리 키: 실제 헤더}.
+        metadata: source 가 DataFrame 일 때, 호출자가 미리 `_load_dataframe`
+            결과로 받은 메타를 그대로 보존하기 위해 전달. raw text/Path 일 때는
+            `_load_dataframe` 이 자체적으로 메타를 채우므로 None 그대로 둠.
 
     Raises:
         MissingColumnsError: 필수 컬럼 자동 매칭 실패 + 오버라이드도 없을 때.
     """
-    df = _load_dataframe(source)
+    if isinstance(source, pd.DataFrame):
+        df = source.copy()
+        meta = metadata or ParseMetadata()
+    else:
+        df, meta = _load_dataframe(source)
 
     col_map = _match_columns(
         list(df.columns),
@@ -115,13 +139,13 @@ def parse_wafer_csv(
     if not data_cols:
         raise MissingColumnsError(missing=[r"DATA\d+"], available=list(df.columns))
 
-    dup_warnings = _detect_duplicate_columns(list(df.columns))
-    wafers, warnings = _group_by_waferid(df, col_map, data_cols)
+    wafers, repeat_groups = _group_by_waferid(df, col_map, data_cols)
+    meta.repeat_measurement_groups = repeat_groups
     return ParseResult(
         wafers=wafers,
         column_mapping=col_map,
         data_columns=data_cols,
-        warnings=dup_warnings + warnings,
+        metadata=meta,
     )
 
 
@@ -151,9 +175,10 @@ def _preclean(text: str) -> str:
     - Non-breaking space(U+00A0) → 일반 공백
     - Zero-width space(U+200B) → 제거
     - UTF-8 BOM 제거
-    - **중복 헤더 행 제거**: 같은 텍스트를 두 번 paste 하면 editor 에 이어붙어
-      헤더 행이 중간에 섞임. 첫 행과 정확히 일치하는 뒤 행들을 모두 스킵.
+
     pd.to_numeric 이 ASCII 만 인식하므로 숫자 NaN 화 방지.
+
+    헤더 행 절단은 `_strip_extra_header_rows` 가 별도로 처리 (메타 카운트 보존).
     """
     text = (
         text.replace("\u2212", "-")
@@ -161,36 +186,55 @@ def _preclean(text: str) -> str:
         .replace("\u200b", "")
         .replace("\ufeff", "")
     )
-    # 중복 헤더 제거
+    return text
+
+
+def _strip_extra_header_rows(text: str) -> tuple[str, int]:
+    """첫 헤더 행 외에 같은 텍스트로 등장하는 헤더 행을 절단.
+
+    paste 2회 시 raw 텍스트에 헤더 행이 여러 번 박힘 → 둘째부터 제거.
+    절단된 행 수를 함께 리턴해 `ParseMetadata.extra_header_rows` 로 기록.
+    """
     lines = text.splitlines(keepends=True)
     if len(lines) < 2:
-        return text
+        return text, 0
     header = lines[0].strip()
     if not header:
-        return text
+        return text, 0
     cleaned: list[str] = [lines[0]]
+    skipped = 0
     for line in lines[1:]:
         if line.strip() == header:
-            continue  # 같은 헤더 행 반복 → skip
+            skipped += 1
+            continue
         cleaned.append(line)
-    return "".join(cleaned)
+    return "".join(cleaned), skipped
 
 
-def _load_dataframe(source: str | Path | pd.DataFrame) -> pd.DataFrame:
+def _load_dataframe(
+    source: str | Path | pd.DataFrame,
+) -> tuple[pd.DataFrame, ParseMetadata]:
+    """source → (DataFrame, ParseMetadata).
+
+    raw 텍스트는 `_preclean` + `_strip_extra_header_rows` 처리 후 메타에
+    `extra_header_rows` 카운트 기록. 파일 경로 / DataFrame 입력은 메타 빈 채로.
+    """
+    metadata = ParseMetadata()
     if isinstance(source, pd.DataFrame):
-        return source.copy()
+        return source.copy(), metadata
     if isinstance(source, (str, Path)):
         s = str(source)
         # 개행/탭이 있으면 원시 텍스트, 아니면 파일 경로로 해석
         if "\n" in s or "\t" in s:
             s = _preclean(s)
+            s, metadata.extra_header_rows = _strip_extra_header_rows(s)
             first_line = s.splitlines()[0] if s.splitlines() else ""
             sep = "\t" if "\t" in first_line else ","
-            return pd.read_csv(io.StringIO(s), sep=sep)
+            return pd.read_csv(io.StringIO(s), sep=sep), metadata
         path = Path(s)
         if not path.exists():
             raise FileNotFoundError(path)
-        return pd.read_csv(path)
+        return pd.read_csv(path), metadata
     raise TypeError(f"지원하지 않는 source 타입: {type(source)}")
 
 
@@ -217,27 +261,6 @@ def _match_columns(
     if missing:
         raise MissingColumnsError(missing=missing, available=columns)
     return col_map
-
-
-def _detect_duplicate_columns(columns: list[str]) -> list[str]:
-    """동일 헤더(정규화 후) 2개 이상 감지 → 경고 문자열 목록.
-
-    pandas 는 동명 컬럼을 `Name`, `Name.1` 로 자동 suffix 처리하지만, 사용자 의도상
-    원본 헤더 중복이면 데이터 손실·혼동 위험. 정규화 후 비교로 `LOT ID` / `Lot_ID`
-    같은 동의어 중복도 잡음.
-    """
-    from collections import Counter
-    warns: list[str] = []
-    # pandas 의 `.N` suffix 는 벗긴 후 정규화 비교
-    raw = [re.sub(r"\.\d+$", "", str(c)) for c in columns]
-    norm_counts = Counter(_normalize(r) for r in raw if r)
-    for norm, cnt in norm_counts.items():
-        if cnt <= 1 or not norm:
-            continue
-        # 정규화 결과가 같은 원본 헤더들 수집
-        origs = sorted({r for r in raw if _normalize(r) == norm})
-        warns.append(f"중복 컬럼 감지: {origs} ({cnt}회) — 마지막 것만 사용됨")
-    return warns
 
 
 def _extract_data_columns(columns: list[str]) -> list[str]:
@@ -277,10 +300,22 @@ def _group_by_waferid(
     df: pd.DataFrame,
     col_map: dict[str, str],
     data_cols: list[str],
-) -> tuple[dict[str, WaferData], list[str]]:
-    warnings: list[str] = []
-    wafers: dict[str, WaferData] = {}
+) -> tuple[dict[str, WaferData], int]:
+    """raw 행 순서 보존 + (WAFERID, PARAMETER) 재등장 시 측정 set 분리.
 
+    같은 `WAFERID` 안에서 같은 `PARAMETER` 가 다시 등장하면 새로운 측정 set
+    시작 — wafer_id 에 `__rep{N}` suffix 를 붙여 별도 wafer 로 분리.
+
+    행 순서 보존: 입력이 W1/W2/W3/W1/W2/W3 순으로 paste 되면 wafer 순서는
+    W1 → W2 → W3 → W1__rep1 → W2__rep1 → W3__rep1. 사용자가 페이스트한
+    순서대로 시각화 cell 이 가로 나열되도록 row 단위 순회 + dict insertion
+    order 활용 (`groupby(sort=False)` 는 같은 wid 를 묶어버려 부적합).
+
+    가정: raw 텍스트가 "한 측정 set 의 모든 PARA 행 → 다음 set" 순서로 나열.
+    같은 (wafer, PARA) 의 재등장이 새 set 의 시작 신호.
+
+    분리된 추가 측정 set 수를 리턴 → `ParseMetadata.repeat_measurement_groups`.
+    """
     wid_col = col_map["waferid"]
     param_col = col_map["parameter"]
     lot_col = col_map["lot_id"]
@@ -289,12 +324,44 @@ def _group_by_waferid(
     max_col = col_map.get("max_data_id")
 
     # Excel 셀 포맷 이슈로 WAFERID 앞뒤 공백 섞이면 같은 웨이퍼가 두 그룹으로 분산됨.
-    # groupby 전에 일괄 strip → 같은 WAFERID 로 합쳐지게.
     df = df.copy()
     df[wid_col] = df[wid_col].astype(str).str.strip()
 
-    for wid_raw, subset in df.groupby(wid_col, sort=False):
-        wid = str(wid_raw)
+    # Pass 1: row 순회하며 (df_idx, param_name) 을 어느 wafer_id 에 넣을지 결정.
+    # base_wid 별로 (current_wid, seen_params, rep_idx) state 추적.
+    state: dict[str, tuple[str, set[str], int]] = {}
+    rows_per_wafer: dict[str, list[tuple[int, str]]] = {}   # insertion order = 시각화 순서
+    repeat_groups = 0
+
+    for df_idx, row in df.iterrows():
+        base_wid = str(row[wid_col]).strip()
+        if not base_wid:
+            continue
+        param_name = str(row[param_col]).strip()
+        if not param_name or param_name.lower() == "nan":
+            continue
+
+        if base_wid not in state:
+            state[base_wid] = (base_wid, set(), 0)
+        current_wid, seen_params, rep_idx = state[base_wid]
+
+        if param_name in seen_params:
+            rep_idx += 1
+            repeat_groups += 1
+            current_wid = f"{base_wid}__rep{rep_idx}"
+            seen_params = set()
+        seen_params.add(param_name)
+        state[base_wid] = (current_wid, seen_params, rep_idx)
+
+        rows_per_wafer.setdefault(current_wid, []).append((df_idx, param_name))
+
+    # Pass 2: wafer 별 WaferData 생성. lot/slot/recipe 는 해당 wafer 의 행들로
+    # `_mode_str` 채택 (한 wafer 안에서 일관성 보호).
+    wafers: dict[str, WaferData] = {}
+    for wid, rows in rows_per_wafer.items():
+        indices = [r[0] for r in rows]
+        subset = df.loc[indices]
+
         wafer = WaferData(
             wafer_id=wid,
             lot_id=_mode_str(subset[lot_col]),
@@ -303,11 +370,8 @@ def _group_by_waferid(
             parameters={},
         )
 
-        for _, row in subset.iterrows():
-            param_name = str(row[param_col]).strip()
-            if not param_name or param_name.lower() == "nan":
-                continue
-
+        for df_idx, param_name in rows:
+            row = df.loc[df_idx]
             values = _row_values(row, data_cols)
             n_actual = len(values)
 
@@ -317,21 +381,14 @@ def _group_by_waferid(
                     max_id = int(row[max_col])
                 except (ValueError, TypeError):
                     max_id = None
-                if max_id is not None and max_id != n_actual:
-                    warnings.append(
-                        f"WAFERID={wid}  PARAMETER={param_name}: "
-                        f"MAX_DATA_ID={max_id} ≠ 실제 DATA 개수={n_actual} → 실제값 사용"
-                    )
 
             wafer.parameters[param_name] = WaferRecord(
                 values=values, n=n_actual, max_data_id=max_id
             )
 
-        # groupby 가 같은 strip 후 wid 를 여러번 넘기면 (공백 섞임) 뒷 것이 덮어쓰게 둠.
-        # 합치고 싶으면 별도 머지 로직 필요하지만, 실사용에서 드문 케이스.
         wafers[wid] = wafer
 
-    return wafers, warnings
+    return wafers, repeat_groups
 
 
 # ────────────────────────────────────────────────────────────────
@@ -368,12 +425,9 @@ def _cli() -> None:
             print(f"   {pname:14s} n={rec.n:3d}{max_id_str}  {preview}{more}")
         print()
 
-    if result.warnings:
-        print("[경고]")
-        for w in result.warnings:
-            print(" -", w)
-    else:
-        print("(경고 없음)")
+    m = result.metadata
+    print(f"[메타] extra_header_rows={m.extra_header_rows}, "
+          f"repeat_measurement_groups={m.repeat_measurement_groups}")
 
 
 if __name__ == "__main__":

@@ -17,6 +17,8 @@ from PySide6.QtWidgets import (
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
+from core.input_summary import summarize
+from core.input_validation import validate
 from main import MissingColumnsError, ParseResult, _load_dataframe, parse_wafer_csv
 
 
@@ -24,6 +26,24 @@ from main import MissingColumnsError, ParseResult, _load_dataframe, parse_wafer_
 # 같은 폭(=72*3 + 6*2)으로 우측 정렬되어야 끝/시작이 일치 (사용자 요구).
 HEADER_BUTTON_WIDTH = 88
 HEADER_BUTTON_SPACING = 6
+
+
+# 검증 경고 severity 별 색 — error > warn > info 우선순위.
+_SEVERITY_COLORS = {
+    "error": "#d32f2f",
+    "warn":  "#e76f51",
+    "info":  "#666",
+}
+_SEVERITY_RANK = {"info": 0, "warn": 1, "error": 2}
+
+
+def _max_severity(warnings: list) -> str:
+    """경고 리스트 중 가장 높은 severity 반환."""
+    return max(
+        (w.severity for w in warnings),
+        key=lambda s: _SEVERITY_RANK.get(s, 0),
+        default="info",
+    )
 
 
 class PasteArea(QWidget):
@@ -35,6 +55,7 @@ class PasteArea(QWidget):
         super().__init__(parent)
         self._result: ParseResult | None = None
         self._df: pd.DataFrame | None = None
+        self._validation: list = []          # 마지막 input_validation 결과
         self._table_dirty = False  # df는 있는데 _fill_table 미실행 상태
 
         lay = QVBoxLayout(self)
@@ -110,15 +131,36 @@ class PasteArea(QWidget):
 
         lay.addWidget(self._stacked, stretch=1)
 
-        # ── 요약 라벨 ──
+        # ── 요약 라벨 (1줄: 카운트, 2줄: 검증 경고) ──
         self._summary = QLabel("— 입력 대기 —")
         self._summary.setStyleSheet("color: gray;")
         lay.addWidget(self._summary)
+
+        self._warnings = QLabel("")
+        self._warnings.setStyleSheet("color: #e76f51;")
+        self._warnings.hide()
+        lay.addWidget(self._warnings)
 
     # ── 외부 API ───────────────────────────────────────
     @property
     def result(self) -> ParseResult | None:
         return self._result
+
+    @property
+    def is_valid(self) -> bool:
+        """Run 가능 여부.
+
+        - 빈 입력 (텍스트 자체 X): True — 이 paste 자체로 Run 차단 안 함.
+          (다른 paste 가 정상이면 단일 모드 시각화 가능)
+        - 텍스트 있음 + 파싱 실패 (필수 컬럼 누락 등): False
+        - 텍스트 + 파싱 성공 + error severity 위반: False
+        - 텍스트 + 파싱 성공 + warn/info 만: True
+        """
+        if not self._editor.toPlainText().strip():
+            return True
+        if self._result is None:
+            return False
+        return not any(w.severity == "error" for w in self._validation)
 
     def clear(self) -> None:
         self._editor.clear()
@@ -152,8 +194,9 @@ class PasteArea(QWidget):
 
         df: pd.DataFrame | None = None
         try:
-            df = _load_dataframe(text)
-            result = parse_wafer_csv(df)  # 같은 DataFrame 재사용
+            df, meta = _load_dataframe(text)
+            # 같은 DataFrame 재사용 + raw 처리 메타 보존
+            result = parse_wafer_csv(df, metadata=meta)
         except MissingColumnsError as e:
             self._set_status(
                 None, df,
@@ -165,15 +208,13 @@ class PasteArea(QWidget):
             self._set_status(None, None, f"⚠ 파싱 실패: {e}", "color: #d32f2f;")
             return
 
-        n_wafers = len(result.wafers)
-        params: set[str] = set()
-        for w in result.wafers.values():
-            params.update(w.parameters)
-        warn = f"  ({len(result.warnings)} 경고)" if result.warnings else ""
+        s = summarize(result)
+        warns = validate(result)
         self._set_status(
             result, df,
-            f"▶ 웨이퍼 {n_wafers}장 · PARAMETER {len(params)}개{warn}",
+            f"웨이퍼 {s.n_wafers}장, Parameter {s.n_parameter}개, 좌표 {s.n_coord_pairs}개",
             "color: #2a9d8f;",
+            warns,
         )
 
     def _set_status(
@@ -182,11 +223,23 @@ class PasteArea(QWidget):
         df: pd.DataFrame | None,
         msg: str,
         style: str,
+        warnings: list | None = None,
     ) -> None:
         self._result = result
         self._df = df
+        self._validation = warnings or []
         self._summary.setText(msg)
         self._summary.setStyleSheet(style)
+
+        # 둘째 라벨 — 검증 경고. 빈/실패는 None 또는 빈 리스트 → hide.
+        if warnings:
+            text = ", ".join(f"⚠ {w.message}" for w in warnings)
+            severity = _max_severity(warnings)
+            self._warnings.setText(text)
+            self._warnings.setStyleSheet(f"color: {_SEVERITY_COLORS[severity]};")
+            self._warnings.show()
+        else:
+            self._warnings.hide()
 
         if df is not None and len(df) > 0:
             self._btn_table.setEnabled(True)

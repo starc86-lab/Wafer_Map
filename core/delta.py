@@ -1,11 +1,18 @@
 """
-DELTA 계산 — 두 `ParseResult` 사이의 WAFERID 교집합 + 좌표 일치점 A − B.
+DELTA 계산 — 두 `ParseResult` 사이의 WAFERID 매칭 + (A − B).
 
-규칙 (CLAUDE.md):
+규칙 (CLAUDE.md + 사용자 정책 2026-04-27):
 - 웨이퍼 매칭 키: `WAFERID` (영구 불변)
-- 점 매칭: 같은 WAFERID 내 `(X, Y)` 좌표가 tolerance 내 일치하는 점만
+- 좌표: 호출자가 사전 결정해서 wafer 별 dict 로 전달.
+  좌표 fallback 정책 (Input A 기준):
+    A 전체 좌표 있음 → A 좌표 사용 (wafer 별)
+    A 전체 누락 + B 전체 있음 → B 좌표 사용
+    A, B 양쪽 누락 → 라이브러리 (A RECIPE → B RECIPE)
+- 점 매칭: **인덱스 매칭** (silent). 사용자 책임 — 측정 순서가 양쪽 동일하다는 가정.
+  (이전 0.2.0: `match_points` 좌표 매칭. 새 정책: 좌표가 한쪽 것이라
+  좌표 매칭 의미 없음 → 인덱스로 통일.)
 - 부호: **A − B 고정**
-- 웨이퍼 수 불일치 허용: 교집합만 출력 (나머지는 조용히 제외)
+- 웨이퍼 수 불일치 허용: 교집합만 출력
 """
 from __future__ import annotations
 
@@ -13,7 +20,6 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from core.coords import match_points, normalize_to_mm
 from main import ParseResult
 
 
@@ -26,7 +32,7 @@ class DeltaWafer:
     slot_b: str
     x_mm: np.ndarray
     y_mm: np.ndarray
-    delta_v: np.ndarray     # (A − B), 매칭된 점에 한함
+    delta_v: np.ndarray     # (A − B), 인덱스 매칭
 
 
 @dataclass
@@ -34,7 +40,7 @@ class DeltaResult:
     deltas: list[DeltaWafer]
     count_a: int            # A 입력 웨이퍼 수
     count_b: int            # B 입력 웨이퍼 수
-    matched: int            # WAFERID 교집합 + 좌표 매칭 성공한 웨이퍼 수
+    matched: int            # 시각화 성공한 wafer 수
     no_coord_match: list[str] = field(default_factory=list)
     missing_parameter: list[str] = field(default_factory=list)
 
@@ -43,36 +49,27 @@ def compute_delta(
     a: ParseResult,
     b: ParseResult,
     value_name: str,
-    x_name: str,
-    y_name: str,
-    tolerance_mm: float = 1e-3,
+    coords_per_wafer: dict[str, tuple[np.ndarray, np.ndarray]],
 ) -> DeltaResult:
-    """WAFERID 교집합 + 좌표 일치 점만 A − B.
+    """WAFERID 교집합 + 인덱스 기반 A − B.
 
-    반환의 `matched` 가 0이면 호출자가 경고 팝업 후 시각화 차단.
+    Args:
+        coords_per_wafer: {wafer_id: (x_mm, y_mm)} — 호출자가 사전 결정한
+            wafer 별 좌표. 좌표 fallback 로직은 호출자 책임 (`_visualize_delta`).
+
+    Returns:
+        DeltaResult. `matched=0` 이면 호출자가 시각화 차단.
     """
-    common = sorted(set(a.wafers) & set(b.wafers))
+    common = sorted(set(a.wafers) & set(b.wafers) & coords_per_wafer.keys())
     deltas: list[DeltaWafer] = []
     no_match: list[str] = []
-    missing: list[str] = []
 
     for wid in common:
         wa = a.wafers[wid]
         wb = b.wafers[wid]
-
-        # 좌표(X/Y)는 양쪽 모두 필수. VALUE 는 optional — 한쪽에라도 없으면
-        # delta_v 를 NaN 으로 채워 cell 은 생성 (사용자가 "누락"임을 인지 가능).
-        if not all(
-            n in wa.parameters and n in wb.parameters
-            for n in (x_name, y_name)
-        ):
-            missing.append(wid)
-            continue
-
-        xa, _ = normalize_to_mm(wa.parameters[x_name].values)
-        ya, _ = normalize_to_mm(wa.parameters[y_name].values)
-        xb, _ = normalize_to_mm(wb.parameters[x_name].values)
-        yb, _ = normalize_to_mm(wb.parameters[y_name].values)
+        x_coord, y_coord = coords_per_wafer[wid]
+        x_coord = np.asarray(x_coord, dtype=float)
+        y_coord = np.asarray(y_coord, dtype=float)
 
         has_va = value_name in wa.parameters
         has_vb = value_name in wb.parameters
@@ -81,33 +78,27 @@ def compute_delta(
         vb = (np.asarray(wb.parameters[value_name].values, dtype=float)
               if has_vb else None)
 
-        na = min(len(xa), len(ya)) if va is None else min(len(xa), len(ya), len(va))
-        nb = min(len(xb), len(yb)) if vb is None else min(len(xb), len(yb), len(vb))
-        if na == 0 or nb == 0:
-            continue
-        xa, ya = xa[:na], ya[:na]
-        xb, yb = xb[:nb], yb[:nb]
+        # 인덱스 매칭 — 좌표 / 측정값 길이의 최소값까지.
+        n = min(len(x_coord), len(y_coord))
         if va is not None:
-            va = va[:na]
+            n = min(n, len(va))
         if vb is not None:
-            vb = vb[:nb]
-
-        ia, ib = match_points(xa, ya, xb, yb, tolerance_mm)
-        if len(ia) == 0:
+            n = min(n, len(vb))
+        if n == 0:
             no_match.append(wid)
             continue
 
         # VALUE 양쪽 다 있을 때만 실제 delta, 아니면 NaN
         if va is not None and vb is not None:
-            dv = va[ia] - vb[ib]
+            dv = va[:n] - vb[:n]
         else:
-            dv = np.full(len(ia), np.nan, dtype=float)
+            dv = np.full(n, np.nan, dtype=float)
 
         deltas.append(DeltaWafer(
             wafer_id=wid,
             lot_a=wa.lot_id, slot_a=wa.slot_id,
             lot_b=wb.lot_id, slot_b=wb.slot_id,
-            x_mm=xa[ia], y_mm=ya[ia],
+            x_mm=x_coord[:n], y_mm=y_coord[:n],
             delta_v=dv,
         ))
 
@@ -117,5 +108,4 @@ def compute_delta(
         count_b=len(b.wafers),
         matched=len(deltas),
         no_coord_match=no_match,
-        missing_parameter=missing,
     )
