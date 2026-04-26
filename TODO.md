@@ -313,6 +313,20 @@ gl_view.paintGL = patched
 
 ---
 
+## 6. Run 실행속도 개선 — prebuild / GL pool 재시도 (보류, 추후 검토)
+
+paste→Run 사용자 체감 시간 ~770ms (case10 6 wafers 기준) 의 분해 분석으로 두 영역 개선 여지 발견. 2026-04-25 시도 후 보류.
+
+- [ ] **(d) RBF eval prebuild** — paste idle 시간 동안 백그라운드 `ThreadPoolExecutor` 로 RBF 미리 평가 → cell 의 `_render_2d/3d` 가 cache hit 시 우회. 시도 결과 -5% 절감에 그쳐 ROI 부족 (RBF eval 자체가 ~40ms, 나머지 mesh build / GLMeshItem setData / face index 가 ~140ms).
+- [ ] **(e) Cell pool prebuild** — `_container.show()` 의 456ms 가 cell GL widget 별 native window 생성 비용. paste idle 동안 cell 미리 만들어 GL init 흡수 가능. 다만 GL `grabFramebuffer` 가 메인 스레드 점유라 사용자 1초 이내 Run 시 약손해 가능 → 안전 설계 필요.
+- 둘 다 합치면 이론상 -83% (770→134ms). 단일 (d) 만은 -5%.
+
+**재시도 시 메모리 참고 (memory 시스템)**:
+- `project_d_rbf_prebuild_attempted` — (d) 측정 결과 + 캐시 invalidation 트리거 + 약손해 케이스 + 측정 인프라 (`debug/bench.py` 마커 모듈) 재구축 방법
+- `project_set_displays_glnative_cost` — `_container.show()` 의 456ms 정체 (paint 가 아닌 GL native window 생성) + (e) 적용 시 WaferCell pool 패턴 + invalidation 키 (`wafer 수, chart_size`) + DELTA 모드 까다로운 점
+
+---
+
 ## 참고 파일
 - `docs/rendering_optimizations.md` — 렌더링 최적화 이력·실패 사례 (반드시 참고)
 - `docs/v0.1.0_perf.md` — v0.1.0 성능 측정 기록

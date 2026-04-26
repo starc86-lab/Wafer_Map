@@ -159,7 +159,7 @@ class MainWindow(QMainWindow):
         right_lay = QVBoxLayout(right_col)
         right_lay.setContentsMargins(0, 0, 0, 0)
         right_lay.setSpacing(4)
-        version_label = QLabel(f"v{VERSION} | © 2026 KP TF | Jihwan Park")
+        version_label = QLabel(f"v{VERSION} | © 2026 SK hynix | Jihwan Park")
         version_label.setStyleSheet(
             "color: gray; background: transparent; "
             "font-size: 9pt; font-style: italic;"
@@ -400,7 +400,12 @@ class MainWindow(QMainWindow):
                 )
                 common = set.union(*per_wafer_params)
             else:
-                common = set()
+                # 교집합 0 — DELTA 시각화 불가하지만 Run 버튼은 클릭 가능해야
+                # paste_b 셋째 줄에 ⚠ 안내 가능. 양측 union 으로 콤보 채움.
+                common = set().union(
+                    *(set(w.parameters) for w in a.wafers.values()),
+                    *(set(w.parameters) for w in b.wafers.values()),
+                )
         else:
             r = results[0]
             per_result = [set(w.parameters) for w in r.wafers.values()]
@@ -412,9 +417,13 @@ class MainWindow(QMainWindow):
         all_wafers = []
         if a is not None and b is not None:
             matched_ids = set(a.wafers) & set(b.wafers)
-            for wid in matched_ids:
-                all_wafers.append(a.wafers[wid])
-                all_wafers.append(b.wafers[wid])
+            if matched_ids:
+                for wid in matched_ids:
+                    all_wafers.append(a.wafers[wid])
+                    all_wafers.append(b.wafers[wid])
+            else:
+                # 교집합 0 fallback — 양측 모든 wafer (콤보 채우기 위해)
+                all_wafers = list(a.wafers.values()) + list(b.wafers.values())
         else:
             all_wafers = list(results[0].wafers.values())
         if not all_wafers:
@@ -877,7 +886,7 @@ class MainWindow(QMainWindow):
             return
 
         self._apply_z_scale_mode(displays, view_mode)
-        self._result_panel.set_displays(displays, v, view_mode=view_mode, summary_line="")
+        self._result_panel.set_displays(displays, v, view_mode=view_mode)
         self._connect_cell_er_signals()
 
     def _visualize_delta(
@@ -895,15 +904,35 @@ class MainWindow(QMainWindow):
             self._enforce_library_limits(library)
 
         dr = compute_delta(a, b, v, x, y, tolerance_mm=1e-3)
+
+        # ── DELTA 검사 → paste_b 한 줄 메시지 끝에 추가 ──
+        # 1) WAFERID 교집합 0 → 시각화 skip + DELTA error. Input B 데이터는 유지.
         if dr.matched == 0:
-            QMessageBox.warning(
-                self,
-                "DELTA",
-                f"WAFERID 교집합 또는 좌표 일치점이 없어 DELTA를 계산할 수 없습니다.\n"
-                f"A {dr.count_a}장 · B {dr.count_b}장",
-            )
+            self.paste_b.set_delta_status("DELTA: 교집합 없음", severity="error")
             self._result_panel.clear()
             return
+
+        # 2) RECIPE 일치 검사 — A/B 의 dominant recipe
+        delta_warnings: list[str] = []
+        recipe_a = self._dominant_recipe(a)
+        recipe_b = self._dominant_recipe(b)
+        if recipe_a and recipe_b and recipe_a.strip().lower() != recipe_b.strip().lower():
+            delta_warnings.append(f"DELTA: RECIPE 다름 ({recipe_a}, {recipe_b})")
+
+        # 3) PARA union 일치 검사 — A 의 union vs B 의 union
+        para_a = set().union(*(set(w.parameters) for w in a.wafers.values())) if a.wafers else set()
+        para_b = set().union(*(set(w.parameters) for w in b.wafers.values())) if b.wafers else set()
+        if para_a != para_b:
+            delta_warnings.append("DELTA: PARA 다름")
+
+        if delta_warnings:
+            head = delta_warnings[0]
+            tail = f" 외 {len(delta_warnings) - 1}건" if len(delta_warnings) > 1 else ""
+            self.paste_b.set_delta_status(f"{head}{tail}", severity="warn")
+        else:
+            self.paste_b.set_delta_status(
+                f"DELTA OK 매칭 {dr.matched}", severity="ok",
+            )
 
         displays = []
         for d in dr.deltas:
@@ -917,17 +946,9 @@ class MainWindow(QMainWindow):
                 is_radial=bool(is_collinear(d.x_mm, d.y_mm)),
                 is_delta=True,
             ))
-        # A/B 의 대표 RECIPE 비교 — 다르면 summary 에 안내 (차단 말고 알림만).
-        # RECIPE 불일치 경고만 남기고, 매칭 개수/DELTA 라벨은 제거 — ER Time 입력란이
-        # 그래프 영역 위에 오는데 summary 라벨이 추가 공간 차지해 그래프 잘리는 문제.
-        recipe_a = self._dominant_recipe(a)
-        recipe_b = self._dominant_recipe(b)
-        summary = ""
-        if recipe_a and recipe_b and recipe_a.strip().lower() != recipe_b.strip().lower():
-            summary = f"⚠ RECIPE 불일치: A={recipe_a} / B={recipe_b}"
         view_mode = self.cb_view.currentText() or "2D"
         self._apply_z_scale_mode(displays, view_mode)
-        self._result_panel.set_displays(displays, v, view_mode=view_mode, summary_line=summary)
+        self._result_panel.set_displays(displays, v, view_mode=view_mode)
         self._connect_cell_er_signals()
 
     def _connect_cell_er_signals(self) -> None:

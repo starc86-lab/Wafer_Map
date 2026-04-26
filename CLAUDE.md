@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-현재 버전: **0.2.0** (FBO Copy Graph + 1D Radial + 3D radial mesh 등, 2026-04-25). 버전 이력은 [CHANGELOG.md](CHANGELOG.md) 참고, 사용자 가이드는 [USER_GUIDE.md](USER_GUIDE.md).
+현재 버전: **0.2.1** (입력 무결성 검사 + 한 줄 상태표시줄, 2026-04-26). 버전 이력은 [CHANGELOG.md](CHANGELOG.md) 참고, 사용자 가이드는 [USER_GUIDE.md](USER_GUIDE.md).
 
 ## 개발자 정보
 - 한국인, 코딩 중급 수준
@@ -362,7 +362,8 @@ Wafer Map/
 │   ├── interp.py                ← RBF 4종(ThinPlate/Multiquadric/Gaussian/Quintic) + `RadialInterp` 1D spline + `is_radial_scan` 자동 감지 + `make_interp` 팩토리
 │   ├── metrics.py               ← summary_metrics (AVG/MAX/MIN/RANGE/3SIG/NU%)
 │   ├── delta.py                 ← compute_delta (WAFERID 매칭 → 좌표 매칭 → A−B)
-│   └── coord_library.py         ← CoordLibrary + CoordPreset (해시 버켓 O(N) 중복 검출, recipe_similarity)
+│   ├── coord_library.py         ← CoordLibrary + CoordPreset (해시 버켓 O(N) 중복 검출, recipe_similarity)
+│   └── integrity.py             ← `check_integrity(result) → list[IntegrityWarning]` (A/B/C/D-1/D-2/D-3 무결성 검사)
 ├── widgets/
 │   ├── main_window.py           ← 3-패널 QSplitter, 컨트롤 패널 fixed-height, view_mode 분기, closeEvent 윈도우 저장
 │   ├── paste_area.py            ← Ctrl+V 타겟 (Text/Table 토글 + Clear)

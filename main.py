@@ -14,6 +14,7 @@ Wafer Map long-form CSV 파서.
 """
 from __future__ import annotations
 
+import csv
 import io
 import re
 from collections import Counter
@@ -73,6 +74,7 @@ class ParseResult:
     column_mapping: dict[str, str]   # 논리 키 → 실제 헤더 이름
     data_columns: list[str]          # 정렬된 DATA 컬럼 이름
     warnings: list[str]              # N 불일치 등 안내 (GUI가 팝업)
+    delimiter: str = ""              # 자동 감지된 구분자 (\t / , / ; / |). DataFrame 직접 전달 시 빈 문자열
 
 
 class MissingColumnsError(Exception):
@@ -84,6 +86,10 @@ class MissingColumnsError(Exception):
         super().__init__(f"필수 컬럼 누락: {missing} / 실제 컬럼: {available}")
 
 
+class DelimiterDetectError(Exception):
+    """csv.Sniffer 가 구분자(`,`, `\\t`, `;`, `|`) 자동 감지 실패."""
+
+
 # ────────────────────────────────────────────────────────────────
 # Public API
 # ────────────────────────────────────────────────────────────────
@@ -92,6 +98,8 @@ def parse_wafer_csv(
     *,
     aliases: dict[str, list[str]] | None = None,
     column_mapping_override: dict[str, str] | None = None,
+    delimiter: str = "",
+    extra_warnings: list[str] | None = None,
 ) -> ParseResult:
     """
     Long-form 웨이퍼 측정 데이터 파싱.
@@ -100,11 +108,18 @@ def parse_wafer_csv(
         source: CSV 경로 / 클립보드·파일에서 읽은 원시 텍스트 / 이미 만든 DataFrame.
         aliases: 사용자 지정 컬럼 이름 별칭 (기본값과 merge됨).
         column_mapping_override: GUI 매핑 다이얼로그가 넘겨주는 {논리 키: 실제 헤더}.
+        delimiter: 외부에서 이미 감지된 구분자(원시 텍스트→DataFrame 변환을 paste_area 가
+            먼저 수행한 케이스). 없으면 _load_dataframe 결과 사용.
+        extra_warnings: paste_area 가 _load_dataframe 으로 이미 받은 텍스트 단계 경고
+            (헤더 행 2개 이상 등). DataFrame 으로 재호출 시 다시 감지 못 하니 명시 전달.
 
     Raises:
         MissingColumnsError: 필수 컬럼 자동 매칭 실패 + 오버라이드도 없을 때.
+        DelimiterDetectError: 원시 텍스트 sep 자동 감지 실패.
     """
-    df = _load_dataframe(source)
+    df, detected_sep, load_warnings = _load_dataframe(source)
+    sep_used = delimiter or detected_sep
+    extra = list(extra_warnings or []) + load_warnings
 
     col_map = _match_columns(
         list(df.columns),
@@ -121,7 +136,8 @@ def parse_wafer_csv(
         wafers=wafers,
         column_mapping=col_map,
         data_columns=data_cols,
-        warnings=dup_warnings + warnings,
+        warnings=extra + dup_warnings + warnings,
+        delimiter=sep_used,
     )
 
 
@@ -151,9 +167,10 @@ def _preclean(text: str) -> str:
     - Non-breaking space(U+00A0) → 일반 공백
     - Zero-width space(U+200B) → 제거
     - UTF-8 BOM 제거
-    - **중복 헤더 행 제거**: 같은 텍스트를 두 번 paste 하면 editor 에 이어붙어
-      헤더 행이 중간에 섞임. 첫 행과 정확히 일치하는 뒤 행들을 모두 스킵.
     pd.to_numeric 이 ASCII 만 인식하므로 숫자 NaN 화 방지.
+
+    중복 헤더 행 제거는 `_strip_extra_header_rows` 가 별도 처리 (두번째 헤더 +
+    이후 행 모두 truncate, warning 누적).
     """
     text = (
         text.replace("\u2212", "-")
@@ -161,36 +178,74 @@ def _preclean(text: str) -> str:
         .replace("\u200b", "")
         .replace("\ufeff", "")
     )
-    # 중복 헤더 제거
-    lines = text.splitlines(keepends=True)
-    if len(lines) < 2:
-        return text
+    return text
+
+
+def _strip_extra_header_rows(text: str) -> tuple[str, int]:
+    """헤더 행이 2번 이상 등장하면 두번째 헤더 + 그 이후 모두 truncate.
+
+    사용자가 두 batch 데이터를 한 번에 paste 한 케이스 (다른 lot 의 동일 시스템
+    출력) 대응. 첫 batch 만 안전하게 사용 + warning 으로 알림.
+
+    반환: `(정리된 텍스트, 추가 헤더 개수)`. 추가 헤더 = 0 이면 변경 없음.
+    """
+    lines = text.splitlines()
+    if not lines:
+        return text, 0
     header = lines[0].strip()
     if not header:
-        return text
-    cleaned: list[str] = [lines[0]]
-    for line in lines[1:]:
-        if line.strip() == header:
-            continue  # 같은 헤더 행 반복 → skip
-        cleaned.append(line)
-    return "".join(cleaned)
+        return text, 0
+    truncate_at: int | None = None
+    n_extra = 0
+    for i in range(1, len(lines)):
+        if lines[i].strip() == header:
+            if truncate_at is None:
+                truncate_at = i
+            n_extra += 1
+    if truncate_at is None:
+        return text, 0
+    return "\n".join(lines[:truncate_at]), n_extra
 
 
-def _load_dataframe(source: str | Path | pd.DataFrame) -> pd.DataFrame:
+def _load_dataframe(
+    source: str | Path | pd.DataFrame,
+) -> tuple[pd.DataFrame, str, list[str]]:
+    """소스를 DataFrame 으로 로드 + 사용된 구분자 + 로드 단계 경고 반환.
+
+    구분자 자동 감지 — `csv.Sniffer` 로 `, \\t ; |` 4종 중 결정. 실패 시
+    `DelimiterDetectError` raise (paste_area 가 catch 후 사용자 안내).
+    DataFrame 직접 전달 시 구분자 정보 없음 → 빈 문자열.
+
+    extra_warnings: 텍스트 정제 단계에서 발견된 경고 (현재는 헤더 행 2개 이상).
+    parse_wafer_csv 가 받아서 ParseResult.warnings 에 누적.
+    """
     if isinstance(source, pd.DataFrame):
-        return source.copy()
+        return source.copy(), "", []
     if isinstance(source, (str, Path)):
         s = str(source)
         # 개행/탭이 있으면 원시 텍스트, 아니면 파일 경로로 해석
         if "\n" in s or "\t" in s:
             s = _preclean(s)
-            first_line = s.splitlines()[0] if s.splitlines() else ""
-            sep = "\t" if "\t" in first_line else ","
-            return pd.read_csv(io.StringIO(s), sep=sep)
+            extra_warnings: list[str] = []
+            # D-2: 헤더 행 2개 이상이면 두번째부터 truncate + warning
+            s, n_extra = _strip_extra_header_rows(s)
+            if n_extra > 0:
+                extra_warnings.append(
+                    f"헤더 행 {n_extra + 1}개 발견 — 첫 헤더만 사용, 이후 행 무시"
+                )
+            try:
+                # 첫 8KB 만 sample (긴 paste 의 sniff 비용 제한)
+                dialect = csv.Sniffer().sniff(s[:8192], delimiters=",\t;|")
+                sep = dialect.delimiter
+            except csv.Error as e:
+                raise DelimiterDetectError(str(e))
+            return pd.read_csv(io.StringIO(s), sep=sep), sep, extra_warnings
         path = Path(s)
         if not path.exists():
             raise FileNotFoundError(path)
-        return pd.read_csv(path)
+        # 파일 경로 모드 — pandas 자동 감지 (engine="python", sep=None)
+        df = pd.read_csv(path, sep=None, engine="python")
+        return df, "", []
     raise TypeError(f"지원하지 않는 source 타입: {type(source)}")
 
 
@@ -236,7 +291,8 @@ def _detect_duplicate_columns(columns: list[str]) -> list[str]:
             continue
         # 정규화 결과가 같은 원본 헤더들 수집
         origs = sorted({r for r in raw if _normalize(r) == norm})
-        warns.append(f"중복 컬럼 감지: {origs} ({cnt}회) — 마지막 것만 사용됨")
+        # 정규화 매칭상 첫 컬럼만 사용됨 (pandas `.1` suffix 가 정규화 결과 다르게 만듦).
+        warns.append(f"중복 컬럼 감지: {', '.join(origs)} ({cnt}회) — 첫 컬럼만 사용됨")
     return warns
 
 
@@ -306,6 +362,13 @@ def _group_by_waferid(
         for _, row in subset.iterrows():
             param_name = str(row[param_col]).strip()
             if not param_name or param_name.lower() == "nan":
+                continue
+
+            # 같은 (WAFERID, PARAMETER) 조합 중복 — 첫번째만 사용, 이후 silently skip + warning
+            if param_name in wafer.parameters:
+                warnings.append(
+                    f"WAFERID 중복: {wid}, PARAMETER={param_name} → 첫번째만 사용"
+                )
                 continue
 
             values = _row_values(row, data_cols)

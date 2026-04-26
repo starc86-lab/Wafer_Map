@@ -5,6 +5,35 @@ Wafer Map 버전 이력. SemVer(Major.Minor.Patch) 기준.
 - **Minor**: 기능 추가 / UI 변경
 - **Patch**: 버그 수정
 
+## [0.2.1] — 2026-04-26
+
+입력 데이터 무결성 검사 + 한 줄 상태표시줄 + 회사명 표기 변경.
+
+### 입력 무결성 검사 (`core/integrity.py` 신규)
+- 파싱 실패 분기 세분화: 구분자 인식 실패 / 필수 컬럼 누락 / DATA 컬럼 없음 / 데이터 행 없음 / CSV 형식 오류
+- 무결성 5종 검사 (A: wafer별 PARA set 일치, B: RECIPE 일치, C: MAX_DATA_ID==n, D-1: 컬럼 헤더 중복, D-2: 헤더 행 2개 이상, D-3: WAFERID+PARA 조합 중복)
+- 검사 모듈 분리 — `check_integrity(result) → list[IntegrityWarning]`. main.py 는 파싱만, paste_area 는 표시만.
+
+### 텍스트 파싱 강화
+- 구분자 자동 감지 — `csv.Sniffer` 로 `,`, `\t`, `;`, `|` 4종. 실패 시 `DelimiterDetectError` (paste_area 가 catch 후 안내).
+- 헤더 행 2개 이상 — 두번째 헤더 + 그 이후 모든 행 truncate (D-2). `_strip_extra_header_rows` 신규.
+- (WAFERID, PARAMETER) 조합 중복 — 첫번째 keep + warning (D-3). `_group_by_waferid` 안에서 처리.
+- 컬럼 헤더 중복 메시지 정정 — "마지막 것만 사용됨" → "첫 컬럼만 사용됨" (실제 동작 일치).
+
+### DELTA 모드 검사 (paste_b 만)
+- WAFERID 교집합 0 / RECIPE 다름 / PARA union 다름 / OK 분기. Run 클릭 시 `_visualize_delta` 가 검사 → paste_b 셋째 라벨 표시.
+- 교집합 0 일 때도 콤보 채워서 Run 버튼 활성화 → 셋째 줄 안내 가능. 기존 팝업 + ResultPanel summary 라벨 제거.
+
+### 한 줄 상태표시줄 (paste_area)
+- 라벨 1개 통합 — 정보 + 자체 무결성 + DELTA 결과 모두 한 줄에 합성. 입력란 위치 흔들림 제거.
+- 메시지 축약 — `웨이퍼 N장 · PARAMETER M개` → `WF N·PARA M`, 구분자 정보 제거, 구분자 ` · ` → `·` (no space).
+- `setToolTip` 으로 잘린 메시지 hover 시 전체 표시.
+- severity 시스템 — 자체/DELTA 둘 중 가장 심각한 색상 (error 빨강 > warn 주황 > ok 민트).
+
+### 기타
+- 회사명 표기 `KP TF` → `SK hynix` (`© 2026 SK hynix | Jihwan Park`)
+- `paste_area._on_text_changed` 의 `text.strip()` 위치 수정 — trailing newline 보존 (헤더만 paste 시 path 모드 진입 버그 fix)
+
 ## [0.2.0] — 2026-04-25
 
 사내 베타 0.1.0 이후 ~87 커밋. 주요 축은 (1) 1D Radial Graph + fitting 고도화, (2) 3D radial mesh 전환, (3) Copy Graph FBO 전환, (4) 좌표 라이브러리 pair-단위 개편, (5) VALUE/좌표 자동 선택 고도화.
