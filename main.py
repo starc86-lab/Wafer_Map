@@ -364,12 +364,12 @@ def _group_by_waferid(
             if not param_name or param_name.lower() == "nan":
                 continue
 
-            # 같은 (WAFERID, PARAMETER) 조합 중복 — 첫번째만 사용, 이후 silently skip + warning
+            # 같은 (WAFERID, PARAMETER) 조합 중복 — warning 만. 값 자체는 0.2.0 동작
+            # 유지(dict 덮어쓰기 → 마지막 행 keep). 변화 최소화 목적.
             if param_name in wafer.parameters:
                 warnings.append(
-                    f"WAFERID 중복: {wid}, PARAMETER={param_name} → 첫번째만 사용"
+                    f"WAFERID 중복: {wid}, PARAMETER={param_name} → 마지막 행 사용"
                 )
-                continue
 
             values = _row_values(row, data_cols)
             n_actual = len(values)

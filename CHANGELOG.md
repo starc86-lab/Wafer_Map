@@ -11,8 +11,9 @@ Wafer Map 버전 이력. SemVer(Major.Minor.Patch) 기준.
 
 ### 입력 무결성 검사 (`core/integrity.py` 신규)
 - 파싱 실패 분기 세분화: 구분자 인식 실패 / 필수 컬럼 누락 / DATA 컬럼 없음 / 데이터 행 없음 / CSV 형식 오류
-- 무결성 5종 검사 (A: wafer별 PARA set 일치, B: RECIPE 일치, C: MAX_DATA_ID==n, D-1: 컬럼 헤더 중복, D-2: 헤더 행 2개 이상, D-3: WAFERID+PARA 조합 중복)
+- 무결성 6종 검사 (A: wafer별 PARA set 일치, B: RECIPE 일치, C: MAX_DATA_ID==n, D-1: 컬럼 헤더 중복, D-2: 헤더 행 2개 이상, D-3: WAFERID+PARA 조합 중복)
 - 검사 모듈 분리 — `check_integrity(result) → list[IntegrityWarning]`. main.py 는 파싱만, paste_area 는 표시만.
+- D-3 (WAFERID+PARA 중복) — warning 만 누적. 값 자체는 0.2.0 동작 유지(마지막 행 keep) — 변화 최소화.
 
 ### 텍스트 파싱 강화
 - 구분자 자동 감지 — `csv.Sniffer` 로 `,`, `\t`, `;`, `|` 4종. 실패 시 `DelimiterDetectError` (paste_area 가 catch 후 안내).
@@ -21,8 +22,18 @@ Wafer Map 버전 이력. SemVer(Major.Minor.Patch) 기준.
 - 컬럼 헤더 중복 메시지 정정 — "마지막 것만 사용됨" → "첫 컬럼만 사용됨" (실제 동작 일치).
 
 ### DELTA 모드 검사 (paste_b 만)
-- WAFERID 교집합 0 / RECIPE 다름 / PARA union 다름 / OK 분기. Run 클릭 시 `_visualize_delta` 가 검사 → paste_b 셋째 라벨 표시.
+- WAFERID 교집합 0 / RECIPE 다름 / PARA union 다름 / DATA 개수 다름 / 좌표 매칭 0 wafer / OK 분기. Run 클릭 시 `_visualize_delta` 가 검사 → paste_b 셋째 라벨 표시.
 - 교집합 0 일 때도 콤보 채워서 Run 버튼 활성화 → 셋째 줄 안내 가능. 기존 팝업 + ResultPanel summary 라벨 제거.
+- 좌표 매칭 0 wafer 안내 — `compute_delta` 의 `no_coord_match` 활용. silently 제외되던 wafer 도 사용자 인지 가능.
+
+### Run 버튼 / 모드 정책 통일
+- Run 버튼 **항상 활성** (비활성화 케이스 없음). CLAUDE.md memory "버튼 항상 클릭 가능" 정책 일치.
+- 클릭 시 분기:
+  - 입력 없음 / 파싱 실패 → result_panel clear (공백)
+  - paste_a 만 OK → 단일 시각화 (paste_b 비어있을 때)
+  - paste_b 만 OK → 단일 시각화 (paste_a 비어있을 때)
+  - **paste_a/b 둘 다 텍스트 입력 = DELTA 의도** — 한쪽 파싱 실패 시 단독 출력 안 하고 공백 + paste_b 셋째 줄 안내
+- 양쪽 paste 후 단독 출력 케이스 제거 (사용자 의도 일관).
 
 ### 한 줄 상태표시줄 (paste_area)
 - 라벨 1개 통합 — 정보 + 자체 무결성 + DELTA 결과 모두 한 줄에 합성. 입력란 위치 흔들림 제거.

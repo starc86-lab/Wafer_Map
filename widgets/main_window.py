@@ -271,7 +271,10 @@ class MainWindow(QMainWindow):
         self.btn_visualize.setFixedWidth(
             HEADER_BUTTON_WIDTH * 3 + HEADER_BUTTON_SPACING * 2
         )
-        self.btn_visualize.setEnabled(False)
+        # Run 버튼은 항상 활성. 입력/파싱 상태에 따라 클릭 시 동작 분기:
+        #  - 입력 없음 / 파싱 실패만 → result_panel clear (공백)
+        #  - 한쪽 정상 → 단일 시각화
+        #  - 양쪽 정상 → DELTA 시각화 (또는 셋째 줄 ⚠ + clear)
         self.btn_visualize.clicked.connect(self._on_visualize)
 
         # 좌표 콤보 변경 시 pair 기반 로직 + VALUE 리스트 재필터
@@ -364,8 +367,11 @@ class MainWindow(QMainWindow):
         pairs = list(zip(x_ordered, y_ordered))
         self._fill_coord_combo(pairs, (x_sel, y_sel) if x_sel and y_sel else None)
 
+        # Run 버튼은 항상 활성 (비활성화 케이스 없음). 클릭 시 _on_visualize 가 분기:
+        #   - 입력 없음 / 파싱 실패만 → result_panel clear (공백)
+        #   - 한쪽 정상 → 단일 시각화
+        #   - 양쪽 정상 → DELTA 시각화 (또는 셋째 줄 ⚠ + clear)
         any_input = bool(self._result_a or self._result_b)
-        self.btn_visualize.setEnabled(any_input and bool(available_ns))
         self.btn_load_preset.setEnabled(any_input)
 
         # 자동 프리셋 감지 — 입력에 X/Y 없고 RECIPE 로 라이브러리 매칭 되면 자동 적용.
@@ -735,7 +741,47 @@ class MainWindow(QMainWindow):
         xy = self._current_xy()
         x = xy[0] if xy else ""
         y = xy[1] if xy else ""
-        if not v:
+
+        a, b = self._result_a, self._result_b
+        text_a = bool(self.paste_a.text().strip())
+        text_b = bool(self.paste_b.text().strip())
+
+        # 모드 판정 — paste_a/b 둘 다 텍스트 입력 = DELTA 의도 (단독 출력 안 함).
+        # 한쪽만 텍스트 = 단일 시각화. 양쪽 모두 빈 = 공백.
+        if text_a and text_b:
+            mode = "delta"
+        elif text_a or text_b:
+            mode = "single"
+        else:
+            mode = "empty"
+
+        # ── 공백 분기 ──
+        # 1) 빈 입력 또는 VALUE 콤보 없음
+        # 2) DELTA 모드 의도이지만 한쪽 파싱 실패 (단독 출력 안 하기)
+        # 3) 단일 모드인데 그쪽 파싱 실패
+        skip_reason: str | None = None
+        if mode == "empty" or not v:
+            skip_reason = ""  # 안내 없이 단순 공백
+        elif mode == "delta":
+            if a is None and b is not None:
+                skip_reason = "DELTA 불가: paste_a 파싱 실패"
+            elif b is None and a is not None:
+                # paste_b 자체 메시지가 이미 ⚠ 표시 중 — 셋째 줄 안내 안 함
+                skip_reason = ""
+            elif a is None and b is None:
+                skip_reason = ""
+        elif mode == "single":
+            single = a or b
+            if single is None:
+                skip_reason = ""
+
+        if skip_reason is not None:
+            self._result_panel.clear()
+            if skip_reason:
+                self.paste_b.set_delta_status(skip_reason, severity="error")
+            else:
+                self.paste_b.set_delta_status(None)
+            self._last_run_signature = None
             return
 
         # Run 변경 감지 — 같은 입력이면 skip (cell 재생성 안 함 → 카메라/휠 zoom/
@@ -762,14 +808,11 @@ class MainWindow(QMainWindow):
             )
             return
 
-        # 렌더링 먼저 → Qt paint 완료 후 n 불일치 경고 팝업 (QTimer 한 틱 지연)
-        a, b = self._result_a, self._result_b
-        if a and b:
+        # 시각화 진행. mode == "delta" 면 양쪽 result 보장됨, mode == "single" 면 a or b 보장.
+        if mode == "delta":
             self._visualize_delta(a, b, v, x, y)
-        elif a or b:
-            self._visualize_single(a or b, v, x, y)
         else:
-            self._result_panel.clear()
+            self._visualize_single(a or b, v, x, y)
 
         if self._preset_override is None:
             QTimer.singleShot(0, lambda: self._warn_n_mismatch_once(v, x, y))
@@ -924,6 +967,27 @@ class MainWindow(QMainWindow):
         para_b = set().union(*(set(w.parameters) for w in b.wafers.values())) if b.wafers else set()
         if para_a != para_b:
             delta_warnings.append("DELTA: PARA 다름")
+
+        # 4) DATA 개수 검사 — 매칭 wafer 의 공통 PARA 의 n 비교
+        n_mismatch_found = False
+        for wid in (set(a.wafers) & set(b.wafers)):
+            wa = a.wafers[wid]
+            wb = b.wafers[wid]
+            for p in (set(wa.parameters) & set(wb.parameters)):
+                if wa.parameters[p].n != wb.parameters[p].n:
+                    n_mismatch_found = True
+                    break
+            if n_mismatch_found:
+                break
+        if n_mismatch_found:
+            delta_warnings.append("DELTA: DATA 개수 다름")
+
+        # 5) 좌표 매칭 0 wafer — WAFERID 일치하지만 (X, Y) 점 매칭 0 으로 시각화에서
+        # silently 제외된 wafer. 사용자 인지 어려우므로 셋째 줄 안내.
+        if dr.no_coord_match:
+            delta_warnings.append(
+                f"DELTA: 좌표 매칭 0 wafer {len(dr.no_coord_match)}장"
+            )
 
         if delta_warnings:
             head = delta_warnings[0]
