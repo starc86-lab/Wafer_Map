@@ -313,6 +313,47 @@ gl_view.paintGL = patched
 
 ---
 
+## 6. wafer 별 PARA set 다른 케이스 시각화 허용 (0.3.x — 우선순위 높음)
+
+**현재 동작**: `input_validation::para_set_mismatch` (severity=error) 가 paste
+단계에서 Run 차단. 사내 실제 데이터에 wafer 별 PARA 다른 케이스 다수 존재 →
+너무 엄격한 차단.
+
+**필요 변경**:
+- [ ] `input_validation::para_set_mismatch` severity 를 `error` → `warn` 완화 —
+  Run 활성, ReasonBar 알림으로 사용자 인지만
+- [ ] VALUE 콤보 union 기준 (이미 `_build_selection_context` 가 union 처리 중 —
+  `para_set_mismatch` 차단 풀면 자연 동작)
+- [ ] 선택한 VALUE PARA 없는 wafer 도 cell 생성 + NaN 시각화 (이미
+  `_visualize_single` 에 `has_value=False` 분기 + `(no data)` 타이틀 + NaN array
+  로직 있음 — 차단만 풀면 자연 동작 가능성 큼)
+- [ ] 일부 wafer 만 좌표 PARA 갖는 케이스도 같은 패턴 — 좌표 union + 좌표 없는
+  wafer 는 라이브러리 fallback 또는 skip + ReasonBar 알림
+
+**검증 시나리오**: 16+장 wafer 입력 + 일부 wafer 에만 T2 / T3 / T_A 같은 케이스
+- Run 활성 OK
+- VALUE 콤보 = {T1, T2, T3, T_A} union 전부 노출
+- T2 선택 시 T2 있는 wafer 만 정상 렌더, 없는 wafer 는 NaN cell + (no data)
+
+
+## 7. 0.2.0 → 0.2.1 회귀 검증 (낮음)
+
+**배경**: `bc315ff` (input_validation 도입) 에서 `_group_by_waferid` 가
+`df.groupby(wid_col).iterrows()` → `df.iterrows() + df.loc[df_idx]` 패턴으로 변경.
+이로 인해 leading whitespace / 컬럼명 중복 등 "지저분한 데이터" 케이스가
+TypeError 로 노출됨 (0.3.x 에서 robust 처리 완료, `a2a265b` 등).
+
+0.2.0 에선 `groupby` 가 silent 통과시킨 거였는데, 그게 정확한 처리였는지
+(일부 wafer 묶이거나 빠뜨린 silent bug 였을 가능성) 검증 필요.
+
+- [ ] 사내 실제 데이터로 0.2.0 build (zip 보관본) vs 0.3.x 결과 비교
+- [ ] 차이 있으면 어느 쪽이 정확한지 판정 + 보강
+
+우선순위 낮음 — 현재 0.3.x 가 명시적으로 정의된 robust 동작 (leading/trailing
+노이즈 정리 + `row[data_cols]` 1D 강제) 이라 신뢰성 더 높음.
+
+---
+
 ## 참고 파일
 - `docs/rendering_optimizations.md` — 렌더링 최적화 이력·실패 사례 (반드시 참고)
 - `docs/v0.1.0_perf.md` — v0.1.0 성능 측정 기록
