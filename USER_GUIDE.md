@@ -20,7 +20,7 @@
 - WAFERID가 동일한 데이터만 매칭되어 Δ = A − B 로 계산.
 - **좌표 합집합 매칭** (tolerance 1mm): 양쪽 매칭 점은 정상 delta, 한쪽만 있는 점도 시각화 (NaN 룰 — A only → dv=va, B only → dv=−vb).
 - **Δ-Interp mode** 체크박스 (Control 패널, 양쪽 입력 시 활성): 한쪽만 있는 점에 RBF 보간으로 상대값 채워 정상 delta 표시. 비활성 시 NaN 룰 적용.
-- **RECIPE 호환** — `_PRE` / `_POST` suffix 자동 제외 후 베이스 비교. `Z_TEST_01__PRE` ↔ `Z_TEST_01__POST` ↔ `Z_TEST_01` 모두 호환. 구분자 `_` 만 인정 (하이픈/구분자 없음은 비호환).
+- **RECIPE 호환** — `_PRE` / `_POST` 토큰을 끝 또는 중간 어디서든 자동 제외 후 베이스 비교. `Z_TEST_01__PRE` ↔ `Z_TEST_01__POST` ↔ `Z_TEST_01`, `CMP_PRE_THK` ↔ `CMP_POST_THK` ↔ `CMP_THK` 모두 호환. 구분자 `_` 만 인정 (하이픈/구분자 없음은 비호환).
 - **DELTA 좌표 fallback**: A 또는 B 한쪽 좌표 누락 시 자동 fallback (옆집 빌리기 / 라이브러리 매칭). 어떤 경로로 해결됐는지 ReasonBar 에 민트색 메시지 표시.
 
 ### 다중 웨이퍼

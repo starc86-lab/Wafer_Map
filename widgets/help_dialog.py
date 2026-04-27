@@ -521,8 +521,9 @@ RECIPE 별로 저장 / 자동 재사용.</p>
 <h3>RECIPE 매칭 순서</h3>
 <ol>
   <li><b>완전 일치</b> (대소문자 무관)</li>
-  <li><b>_PRE / _POST suffix 무시</b>: 끝의 _PRE / _POST 만 다르면 같은 RECIPE 로 간주
-    (예: <code>ABC_PRE</code> ↔ <code>ABC_POST</code> ↔ <code>ABC</code>)</li>
+  <li><b>_PRE / _POST 토큰 무시</b>: 끝 또는 중간의 _PRE / _POST 만 다르면 같은 RECIPE 로 간주
+    (예: <code>ABC_PRE</code> ↔ <code>ABC_POST</code> ↔ <code>ABC</code>,
+    <code>CMP_PRE_THK</code> ↔ <code>CMP_POST_THK</code> ↔ <code>CMP_THK</code>)</li>
   <li><b>Similarity</b>: 단어 3개 이상 공통 + 측정점 개수 같음</li>
 </ol>
 <p>구분자 <code>_</code> 만 인정 — <code>ABC-POST</code> (하이픈) / <code>ABCPOST</code> (구분자 X) 는 비호환.</p>

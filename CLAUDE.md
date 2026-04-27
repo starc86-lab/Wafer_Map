@@ -427,8 +427,10 @@ Wafer Map/
   - 자세한 docstring: `widgets/main_window.py::_resolve_delta_coords`
 
 - **RECIPE 호환 룰** (`core/recipe_util` — 단일 진실 원천):
-  - 구분자 `_` 만 인정 + `_PRE` / `_POST` suffix 항상 제외 후 베이스 비교 + 대소문자 무관
-  - `Z_TEST_01__PRE` ↔ `Z_TEST_01__POST` ↔ `Z_TEST_01` 모두 호환
+  - 구분자 `_` 만 인정 + `_PRE` / `_POST` 토큰 끝/중간 어디서든 제외 후 베이스 비교 + 대소문자 무관
+  - 끝: `Z_TEST_01__PRE` / 중간: `Z_PRE_TEST_01`, `CMP_PRE_THK` 모두 처리
+  - 맨 앞 (`PRE_TEST_01`) 은 처리 안 함 (사내 데이터에 존재 안 함)
+  - 부분 일치 보호: `Z_PRESET_01` (PRE+SET), `Z_POSTBAKE_01` 등은 lookahead `(?=_|$)` 로 매치 회피
   - `Z_TEST_01-POST` (하이픈) / `Z_TEST_01POST` (구분자 X) 는 비호환
   - DELTA 호환 판정 + `coord_library.find_by_recipe` (3-stage fallback: 정확 일치 → PRE/POST 베이스 일치 → similarity 3+ 토큰 매칭) 에서 사용
 
