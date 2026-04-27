@@ -207,6 +207,9 @@ class PasteArea(QWidget):
             )
             return
         except Exception as e:
+            # 정확한 원인 파악용 — stderr 에 traceback 출력 (사용자가 콘솔에서 확인)
+            import traceback
+            traceback.print_exc()
             self._set_status(None, None, f"⚠ 파싱 실패: {e}", "color: #d32f2f;")
             return
 
