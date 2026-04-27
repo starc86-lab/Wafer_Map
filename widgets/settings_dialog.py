@@ -1032,17 +1032,14 @@ class SettingsDialog(QDialog):
         self._design.graph_changed.connect(self._apply_graph_runtime)
 
         btns = QDialogButtonBox()
-        # 도움말 — 좌측에 배치 (HelpRole). 클릭 시 브라우저로 통합 도움말 페이지 오픈.
-        self.btn_help = btns.addButton("도움말", QDialogButtonBox.ButtonRole.HelpRole)
         self.btn_save = btns.addButton("Save", QDialogButtonBox.ButtonRole.AcceptRole)
         self.btn_close = btns.addButton("Close", QDialogButtonBox.ButtonRole.RejectRole)
-        self.btn_help.clicked.connect(self._on_help)
         self.btn_save.clicked.connect(self._on_save)
         self.btn_close.clicked.connect(self._on_close)
 
         # 버튼 폭 통일 + default/auto-default 해제 (엔터로 dialog 닫힘 방지)
         from widgets.paste_area import HEADER_BUTTON_WIDTH
-        for b in (self.btn_help, self.btn_save, self.btn_close):
+        for b in (self.btn_save, self.btn_close):
             b.setFixedWidth(HEADER_BUTTON_WIDTH)
             b.setDefault(False)
             b.setAutoDefault(False)
@@ -1108,11 +1105,6 @@ class SettingsDialog(QDialog):
         super().keyPressEvent(event)
 
     # ── Save / Close ──────────────────────────
-    def _on_help(self) -> None:
-        """도움말 — 통합 HTML 페이지를 기본 브라우저로 오픈."""
-        from widgets.help_dialog import open_help_in_browser
-        open_help_in_browser()
-
     def _on_save(self) -> None:
         """파일 저장만 수행 — 다이얼로그는 닫지 않음. 사용자가 값 더 바꾸고
         추가 저장하거나 Close로 닫을 수 있게."""

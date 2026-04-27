@@ -179,12 +179,28 @@ class MainWindow(QMainWindow):
         )
         version_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         right_lay.addWidget(version_label)
+        # ⚙ Settings + ❓ 도움말 한 행 (우측 정렬). 도움말은 브라우저로 통합 HTML 오픈.
+        btn_row = QWidget()
+        br_lay = QHBoxLayout(btn_row)
+        br_lay.setContentsMargins(0, 0, 0, 0)
+        br_lay.setSpacing(4)
+        br_lay.addStretch(1)
+
+        btn_help = QToolButton()
+        btn_help.setText("❓ 도움말")
+        btn_help.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        btn_help.setStyleSheet("QToolButton { padding: 4px 10px; }")
+        btn_help.clicked.connect(self._open_help)
+        br_lay.addWidget(btn_help)
+
         btn_settings = QToolButton()
         btn_settings.setText("⚙ Settings")
         btn_settings.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         btn_settings.setStyleSheet("QToolButton { font-weight: bold; padding: 4px 10px; }")
         btn_settings.clicked.connect(self._open_settings)
-        right_lay.addWidget(btn_settings, alignment=Qt.AlignmentFlag.AlignRight)
+        br_lay.addWidget(btn_settings)
+
+        right_lay.addWidget(btn_row, alignment=Qt.AlignmentFlag.AlignRight)
 
         # 좌측 더미 컬럼: 우측 컬럼과 동일 폭으로 가운데 정렬 보존
         left_dummy = QWidget()
@@ -1457,6 +1473,11 @@ class MainWindow(QMainWindow):
             for d, rend, meas in zip(displays, per_d_render, per_d_measured):
                 d.z_range = _margin(*rend) if rend is not None else None
                 d.z_range_1d = _margin(*meas) if meas is not None else None
+
+    def _open_help(self) -> None:
+        """통합 도움말 HTML 을 기본 브라우저로 오픈."""
+        from widgets.help_dialog import open_help_in_browser
+        open_help_in_browser()
 
     def _open_settings(self) -> None:
         from widgets.settings_dialog import SettingsDialog
