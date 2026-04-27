@@ -182,10 +182,68 @@ QHeaderView::section {{
     font-size: {F['body']}px;
     font-weight: bold;
 }}
-QScrollBar:horizontal {{ background-color: {t['surface']}; height: 10px; }}
-QScrollBar::handle:horizontal {{ background-color: {t['border']}; border-radius: 5px; }}
-QScrollBar:vertical   {{ background-color: {t['surface']}; width: 10px; }}
-QScrollBar::handle:vertical   {{ background-color: {t['border']}; border-radius: 5px; }}
+/* 스크롤바 — 양 끝 화살표 버튼 + handle 최소 크기.
+   대용량 데이터에서 thumb 가 너무 작아져도 화살표로 클릭 스크롤 가능. */
+QScrollBar:horizontal {{
+    background-color: {t['surface']};
+    height: 14px;
+    margin: 0 16px 0 16px;
+}}
+QScrollBar:vertical {{
+    background-color: {t['surface']};
+    width: 14px;
+    margin: 16px 0 16px 0;
+}}
+QScrollBar::handle:horizontal {{
+    background-color: {t['border']};
+    border-radius: 5px;
+    min-width: 40px;
+}}
+QScrollBar::handle:vertical {{
+    background-color: {t['border']};
+    border-radius: 5px;
+    min-height: 40px;
+}}
+QScrollBar::sub-line:horizontal {{
+    background: {t['surface_alt']};
+    width: 16px; subcontrol-position: left;  subcontrol-origin: margin;
+    border: 1px solid {t['border']};
+}}
+QScrollBar::add-line:horizontal {{
+    background: {t['surface_alt']};
+    width: 16px; subcontrol-position: right; subcontrol-origin: margin;
+    border: 1px solid {t['border']};
+}}
+QScrollBar::sub-line:vertical {{
+    background: {t['surface_alt']};
+    height: 16px; subcontrol-position: top;    subcontrol-origin: margin;
+    border: 1px solid {t['border']};
+}}
+QScrollBar::add-line:vertical {{
+    background: {t['surface_alt']};
+    height: 16px; subcontrol-position: bottom; subcontrol-origin: margin;
+    border: 1px solid {t['border']};
+}}
+QScrollBar::left-arrow:horizontal {{
+    border-style: solid; border-width: 5px 7px 5px 0;
+    border-color: transparent {t['text']} transparent transparent;
+    width: 0; height: 0;
+}}
+QScrollBar::right-arrow:horizontal {{
+    border-style: solid; border-width: 5px 0 5px 7px;
+    border-color: transparent transparent transparent {t['text']};
+    width: 0; height: 0;
+}}
+QScrollBar::up-arrow:vertical {{
+    border-style: solid; border-width: 0 5px 7px 5px;
+    border-color: transparent transparent {t['text']} transparent;
+    width: 0; height: 0;
+}}
+QScrollBar::down-arrow:vertical {{
+    border-style: solid; border-width: 7px 5px 0 5px;
+    border-color: {t['text']} transparent transparent transparent;
+    width: 0; height: 0;
+}}
 QStatusBar {{ background-color: {t['surface_alt']}; color: {t['text_sub']}; }}
 QToolTip {{
     background-color: {t['surface']};

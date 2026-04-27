@@ -179,21 +179,12 @@ class MainWindow(QMainWindow):
         )
         version_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         right_lay.addWidget(version_label)
-        from widgets.help_dialog import make_help_button
-        btn_settings_row = QWidget()
-        bsr_lay = QHBoxLayout(btn_settings_row)
-        bsr_lay.setContentsMargins(0, 0, 0, 0)
-        bsr_lay.setSpacing(4)
-        bsr_lay.addStretch(1)
         btn_settings = QToolButton()
         btn_settings.setText("⚙ Settings")
         btn_settings.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         btn_settings.setStyleSheet("QToolButton { font-weight: bold; padding: 4px 10px; }")
         btn_settings.clicked.connect(self._open_settings)
-        bsr_lay.addWidget(btn_settings)
-        # 입력 방법 도움말 버튼 — Settings 우측에 붙임
-        bsr_lay.addWidget(make_help_button(self, "input"))
-        right_lay.addWidget(btn_settings_row, alignment=Qt.AlignmentFlag.AlignRight)
+        right_lay.addWidget(btn_settings, alignment=Qt.AlignmentFlag.AlignRight)
 
         # 좌측 더미 컬럼: 우측 컬럼과 동일 폭으로 가운데 정렬 보존
         left_dummy = QWidget()
@@ -298,15 +289,21 @@ class MainWindow(QMainWindow):
         self.sp_z_range.setFixedWidth(72)
         self.sp_z_range.valueChanged.connect(self._on_z_range_changed)
 
+        from widgets.paste_area import HEADER_BUTTON_WIDTH, HEADER_BUTTON_SPACING
+        # Run Analysis (2칸 폭) + Clear (1칸 폭) — 합치면 paste_area 의 Text+Table+Clear
+        # 폭과 동일 (시작/끝 X 정합 유지).
         self.btn_visualize = QPushButton("▶  Run Analysis")
         self.btn_visualize.setProperty("class", "primary")
-        # Input B 헤더 Text+Table+Clear 폭 합과 동일 (시작/끝 X가 일치하도록)
-        from widgets.paste_area import HEADER_BUTTON_WIDTH, HEADER_BUTTON_SPACING
         self.btn_visualize.setFixedWidth(
-            HEADER_BUTTON_WIDTH * 3 + HEADER_BUTTON_SPACING * 2
+            HEADER_BUTTON_WIDTH * 2 + HEADER_BUTTON_SPACING
         )
         self.btn_visualize.setEnabled(False)
         self.btn_visualize.clicked.connect(self._on_visualize)
+
+        # Clear — 결과 영역 비움
+        self.btn_clear = QPushButton("Clear")
+        self.btn_clear.setFixedWidth(HEADER_BUTTON_WIDTH)
+        self.btn_clear.clicked.connect(self._on_clear_results)
 
         # 좌표 콤보 변경 시 pair 기반 로직 + VALUE 리스트 재필터
         self.cb_coord.currentIndexChanged.connect(self._on_coord_changed)
@@ -360,9 +357,7 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.chk_delta_interp)
         lay.addStretch(1)
         lay.addWidget(self.btn_visualize)
-        # Control Bar / Copy 도움말 — Run Analysis 우측에 붙임
-        from widgets.help_dialog import make_help_button
-        lay.addWidget(make_help_button(self, "control"))
+        lay.addWidget(self.btn_clear)
         # 자연 높이를 측정해 fix — splitter 안에서 핸들로 변경 불가
         w.adjustSize()
         w.setFixedHeight(w.sizeHint().height())
@@ -384,6 +379,11 @@ class MainWindow(QMainWindow):
         self._reset_preset_override()
         self._update_delta_validation()
         self._refresh_controls()
+
+    def _on_clear_results(self) -> None:
+        """Clear 버튼 — 결과 영역 비우고 ReasonBar 초기화. 입력 데이터는 유지."""
+        self._result_panel.clear()
+        self._reason_bar.set_warnings(self._delta_warnings)
 
     def _show_blocking_reason(
         self, code: str, severity: str, message: str,

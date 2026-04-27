@@ -1,23 +1,20 @@
 """
-도움말 다이얼로그 + [?] 버튼 헬퍼.
+도움말 카탈로그 + 브라우저 오픈 헬퍼.
 
-규약:
-- `HelpDialog(title, body_html, parent)` — 단일 도움말 표시 다이얼로그 (modal).
-- `make_help_button(parent, topic_key)` — 22×22 [?] 버튼 생성. 클릭 시 `HELP_TEXTS[topic_key]` 다이얼로그 표시.
-- `install_corner_help_button(group_box, topic_key)` — QGroupBox 의 우상단 모서리에 [?] 버튼 absolute 배치. resize 시 위치 자동 갱신.
-- `HELP_TEXTS` — 카탈로그. key → (title, html_body). 모든 도움말 텍스트는 본 모듈 한 곳에서 관리.
+방식 — `HELP_TEXTS` 7 토픽을 통합 HTML 한 페이지로 빌드 → 임시 파일 →
+기본 브라우저로 오픈. 앱 내부 모달 다이얼로그 X.
 
-이미지 첨부:
-- 본 1차 초안은 텍스트 위주 (HTML <table> / <ul> / <code>). 사용자 검토 후 필요 시
-  PNG/SVG 첨부는 `<img src="..." />` 로 추가 가능.
+규약 (사용자 정책 2026-04-27):
+- `HELP_TEXTS` — 카탈로그. key → (title, html_body)
+- `open_help_in_browser()` — Settings 의 [도움말] 버튼이 호출. 하나의 HTML 페이지에
+  좌측 목차 + 우측 본문 (간단한 anchor 기반)
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QDialog, QDialogButtonBox, QGroupBox, QPushButton, QTextBrowser,
-    QVBoxLayout, QWidget,
-)
+import os
+import tempfile
+import webbrowser
+from pathlib import Path
 
 
 # ── 도움말 카탈로그 ─────────────────────────────────────────────
@@ -574,92 +571,63 @@ RECIPE 별로 저장 / 자동 재사용.</p>
 }
 
 
-# ── HelpDialog ─────────────────────────────────────────────────
-class HelpDialog(QDialog):
-    """단일 도움말 다이얼로그 — title + body_html + OK 버튼."""
+# ── 통합 HTML 페이지 빌드 + 브라우저 오픈 ──────────────────────
 
-    def __init__(self, title: str, body_html: str, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle(f"도움말 — {title}")
-        self.setModal(True)
-        self.resize(820, 720)
-
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(12, 12, 12, 12)
-        lay.setSpacing(8)
-
-        browser = QTextBrowser()
-        browser.setOpenExternalLinks(True)
-        browser.setHtml(body_html)
-        lay.addWidget(browser, stretch=1)
-
-        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
-        bb.accepted.connect(self.accept)
-        lay.addWidget(bb)
-
-
-def show_help(topic_key: str, parent: QWidget | None = None) -> None:
-    """카탈로그 키로 도움말 다이얼로그 표시."""
-    if topic_key not in HELP_TEXTS:
-        return
-    title, body = HELP_TEXTS[topic_key]
-    dlg = HelpDialog(title, body, parent)
-    dlg.exec()
+_PAGE_CSS = """
+body { font-family: 'Segoe UI', sans-serif; max-width: 960px; margin: 0 auto;
+       padding: 24px; color: #222; background: #fafafa; line-height: 1.55; }
+h1 { color: #1a4d6e; border-bottom: 2px solid #1a4d6e; padding-bottom: 8px; }
+h2 { color: #1a4d6e; margin-top: 36px; padding-top: 8px;
+     border-top: 1px solid #d0d0d0; }
+h3 { color: #2e5a7a; margin-top: 24px; }
+table { border-collapse: collapse; margin: 8px 0 16px 0; width: 100%; }
+table, th, td { border: 1px solid #aaa; }
+th, td { padding: 8px 12px; text-align: left; vertical-align: top; }
+th { background: #e8eef3; }
+code { background: #eef2f5; padding: 2px 5px; border-radius: 3px;
+       font-family: 'Consolas', 'Courier New', monospace; font-size: 0.92em; }
+ul, ol { margin: 6px 0 14px 0; }
+li { margin-bottom: 4px; }
+.toc { background: #fff; border: 1px solid #d0d0d0; padding: 12px 24px;
+       border-radius: 4px; margin-bottom: 24px; }
+.toc ul { list-style: none; padding-left: 8px; }
+.toc a { color: #1a4d6e; text-decoration: none; font-weight: bold; }
+.toc a:hover { text-decoration: underline; }
+"""
 
 
-# ── [?] 버튼 헬퍼 ──────────────────────────────────────────────
-_HELP_BUTTON_QSS = (
-    "QPushButton { "
-    "  border: 1px solid #888; "
-    "  border-radius: 11px; "
-    "  background-color: #f7f7f7; "
-    "  color: #333; "
-    "  font-weight: bold; "
-    "  padding: 0; "
-    "}"
-    "QPushButton:hover { background-color: #e0e0e0; }"
-    "QPushButton:pressed { background-color: #c8c8c8; }"
-)
+def build_help_html() -> str:
+    """모든 토픽을 하나의 HTML 페이지로 통합 — 목차 + 본문."""
+    parts: list[str] = [
+        "<!DOCTYPE html>",
+        "<html lang='ko'><head><meta charset='utf-8'>",
+        "<title>Wafer Map 도움말</title>",
+        f"<style>{_PAGE_CSS}</style>",
+        "</head><body>",
+        "<h1>Wafer Map 도움말</h1>",
+    ]
+
+    # 목차
+    parts.append("<div class='toc'><h3 style='margin-top:0'>목차</h3><ul>")
+    for key, (title, _) in HELP_TEXTS.items():
+        parts.append(f"<li><a href='#{key}'>{title}</a></li>")
+    parts.append("</ul></div>")
+
+    # 본문 — 각 토픽을 anchor 와 함께
+    for key, (_title, body) in HELP_TEXTS.items():
+        parts.append(f"<section id='{key}'>{body}</section>")
+
+    parts.append("</body></html>")
+    return "\n".join(parts)
 
 
-def make_help_button(parent: QWidget, topic_key: str) -> QPushButton:
-    """수평 layout 에 추가할 [?] 버튼 (22×22). main_window 의 toolbar/control 에 사용."""
-    btn = QPushButton("?", parent)
-    btn.setFixedSize(22, 22)
-    btn.setStyleSheet(_HELP_BUTTON_QSS)
-    btn.setToolTip("도움말")
-    btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    btn.clicked.connect(lambda: show_help(topic_key, parent))
-    return btn
+def open_help_in_browser() -> None:
+    """통합 도움말 HTML 을 임시 파일에 쓰고 기본 브라우저로 오픈.
 
-
-def install_corner_help_button(group: QGroupBox, topic_key: str) -> None:
-    """QGroupBox 우상단 모서리에 [?] 버튼 absolute 배치.
-
-    QGroupBox 의 native title 은 그대로 유지. 버튼은 child widget 으로 띄워
-    `resizeEvent` 에서 위치 자동 갱신.
+    매 호출마다 새로 빌드 — `HELP_TEXTS` 변경 즉시 반영.
+    파일은 OS 임시 폴더에 생성 (`wafer_map_help.html`). 같은 이름이라 누적 안 됨.
     """
-    btn = QPushButton("?", group)
-    btn.setFixedSize(22, 22)
-    btn.setStyleSheet(_HELP_BUTTON_QSS)
-    btn.setToolTip("도움말")
-    btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    btn.clicked.connect(lambda: show_help(topic_key, group))
-    btn.raise_()
-
-    # resize 시 우상단 위치 유지 — 기존 resizeEvent 보존하며 후처리
-    margin_x = 10
-    margin_y = 2
-
-    def _reposition() -> None:
-        btn.move(group.width() - btn.width() - margin_x, margin_y)
-        btn.raise_()
-
-    _orig_resize = group.resizeEvent
-
-    def _resize(ev) -> None:
-        _orig_resize(ev)
-        _reposition()
-
-    group.resizeEvent = _resize  # type: ignore[method-assign]
-    _reposition()
+    html = build_help_html()
+    out = Path(tempfile.gettempdir()) / "wafer_map_help.html"
+    out.write_text(html, encoding="utf-8")
+    webbrowser.open(out.as_uri())
