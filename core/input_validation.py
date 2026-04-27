@@ -9,9 +9,9 @@
 - 케이스 2: 헤더 행 2개+         → `metadata.extra_header_rows > 0` (severity=info)
   사용자가 여러 결과들 통합해서 한번에 paste 하는 use case. 첫 헤더만 남기고
   나머지는 main.py 의 `_strip_extra_header_rows` 가 절단.
-- 케이스 3: wafer 별 PARA set 다름 → 직접 분석 (severity=error, Run 차단).
-  사용자가 COPY 시 상단/하단 일부 행 누락한 케이스 — DELTA 모드 고려시 복잡해
-  Run 비활성으로 안전하게 차단.
+- 케이스 3: wafer 별 PARA set 다름 → 직접 분석 (severity=warn, Run 활성).
+  사내 실제 데이터에 흔한 케이스 (일부 wafer 만 추가 측정). VALUE 콤보 union
+  + `_visualize_single` 이 PARA 없는 wafer 는 NaN cell + (no data) 타이틀로 처리.
 - 케이스 4: (WAFERID, PARAMETER) 재등장 → `metadata.repeat_measurement_groups > 0`
   (severity=info — 재측정/반복 측정 정상 데이터, suffix 로 분리되어 시각화)
 
@@ -19,8 +19,8 @@
 raise — 호출처 (paste_area) 가 catch 후 자체 메시지 표시. 본 모듈 영역 외.
 
 severity 정책 — 호출자가 Run 비활성 결정에 사용:
-- `error` (Run 차단 / 시각화 불가): 케이스 3
-- `warn`  (Run 활성 / 주의 알림): DELTA 모드 PARA·RECIPE·반복 측정
+- `error` (Run 차단 / 시각화 불가): 현재 단일 입력 검증에선 미사용
+- `warn`  (Run 활성 / 주의 알림): 케이스 3 (PARA set 다름) / DELTA 모드 PARA·RECIPE·반복 측정
 - `ok`    (Run 활성 / 성공 알림): DELTA 좌표 fallback 성공
 - `info`  (Run 활성 / 정보 알림): 케이스 2, 4
 """
@@ -65,10 +65,11 @@ def validate(result: ParseResult) -> list[ValidationWarning]:
             message=f"헤더 행 {extra + 1}개 발견 — 첫 헤더만 사용",
         ))
 
-    # 케이스 3 — wafer 별 PARA set 일치 여부 — Run 차단
-    # 단, repeat_measurement_groups 가 있으면 __rep 분리된 wafer 가 PARA 다를 수
-    # 있어 false-positive 가능 (rep set 이 미완성인 경우). 일단 단순 비교 유지 —
-    # 사용자 케이스에서 rep 도 동일 PARA set 으로 측정하는 게 정상이라.
+    # 케이스 3 — wafer 별 PARA set 다름 — warn (Run 활성)
+    # 정책 (사용자 정책 2026-04-27, #6): 사내 실제 데이터에 wafer 별 PARA 다른
+    # 케이스 다수 존재. 이전엔 error 로 차단했지만 너무 엄격. VALUE 콤보는
+    # union 으로 채우고, 선택한 PARA 가 없는 wafer 는 _visualize_single 이
+    # NaN cell + (no data) 타이틀로 처리.
     para_sets = [frozenset(w.parameters.keys()) for w in result.wafers.values()]
     if len(set(para_sets)) > 1:
         union = set().union(*para_sets)
@@ -78,8 +79,9 @@ def validate(result: ParseResult) -> list[ValidationWarning]:
         tail = f" 외 {len(diff) - 3}개" if len(diff) > 3 else ""
         warnings.append(ValidationWarning(
             code="para_set_mismatch",
-            severity="error",
-            message=f"일부 웨이퍼 PARA 다름 ({head}{tail}) — 시각화 불가",
+            severity="warn",
+            message=(f"일부 웨이퍼 PARA 다름 ({head}{tail}) — "
+                     "없는 wafer 는 NaN cell 로 표시"),
         ))
 
     # 케이스 4 — (WAFERID, PARAMETER) 재등장 → __repN suffix 로 분리됨 (정상 데이터)
