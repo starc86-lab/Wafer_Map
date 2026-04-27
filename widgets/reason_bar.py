@@ -51,11 +51,16 @@ class ReasonBar(QFrame):
         """ValidationWarning list 받아 가장 높은 severity 색으로 표시.
 
         빈 list 면 빈 메시지 (라벨 비움). 여러 건이면 ", " 로 join.
+        ok severity 는 정상 동작 알림이라 ⚠ prefix 안 붙임 — 경고 마크와 톤 충돌.
         """
         if not warnings:
             self.set_message("", "info")
             return
-        text = ", ".join(f"⚠ {w.message}" for w in warnings)
+
+        def _fmt(w) -> str:
+            return w.message if w.severity == "ok" else f"⚠ {w.message}"
+
+        text = ", ".join(_fmt(w) for w in warnings)
         rank = {"info": 0, "ok": 1, "warn": 2, "error": 3}
         severity = max(
             (w.severity for w in warnings),

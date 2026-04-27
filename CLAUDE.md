@@ -361,11 +361,16 @@ Wafer Map/
 │   ├── coords.py                ← normalize_to_mm / filter_in_wafer / match_points / WAFER_RADIUS_MM=150
 │   ├── interp.py                ← RBF 4종(ThinPlate/Multiquadric/Gaussian/Quintic) + `RadialInterp` 1D spline + `is_radial_scan` 자동 감지 + `make_interp` 팩토리
 │   ├── metrics.py               ← summary_metrics (AVG/MAX/MIN/RANGE/3SIG/NU%)
-│   ├── delta.py                 ← compute_delta (WAFERID 매칭 → 좌표 매칭 → A−B)
-│   └── coord_library.py         ← CoordLibrary + CoordPreset (해시 버켓 O(N) 중복 검출, recipe_similarity)
+│   ├── delta.py                 ← compute_delta (WAFERID 매칭 → 좌표 합집합 + NaN 룰 + A−B + Δ-Interp 옵션)
+│   ├── coord_library.py         ← CoordLibrary + CoordPreset (해시 버켓 O(N) 중복 검출, recipe_similarity, PRE/POST 베이스 매칭)
+│   ├── input_summary.py         ← 단일 ParseResult 요약 (n_wafers / n_parameter / n_coord_pairs)
+│   ├── input_validation.py      ← 단일 입력 정합성 (extra_header/repeat_measurement info, para_set_mismatch error)
+│   ├── delta_validation.py      ← 양쪽 입력 정합성 (no_intersect/coord_unresolved error, coord_fallback ok, recipe_mismatch/no_common_value_para/repeats_in_input warn)
+│   └── recipe_util.py           ← RECIPE 호환 판정 단일 진실 원천 (`_+(PRE|POST)$` 베이스 비교, 구분자 `_` 만)
 ├── widgets/
 │   ├── main_window.py           ← 3-패널 QSplitter, 컨트롤 패널 fixed-height, view_mode 분기, closeEvent 윈도우 저장
-│   ├── paste_area.py            ← Ctrl+V 타겟 (Text/Table 토글 + Clear)
+│   ├── reason_bar.py            ← Run 결과 사유 한 줄 표시 (info/ok/warn/error 색 분기, ok 는 ⚠ prefix 없음)
+│   ├── paste_area.py            ← Ctrl+V 타겟 (Text/Table 토글 + Clear). 단일 입력 검증 라벨 (severity 색)
 │   ├── wafer_cell.py            ← WaferDisplay/WaferCell — 2D pyqtgraph + 3D GLSurfacePlotItem 동적 swap
 │   ├── result_panel.py          ← (MAP+Summary) 쌍을 가로 나열, 합성 Copy Graph용 컨테이너
 │   ├── settings_dialog.py       ← non-modal Save/Close/Default. Save는 저장만 (close 안 함) — 사용자가 연속 조정 가능. Close 누르면 미저장
@@ -385,6 +390,13 @@ Wafer Map/
 ├── settings.json                ← 런타임 설정 (.gitignore)
 └── coord_library.json           ← 좌표 프리셋 영구 저장소 (.gitignore)
 ```
+
+**입력 검증 + DELTA fallback 정책 (0.2.1~)**
+- **검증 분리**: 단일 입력 = `core/input_validation`, 양쪽 입력 = `core/delta_validation`. paste 직후 호출 → 결과 cache → `_refresh_controls` (Run 활성/비활성) + ReasonBar (사유 표시) 양쪽에서 재사용
+- **severity 정책**: `error` (Run 차단) / `warn` (Run 활성, 주의 알림) / `ok` (Run 활성, fallback 성공 알림 — 민트 색) / `info` (정보) — 색은 `paste_area._SEVERITY_COLORS` / `reason_bar` 동일 팔레트 (#d32f2f / #e76f51 / #2a9d8f / #666). `ok` 는 정상 동작 알림이라 `⚠` prefix 안 붙임
+- **DELTA 좌표 fallback 매트릭스** (`_resolve_delta_coords` + `delta_validation`): A·B 좌표 유무 × RECIPE 호환 → 옆집 빌리기 (양쪽 RECIPE 베이스 동일) / 라이브러리 / 결합. 자세한 표는 `widgets/main_window.py::_resolve_delta_coords` docstring
+- **RECIPE 호환 룰** (`core/recipe_util`): 구분자 `_` 만 인정 + `_PRE`/`_POST` suffix 항상 제외 후 베이스 비교 + 대소문자 무관. `Z_TEST_01__PRE` ↔ `Z_TEST_01__POST` ↔ `Z_TEST_01` 모두 호환. `Z_TEST_01-POST` (하이픈) / `Z_TEST_01POST` (구분자 X) 는 비호환. DELTA 호환 판정 + `coord_library.find_by_recipe` 양쪽에서 사용 (단일 진실 원천)
+- **Δ-Interp mode**: 양쪽 좌표가 부분만 겹칠 때 unmatched 점에 보간값으로 채워 정상 delta. 체크박스 (Control 패널) 활성 시 compute_delta 가 `interp_factory` 받아 `RBFInterpolator` 로 a_only/b_only 점 채움. 비활성 시 NaN 룰 (a_only → dv=va, b_only → dv=-vb)
 
 **3D 렌더링 메모**
 - 셰이더는 `shaded` 하드코딩. (normalColor/heightColor는 콤보 변경해도 시각적 효과 의미 없거나 컬러맵 무시되어 제거)
@@ -513,7 +525,13 @@ Wafer Map/
 - `_apply_z_scale_mode`는 `cb_zscale`을 ground truth로, view_mode 분기 없음. 토글 시 `refresh_all()` (2D `img.setLevels(z_range)`도 영향 받기 때문 — `invalidate_3d`만으론 2D 컬러 스케일 안 바뀜)
 - **Z-Margin 스핀박스 (메인 컨트롤 패널, cb_zscale 옆)**: 공통 모드 전용. 개별 모드에선 disable + 값 0 회색 (저장값은 별도 보관). matplotlib `ax.margins()` 관례 — `midpoint` 고정, `range × (1 + pct/100)` 로 확장. pct=0 원본, 50% → 1.5배, 100% → 2.0배. 각 wafer 가 palette 더 좁게 써서 시각 대비 부드러워짐. `_apply_z_scale_mode` 끝에서 적용. 즉시 settings.json 저장 + 전 셀 재렌더
 - **첫 Run Analysis 시퀀셜 표시 제거**: `ResultPanel.set_displays`가 `container.hide() → cells 생성·렌더·addWidget → layout.activate() + adjustSize() → container.show()` 순서. activate/adjustSize 빠지면 show() 직후 (0,0) 중첩 → HBoxLayout 펼침이 1프레임 보임
-- **첫 Run lazy init 흡수**: `app.py::_render_warmup`이 시작 시 dummy `pg.PlotWidget` + dummy `RBFInterpolator` 1회 호출 — 첫 Run Analysis가 두번째와 동속
+- **첫 Run lazy init 흡수**: `app.py::_pg_widget_warmup` 이 시작 시 dummy `pg.PlotWidget` + `_bg_warmup` 이 dummy `RBFInterpolator` 1회 호출 — 첫 Run Analysis 가 두번째와 동속
+
+**Startup warmup 구조 (0.2.1~)**
+- 이전 `_async_warmups` 단일 콜백이 GUI 스레드 0.5~2s 점유 → 윈도우 응답성 저하
+- 분리 구조: GUI 스레드 단계 분할 (`_gl_warmup` → 다음 틱 `_pg_widget_warmup`) + 백그라운드 `threading.Thread` 로 `_bg_warmup` (scipy RBF dummy + lazy import). Qt widget 은 GUI 스레드 전용이므로 백그라운드는 절대 만지지 않음
+- 측정 (벤치): GUI 스레드 ~167ms (gl 132ms + pg 35ms), bg 스레드 ~1.1s (병렬). 이전 대비 GUI 점유 89% 감소
+- 환경변수 `WAFERMAP_BENCH=1` 설정 시 단계별 시간 stdout 출력
 
 **3D 첫 렌더링 깜빡임 제거 (0.1.0~)**
 - `app.py`에서 `Qt.AA_ShareOpenGLContexts` set + 시작 시 dummy `GLViewWidget` show→hide→deleteLater (`_gl_warmup`).

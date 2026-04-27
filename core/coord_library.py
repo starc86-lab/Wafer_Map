@@ -169,20 +169,29 @@ class CoordLibrary:
         return None
 
     def find_by_recipe(self, recipe: str, n_points: int | None = None) -> list[CoordPreset]:
-        """RECIPE 매칭 — 2단계 폴백.
+        """RECIPE 매칭 — 3단계 폴백 (사용자 정책 2026-04-27 일관 적용).
 
         1단계: 대소문자 무시 완전일치 → `last_used` 내림차순
-        2단계 (1단계 결과 없고 `n_points` 주어졌을 때):
-          recipe_similarity >= 3 AND p.n_points == n_points →
-          (유사도, last_used) 내림차순
+        2단계: `_PRE` / `_POST` suffix 제외 후 베이스 일치 (양방향) →
+          `last_used` 내림차순. 정책 단일 진실 원천: `core.recipe_util`.
+        3단계 (`n_points` 주어졌을 때): recipe_similarity >= 3 AND
+          p.n_points == n_points → (유사도, last_used) 내림차순
         """
         if not recipe:
             return []
+        from core.recipe_util import strip_pre_post  # lazy: 순환 회피
         rec_lower = recipe.lower()
         exact = [p for p in self.presets if p.recipe.lower() == rec_lower]
         if exact:
             exact.sort(key=lambda p: p.last_used, reverse=True)
             return exact
+        # 2단계: PRE/POST 제외 후 베이스 일치
+        target_base = strip_pre_post(recipe)
+        compat = [p for p in self.presets
+                  if p.recipe and strip_pre_post(p.recipe) == target_base]
+        if compat:
+            compat.sort(key=lambda p: p.last_used, reverse=True)
+            return compat
         if n_points is None:
             return []
         MIN_SHARED_TOKENS = 3

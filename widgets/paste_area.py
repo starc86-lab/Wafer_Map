@@ -28,13 +28,15 @@ HEADER_BUTTON_WIDTH = 88
 HEADER_BUTTON_SPACING = 6
 
 
-# 검증 경고 severity 별 색 — error > warn > info 우선순위.
+# 검증 경고 severity 별 색 — error > warn > ok > info 우선순위.
+# `ok` 는 fallback 등 성공 알림 (민트). ReasonBar 와 동일 팔레트.
 _SEVERITY_COLORS = {
     "error": "#d32f2f",
     "warn":  "#e76f51",
+    "ok":    "#2a9d8f",
     "info":  "#666",
 }
-_SEVERITY_RANK = {"info": 0, "warn": 1, "error": 2}
+_SEVERITY_RANK = {"info": 0, "ok": 1, "warn": 2, "error": 3}
 
 
 def _max_severity(warnings: list) -> str:
@@ -232,8 +234,12 @@ class PasteArea(QWidget):
         self._summary.setStyleSheet(style)
 
         # 둘째 라벨 — 검증 경고. 빈/실패는 None 또는 빈 리스트 → hide.
+        # ok severity 는 정상 동작 알림이라 ⚠ 안 붙임 (ReasonBar 와 동일 규약).
         if warnings:
-            text = ", ".join(f"⚠ {w.message}" for w in warnings)
+            text = ", ".join(
+                w.message if w.severity == "ok" else f"⚠ {w.message}"
+                for w in warnings
+            )
             severity = _max_severity(warnings)
             self._warnings.setText(text)
             self._warnings.setStyleSheet(f"color: {_SEVERITY_COLORS[severity]};")

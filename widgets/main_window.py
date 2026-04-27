@@ -96,10 +96,6 @@ class MainWindow(QMainWindow):
         # DELTA 모드 검증 결과 cache — paste 변경 시점에 한 번 계산, _refresh_controls
         # (Run 활성화) + ReasonBar 양쪽에서 재사용. 단일 입력 / 빈 입력은 빈 list.
         self._delta_warnings: list = []
-        # 마지막 Run signature — 동일 입력 재Run 시 재렌더 skip (cell 재생성/RBF 재계산
-        # 비용 제거 + 카메라 각도·ER time 등 cell 내부 상태 보존). Settings/r-symmetry/
-        # Z-Scale 등 Run 과 무관한 변경은 즉시 반영 경로라 영향 없음.
-        self._last_run_signature: tuple | None = None
         self._main_splitter_restored = False
         self._preset_override: CoordPreset | None = None
 
@@ -325,6 +321,17 @@ class MainWindow(QMainWindow):
         self.chk_r_symmetry.setChecked(False)  # 저장값 무시, 항상 해제 시작
         self.chk_r_symmetry.toggled.connect(self._on_r_symmetry_toggled)
 
+        # Δ-Interp mode — DELTA 모드에서 좌표 일치 안 하는 점을 보간값으로 채워
+        # 정상 delta 계산. Default 미체크 + 세션 휘발 (저장 안 함). A·B 모두
+        # 유효한 입력일 때만 활성.
+        self.chk_delta_interp = QCheckBox("Δ-Interp mode")
+        self.chk_delta_interp.setStyleSheet(
+            f"QCheckBox {{ font-size: {FONT_SIZES.get('body', 14)}px; }}"
+        )
+        self.chk_delta_interp.setChecked(False)
+        self.chk_delta_interp.setEnabled(False)
+        self.chk_delta_interp.toggled.connect(self._on_delta_interp_toggled)
+
         for label, widget in [
             ("VALUE:", self.cb_value),
             ("좌표:", self.cb_coord),
@@ -341,6 +348,7 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.sp_z_range)
         lay.addSpacing(16)
         lay.addWidget(self.chk_r_symmetry)
+        lay.addWidget(self.chk_delta_interp)
         lay.addStretch(1)
         lay.addWidget(self.btn_visualize)
         # 자연 높이를 측정해 fix — splitter 안에서 핸들로 변경 불가
@@ -421,6 +429,13 @@ class MainWindow(QMainWindow):
             any_input and bool(available_ns) and all_valid and not delta_blocking
         )
         self.btn_load_preset.setEnabled(any_input)
+        # Δ-Interp mode — A·B 모두 유효한 입력일 때만 활성 (DELTA 모드 전용)
+        delta_ready = (self._result_a is not None and self._result_b is not None
+                       and self.paste_a.is_valid and self.paste_b.is_valid
+                       and not delta_blocking)
+        self.chk_delta_interp.setEnabled(delta_ready)
+        if not delta_ready and self.chk_delta_interp.isChecked():
+            self.chk_delta_interp.setChecked(False)
 
         # 자동 프리셋 감지 — 입력에 X/Y 없고 RECIPE 로 라이브러리 매칭 되면 자동 적용.
         # 사용자 explicit override 가 없을 때만.
@@ -783,20 +798,16 @@ class MainWindow(QMainWindow):
         if not v:
             return
 
-        # Run 변경 감지 — 같은 입력이면 skip (cell 재생성 안 함 → 카메라/휠 zoom/
-        # ER time 등 cell 상태 유지 + RBF 재계산 비용 제거). signature 는 paste
-        # 텍스트 + 콤보 선택 조합. 좌표 preset/라이브러리 자동 적용은 paste+VALUE
-        # 로부터 결정론적이라 포함 불필요.
-        signature = (
-            self.paste_a.text(),
-            self.paste_b.text(),
-            v, x, y,
-        )
-        if signature == self._last_run_signature and self._result_panel.cells:
-            return
-        self._last_run_signature = signature
+        # signature skip 정책 폐기 (2026-04-27) — 같은 입력 재클릭 시에도 매번
+        # 새로 시각화. 사용자 의도: Run 재클릭 = reset 같은 의도. 라이브러리/외부
+        # 상태 변경 후 재시도가 silent skip 되는 버그 (N1) 도 자동 해결.
+        # cell 재생성 비용은 보통 한 번 클릭이라 무시. 카메라/zoom 사용자 조정값은
+        # `_applied_cam_dist` 등 별도 추적기로 보존 (Settings camera_distance 변경
+        # 안 했으면 setCameraPosition 호출 안 함).
+
         # 좌표 콤보 비어있음 → 팝업 안내. 입력에 X/Y 없고 라이브러리 매칭도 없는 케이스.
         if not (x and y):
+            self._result_panel.clear()
             QMessageBox.warning(
                 self, "좌표 없음",
                 "X / Y 좌표를 확인할 수 없어 시각화할 수 없습니다.\n\n"
@@ -918,8 +929,9 @@ class MainWindow(QMainWindow):
 
         self._enforce_library_limits(library)
 
-        # 모든 웨이퍼 좌표 해결 실패 → 사용자에게 안내
+        # 모든 웨이퍼 좌표 해결 실패 → 결과 영역 비우고 사용자에게 안내
         if not displays and len(result.wafers) > 0:
+            self._result_panel.clear()
             QMessageBox.warning(
                 self, "좌표 없음",
                 "X/Y 좌표를 확인할 수 없어 시각화할 수 없습니다.\n\n"
@@ -963,7 +975,27 @@ class MainWindow(QMainWindow):
             self._result_panel.clear()
             return
 
-        dr = compute_delta(a, b, v, coords_per_wafer)
+        # Δ-Interp mode — 활성 시 a_only/b_only 점에 RBF 보간으로 채움.
+        # Settings 의 보간법 그대로 사용 (chart_common.interp_method 등).
+        interp_factory = None
+        if self.chk_delta_interp.isChecked():
+            from functools import partial
+            from core.interp import make_interp
+            sc = load_settings().get("chart_common", {})
+            interp_factory = partial(
+                make_interp,
+                method=sc.get("interp_method", "RBF-ThinPlate"),
+                radial_method=sc.get("radial_method", "Univariate Spline"),
+                radial_smoothing_factor=sc.get("radial_smoothing_factor", 5.0),
+                savgol_window=sc.get("savgol_window", 11),
+                savgol_polyorder=sc.get("savgol_polyorder", 3),
+                lowess_frac=sc.get("lowess_frac", 0.3),
+                polyfit_degree=sc.get("polyfit_degree", 3),
+                radial_bin_size_mm=sc.get("radial_bin_size_mm", 0),
+                radial_line_width_mm=sc.get("radial_line_width_mm", 45.0),
+            )
+
+        dr = compute_delta(a, b, v, coords_per_wafer, interp_factory=interp_factory)
         if dr.matched == 0:
             self._result_panel.clear()
             return
@@ -1083,19 +1115,30 @@ class MainWindow(QMainWindow):
         x_name: str,
         y_name: str,
         library: CoordLibrary,
-    ) -> dict[str, tuple[np.ndarray, np.ndarray]] | None:
-        """DELTA 모드 wafer 별 좌표 결정 (사용자 정책 2026-04-27).
+    ) -> dict[str, tuple[tuple[np.ndarray, np.ndarray],
+                          tuple[np.ndarray, np.ndarray]]] | None:
+        """DELTA 모드 wafer 별 좌표 결정 (사용자 정책 2026-04-27, Step 2).
 
-        우선순위:
-          1. A 전체 좌표 있음 → A 좌표 (wafer 별)
-          2. A 전체 누락 + B 전체 있음 → B 좌표 (wafer 별)
-          3. 양쪽 누락 → 라이브러리 (A RECIPE → B RECIPE) 좌표 (전체 wafer 동일)
-          4. 라이브러리도 매칭 X → None (좌표 결정 실패)
+        매트릭스 — "옆집 빌리기 (RECIPE 호환 시) + 도서관 fallback":
 
-        일부 wafer 만 누락은 input_validation case 3 가 paste 단계에서 차단했다고
-        가정 (Run 비활성). 본 메서드 호출 도달 시 양쪽 모두 wafer-level 일관 상태.
+        | A 좌표 | B 좌표 | RECIPE 호환 | 처리                                          |
+        |--------|--------|-------------|-----------------------------------------------|
+        | 있음   | 있음   | (any)       | A·B 각자 (compute_delta 합집합 매칭)          |
+        | 있음   | 없음   | 호환        | B 가 A 좌표 빌림 (양쪽 동일)                  |
+        | 있음   | 없음   | 호환 X      | B 라이브러리 → 매칭 ✓ 합집합 / 매칭 X 비활성  |
+        | 없음   | 있음   | 호환        | A 가 B 좌표 빌림                              |
+        | 없음   | 있음   | 호환 X      | A 라이브러리 → 매칭 ✓ 합집합 / 매칭 X 비활성  |
+        | 없음   | 없음   | 호환        | A 라이브러리 양쪽 → 없으면 B 라이브러리 양쪽  |
+        | 없음   | 없음   | 호환 X      | 양쪽 모두 라이브러리 필요. 한쪽 X → 비활성    |
+
+        RECIPE 호환 = `core.delta_validation._recipes_compatible` (정확 일치 +
+        _PRE/_POST suffix 제외 후 베이스 같음, 양방향).
+
+        Returns:
+            {wafer_id: ((xa, ya), (xb, yb))}, 또는 None (좌표 결정 실패 → Run 비활성).
         """
         from core.coords import normalize_to_mm  # lazy
+        from core.delta_validation import _recipes_compatible  # lazy
         common = sorted(set(a.wafers) & set(b.wafers))
         if not common:
             return {}
@@ -1107,25 +1150,61 @@ class MainWindow(QMainWindow):
                 return xa, ya
             return None
 
+        def _lib_coord(recipe):
+            if not recipe:
+                return None
+            hits = library.find_by_recipe(recipe)
+            if not hits:
+                return None
+            return (np.asarray(hits[0].x_mm, dtype=float),
+                    np.asarray(hits[0].y_mm, dtype=float))
+
         a_coords = {wid: _wafer_coord(a.wafers[wid]) for wid in common}
         b_coords = {wid: _wafer_coord(b.wafers[wid]) for wid in common}
         a_has = all(c is not None for c in a_coords.values())
         b_has = all(c is not None for c in b_coords.values())
 
-        if a_has:
-            return a_coords
-        if b_has:
-            return b_coords
+        recipe_a = self._dominant_recipe(a)
+        recipe_b = self._dominant_recipe(b)
+        can_borrow = _recipes_compatible(recipe_a, recipe_b)
 
-        # 양쪽 누락 — 라이브러리 (A RECIPE → B RECIPE)
-        for recipe in (self._dominant_recipe(a), self._dominant_recipe(b)):
-            if not recipe:
-                continue
-            hits = library.find_by_recipe(recipe)
-            if hits:
-                lib_x = np.asarray(hits[0].x_mm, dtype=float)
-                lib_y = np.asarray(hits[0].y_mm, dtype=float)
-                return {wid: (lib_x, lib_y) for wid in common}
+        # 케이스 1: 양쪽 좌표 있음 → 각자 (합집합 매칭)
+        if a_has and b_has:
+            return {wid: (a_coords[wid], b_coords[wid]) for wid in common}
+
+        # 케이스 2: A 만 좌표 있음
+        if a_has:
+            if can_borrow:
+                # B 가 A 좌표 빌림 (옆집)
+                return {wid: (a_coords[wid], a_coords[wid]) for wid in common}
+            # 호환 X → B 라이브러리 탐색
+            lib_b = _lib_coord(recipe_b)
+            if lib_b is None:
+                return None
+            return {wid: (a_coords[wid], lib_b) for wid in common}
+
+        # 케이스 3: B 만 좌표 있음 (대칭)
+        if b_has:
+            if can_borrow:
+                return {wid: (b_coords[wid], b_coords[wid]) for wid in common}
+            lib_a = _lib_coord(recipe_a)
+            if lib_a is None:
+                return None
+            return {wid: (lib_a, b_coords[wid]) for wid in common}
+
+        # 케이스 4: 양쪽 모두 누락 — 라이브러리 fallback
+        lib_a = _lib_coord(recipe_a)
+        lib_b = _lib_coord(recipe_b)
+        if can_borrow:
+            # 호환 → 한쪽 라이브러리만 있어도 양쪽에 사용 (A 우선)
+            if lib_a is not None:
+                return {wid: (lib_a, lib_a) for wid in common}
+            if lib_b is not None:
+                return {wid: (lib_b, lib_b) for wid in common}
+            return None
+        # 호환 X → 양쪽 모두 라이브러리 필요
+        if lib_a is not None and lib_b is not None:
+            return {wid: (lib_a, lib_b) for wid in common}
         return None
 
     def _save_used_pair_to_library(
@@ -1372,6 +1451,17 @@ class MainWindow(QMainWindow):
         if not self._result_panel.cells:
             return
         self._result_panel.refresh_all()
+
+    def _on_delta_interp_toggled(self, checked: bool) -> None:
+        """Δ-Interp mode 체크 — DELTA 좌표 일치 안 하는 점을 보간으로 채움.
+
+        DELTA 모드 전용. 체크 시 a_only/b_only 점에서 상대 측정값을 RBF 보간
+        값으로 채워 정상 delta 계산 (사용자 정책 2026-04-27).
+
+        **세션 휘발** — settings.json 저장 안 함. 양쪽 입력 있으면 즉시 재시각화.
+        """
+        if self._result_a and self._result_b:
+            self._on_visualize()
 
     def _on_z_range_changed(self, value: int) -> None:
         """Z-Margin 스핀박스 변경 — 현재 모드 세션값 갱신 + 재렌더. 저장 안 함."""

@@ -33,7 +33,7 @@ from widgets.settings_dialog import apply_global_style
 
 
 def _gl_warmup() -> None:
-    """OpenGL 컨텍스트 사전 초기화 — 첫 3D 깜빡임 제거용."""
+    """OpenGL 컨텍스트 사전 초기화 — 첫 3D 깜빡임 제거용 (GUI 스레드 필수)."""
     try:
         import pyqtgraph.opengl as gl
         w = gl.GLViewWidget()
@@ -47,16 +47,14 @@ def _gl_warmup() -> None:
         pass
 
 
-def _render_warmup() -> None:
-    """pyqtgraph / scipy 의 lazy 초기화 비용을 앱 시작 시점에 흡수.
+def _pg_widget_warmup() -> None:
+    """pyqtgraph widget 류 첫 호출 비용 흡수 (GUI 스레드 필수).
 
-    첫 Run Analysis에서 발생하던 cell 순차 생성 느낌(cell 하나씩 나타남)은
-    이 lib들의 첫 호출 cost가 cell마다 누적되어 발생. 여기서 미리 한 번 돌려
-    이후 Run Analysis는 두 번째 실행부터와 동일한 속도로 시작.
+    PlotWidget / ImageItem / ColorMap 의 lazy 초기화. show + processEvents 로
+    첫 paint 까지 강제 → 첫 Run Analysis 의 cell 별 lazy init 누적 흡수.
     """
-    import numpy as np
     try:
-        # pyqtgraph — PlotWidget / ImageItem / ColorMap 첫 사용 준비
+        import numpy as np
         import pyqtgraph as pg
         pw = pg.PlotWidget()
         pw.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
@@ -71,8 +69,17 @@ def _render_warmup() -> None:
         pw.deleteLater()
     except Exception:
         pass
+
+
+def _bg_warmup() -> None:
+    """백그라운드 스레드 — Qt widget 무관 부분만.
+
+    scipy RBF dummy 호출 + 무거운 모듈 prefetch. 둘 다 numpy/scipy/lapack 같은
+    C 확장 사용량 大 → GIL 풀려서 GUI 스레드 영향 거의 0. Qt widget 은 GUI
+    스레드 전용이므로 절대 만지지 않음.
+    """
     try:
-        # scipy RBF — 첫 호출 JIT/초기화 비용 흡수
+        import numpy as np
         from scipy.interpolate import RBFInterpolator
         pts = np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
         vals = np.array([1.0, 2.0, 3.0, 4.0])
@@ -80,15 +87,6 @@ def _render_warmup() -> None:
         rbf(np.array([[0.5, 0.5]]))
     except Exception:
         pass
-
-
-def _prefetch_lazy_modules() -> None:
-    """창 표시 후 백그라운드로 무거운 모듈을 미리 import.
-
-    `widgets.main_window` 가 module-level import 하지 않아 창 표시는 빨라지되,
-    사용자가 첫 사용 (Run / Settings / Preset Dialog) 까지 보통 3초+ 걸리는
-    틈에 미리 로드해 첫 사용 시 지연 0 보장.
-    """
     try:
         import core.interp  # noqa  — scipy.interpolate / scipy.signal 끌어옴 (가장 무거움)
         import core.delta   # noqa
@@ -153,15 +151,41 @@ def main() -> int:
     except ImportError:
         pass
 
-    # 창 표시 후 비동기로:
-    # 1) GL/render warmup (lazy 초기화 비용 흡수)
-    # 2) lazy 모듈 prefetch (사용자 첫 사용 시 지연 0)
-    # 사용자 첫 사용까지 보통 2-3초+ 걸리니 그 안에 모두 완료.
-    def _async_warmups() -> None:
+    # 창 표시 후 warmup —
+    #   - GUI 스레드: GL warmup → 다음 틱에 pyqtgraph widget warmup (단계 분할)
+    #   - 백그라운드 스레드: scipy RBF + lazy 모듈 prefetch (Qt 무관 부분)
+    # 이전 (단일 콜백 직렬 실행) 은 GUI 스레드 0.5~2s 점유 → 윈도우 응답성 저하.
+    # 분할 + 병렬화로 GUI 스레드 점유 ~300ms 이하로 축소.
+    # 환경변수 `WAFERMAP_BENCH=1` 설정 시 단계별 시간 stdout 출력.
+    import os
+    import threading
+    import time
+    bench = bool(os.environ.get("WAFERMAP_BENCH"))
+    t_main = time.perf_counter()
+
+    def _log(stage: str, t0: float) -> None:
+        if bench:
+            print(f"[startup] {stage}: {(time.perf_counter() - t0) * 1000:.0f}ms")
+
+    def _step_pg() -> None:
+        t0 = time.perf_counter()
+        _pg_widget_warmup()
+        _log("pg widget warmup (gui)", t0)
+
+    def _step_gl() -> None:
+        t0 = time.perf_counter()
         _gl_warmup()
-        _render_warmup()
-        _prefetch_lazy_modules()
-    QTimer.singleShot(0, _async_warmups)
+        _log("gl warmup (gui)", t0)
+        QTimer.singleShot(0, _step_pg)
+
+    def _bg_thread() -> None:
+        t0 = time.perf_counter()
+        _bg_warmup()
+        _log("bg warmup (thread)", t0)
+
+    threading.Thread(target=_bg_thread, daemon=True).start()
+    QTimer.singleShot(0, _step_gl)
+    _log("main → exec (gui blocking)", t_main)
 
     if "--selftest" in sys.argv:
         # 1.5초 후 자동 종료 — 뼈대 import/QSS/창 빌드 검증용

@@ -90,3 +90,53 @@ def match_points(
             ia.append(i)
             ib.append(j)
     return np.asarray(ia, dtype=int), np.asarray(ib, dtype=int)
+
+
+def union_match(
+    xa: np.ndarray, ya: np.ndarray,
+    xb: np.ndarray, yb: np.ndarray,
+    tolerance: float = 1.0,
+) -> tuple[list[tuple[int, int]], list[int], list[int]]:
+    """A∪B 합집합 + 1:1 매칭 (DELTA 새 정책용).
+
+    A 의 각 점에 대해 B 의 매칭되지 않은 점 중 가장 가까운 것 찾음. 거리
+    `tolerance` (mm, 직선) 내면 매칭 페어로. B 의 한 점이 A 의 여러 점에
+    동시 매칭되지 않도록 1:1 보장.
+
+    Returns:
+        pairs: list of (i_a, i_b) — 양쪽 다 있는 점
+        a_only: list of int — A 에만 있는 점 (B 매칭 X)
+        b_only: list of int — B 에만 있는 점 (A 매칭 X)
+    """
+    xa = np.asarray(xa, dtype=float)
+    ya = np.asarray(ya, dtype=float)
+    xb = np.asarray(xb, dtype=float)
+    yb = np.asarray(yb, dtype=float)
+
+    n_a, n_b = len(xa), len(xb)
+    matched_a: set[int] = set()
+    matched_b: set[int] = set()
+    pairs: list[tuple[int, int]] = []
+    tol_sq = tolerance * tolerance
+
+    for i in range(n_a):
+        if n_b == 0:
+            break
+        d2 = (xb - xa[i]) ** 2 + (yb - ya[i]) ** 2
+        # 매칭 안 된 B 점 중 가장 가까운 것
+        best_j = -1
+        best_d2 = np.inf
+        for j in range(n_b):
+            if j in matched_b:
+                continue
+            if d2[j] < best_d2:
+                best_d2 = d2[j]
+                best_j = j
+        if best_j >= 0 and best_d2 <= tol_sq:
+            pairs.append((i, best_j))
+            matched_a.add(i)
+            matched_b.add(best_j)
+
+    a_only = [i for i in range(n_a) if i not in matched_a]
+    b_only = [j for j in range(n_b) if j not in matched_b]
+    return pairs, a_only, b_only
