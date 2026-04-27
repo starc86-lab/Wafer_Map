@@ -186,6 +186,9 @@ def _preclean(text: str) -> str:
         .replace("\u200b", "")
         .replace("\ufeff", "")
     )
+    # \uc904\ubcc4 trailing separator \uc81c\uac70 \u2014 Excel \ubcf5\uc0ac \uc2dc \uc77c\ubd80 \uc904\uc5d0\ub9cc trailing \ube48 \uc140\uc774
+    # \ubd99\uc5b4 \uceec\ub7fc \uc218 \ubd88\uc77c\uce58 (`expected N fields, saw N+1`) \ub098\ub294 \ucf00\uc774\uc2a4 \ub300\uc751
+    text = re.sub(r"[,\t]+\s*$", "", text, flags=re.MULTILINE)
     return text
 
 
@@ -251,12 +254,12 @@ def _load_dataframe(
             s, metadata.extra_header_rows = _strip_extra_header_rows(s)
             first_line = s.splitlines()[0] if s.splitlines() else ""
             sep = "\t" if "\t" in first_line else ","
-            df = pd.read_csv(io.StringIO(s), sep=sep)
+            df = pd.read_csv(io.StringIO(s), sep=sep, on_bad_lines="warn")
             return _drop_leading_empty_columns(df), metadata
         path = Path(s)
         if not path.exists():
             raise FileNotFoundError(path)
-        df = pd.read_csv(path)
+        df = pd.read_csv(path, on_bad_lines="warn")
         return _drop_leading_empty_columns(df), metadata
     raise TypeError(f"지원하지 않는 source 타입: {type(source)}")
 
