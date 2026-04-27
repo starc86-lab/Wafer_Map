@@ -215,9 +215,12 @@ class PasteArea(QWidget):
 
         s = summarize(result)
         warns = validate(result)
+        sep_label = result.metadata.delimiter
+        sep_str = f" / 구분자: {sep_label}" if sep_label else ""
         self._set_status(
             result, df,
-            f"웨이퍼 {s.n_wafers}장, Parameter {s.n_parameter}개, 좌표 {s.n_coord_pairs}개",
+            f"웨이퍼 {s.n_wafers}장, Parameter {s.n_parameter}개, "
+            f"좌표 {s.n_coord_pairs}개{sep_str}",
             "color: #2a9d8f;",
             warns,
         )

@@ -80,6 +80,7 @@ class ParseMetadata:
     extra_header_rows: int = 0              # 첫 헤더 행 외에 절단된 헤더 행 수 (paste 2회 의심)
     repeat_measurement_groups: int = 0      # 같은 (WAFERID, PARA) 재등장으로 분리된 추가 측정 set 수
                                              # (재측정 / 반복 측정 케이스 — 데이터 보존 + suffix 로 분리)
+    delimiter: str = ""                      # 감지된 구분자 — "탭" / "콤마" / "" (DataFrame 직접 입력 / 미정)
 
 
 @dataclass
@@ -258,12 +259,14 @@ def _load_dataframe(
             s = re.sub(r"^[ \t]+", "", s, flags=re.MULTILINE)
             first_line = s.splitlines()[0] if s.splitlines() else ""
             sep = "\t" if "\t" in first_line else ","
+            metadata.delimiter = "탭" if sep == "\t" else "콤마"
             df = pd.read_csv(io.StringIO(s), sep=sep, on_bad_lines="warn")
             return _drop_leading_empty_columns(df), metadata
         path = Path(s)
         if not path.exists():
             raise FileNotFoundError(path)
         df = pd.read_csv(path, on_bad_lines="warn")
+        metadata.delimiter = "콤마"  # pd.read_csv 기본 sep=콤마
         return _drop_leading_empty_columns(df), metadata
     raise TypeError(f"지원하지 않는 source 타입: {type(source)}")
 
