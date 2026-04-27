@@ -179,12 +179,21 @@ class MainWindow(QMainWindow):
         )
         version_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         right_lay.addWidget(version_label)
+        from widgets.help_dialog import make_help_button
+        btn_settings_row = QWidget()
+        bsr_lay = QHBoxLayout(btn_settings_row)
+        bsr_lay.setContentsMargins(0, 0, 0, 0)
+        bsr_lay.setSpacing(4)
+        bsr_lay.addStretch(1)
         btn_settings = QToolButton()
         btn_settings.setText("⚙ Settings")
         btn_settings.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         btn_settings.setStyleSheet("QToolButton { font-weight: bold; padding: 4px 10px; }")
         btn_settings.clicked.connect(self._open_settings)
-        right_lay.addWidget(btn_settings, alignment=Qt.AlignmentFlag.AlignRight)
+        bsr_lay.addWidget(btn_settings)
+        # 입력 방법 도움말 버튼 — Settings 우측에 붙임
+        bsr_lay.addWidget(make_help_button(self, "input"))
+        right_lay.addWidget(btn_settings_row, alignment=Qt.AlignmentFlag.AlignRight)
 
         # 좌측 더미 컬럼: 우측 컬럼과 동일 폭으로 가운데 정렬 보존
         left_dummy = QWidget()
@@ -351,6 +360,9 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.chk_delta_interp)
         lay.addStretch(1)
         lay.addWidget(self.btn_visualize)
+        # Control Bar / Copy 도움말 — Run Analysis 우측에 붙임
+        from widgets.help_dialog import make_help_button
+        lay.addWidget(make_help_button(self, "control"))
         # 자연 높이를 측정해 fix — splitter 안에서 핸들로 변경 불가
         w.adjustSize()
         w.setFixedHeight(w.sizeHint().height())

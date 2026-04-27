@@ -725,6 +725,14 @@ class DesignTab(QWidget):
         self._card_3d = Chart3DGroup(settings.get("chart_3d", {}))
         # 1D Radial Graph 설정 — chart_common 과 같은 dict 에 저장. 카드만 분리.
         self._card_1d = Chart1DRadialGroup(settings.get("chart_common", {}))
+
+        # 도움말 [?] 버튼 — UI 설정 카드 제외 (사용자 정책 2026-04-27)
+        from widgets.help_dialog import install_corner_help_button
+        install_corner_help_button(self._card_common, "settings_chart_common")
+        install_corner_help_button(self._card_2d, "settings_chart_2d")
+        install_corner_help_button(self._card_3d, "settings_chart_3d")
+        install_corner_help_button(self._card_1d, "settings_chart_1d")
+
         cards.addWidget(self._ui_card)
         cards.addWidget(self._card_common)
         cards.addWidget(self._card_2d)
@@ -831,6 +839,9 @@ class CoordLibraryTab(QWidget):
         self._table.doubleClicked.connect(self._on_row_dbl_click)
 
         limits_box = QGroupBox("자동 정리")
+        # 도움말 [?] — 좌표 라이브러리 정책 전체 안내
+        from widgets.help_dialog import install_corner_help_button
+        install_corner_help_button(limits_box, "settings_coord_library")
         limits_form = QFormLayout(limits_box)
         cl_settings = settings.get("coord_library", {}) or {}
 
