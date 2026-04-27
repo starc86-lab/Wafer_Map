@@ -252,13 +252,12 @@ def _load_dataframe(
         if "\n" in s or "\t" in s:
             s = _preclean(s)
             s, metadata.extra_header_rows = _strip_extra_header_rows(s)
+            # 줄 시작 공백/탭 제거 — 모든 sep 에 일괄 적용. Excel 복사 시 줄 앞
+            # 노이즈 (공백·탭) 가 컬럼명에 붙거나 sep 인식 깨지는 케이스 대응.
+            # 탭 sep 의 진짜 leading 빈 셀은 사실상 의미 없는 케이스 — 제거 안전.
+            s = re.sub(r"^[ \t]+", "", s, flags=re.MULTILINE)
             first_line = s.splitlines()[0] if s.splitlines() else ""
             sep = "\t" if "\t" in first_line else ","
-            # sep=콤마 일 때 줄 시작 공백/탭 제거 — Excel 복사 시 줄 앞에 공백이
-            # 들어와 컬럼명에 leading 공백이 붙거나 sep 인식 깨지는 케이스 대응.
-            # sep=탭 이면 줄 시작 탭이 의미 있는 빈 셀이라 보존 (drop_leading 이 처리).
-            if sep == ",":
-                s = re.sub(r"^[ \t]+", "", s, flags=re.MULTILINE)
             df = pd.read_csv(io.StringIO(s), sep=sep, on_bad_lines="warn")
             return _drop_leading_empty_columns(df), metadata
         path = Path(s)
