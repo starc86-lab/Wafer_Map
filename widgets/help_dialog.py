@@ -12,9 +12,22 @@
 from __future__ import annotations
 
 import os
+import shutil
+import sys
 import tempfile
 import webbrowser
 from pathlib import Path
+
+
+def _help_assets_dir() -> Path:
+    """`assets/help/` 절대 경로 — PyInstaller `_MEIPASS` 환경도 자동 인식.
+
+    이 폴더에 PNG/JPG/SVG 등을 두고 HTML 본문에서
+    `<img src="파일명.png">` 형식으로 참조 가능.
+    """
+    if hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS) / "assets" / "help"
+    return Path(__file__).resolve().parent.parent / "assets" / "help"
 
 
 # ── 도움말 카탈로그 ─────────────────────────────────────────────
@@ -593,6 +606,11 @@ li { margin-bottom: 4px; }
 .toc ul { list-style: none; padding-left: 8px; }
 .toc a { color: #1a4d6e; text-decoration: none; font-weight: bold; }
 .toc a:hover { text-decoration: underline; }
+img { max-width: 100%; height: auto; border: 1px solid #ccc;
+      border-radius: 4px; margin: 8px 0; display: block; }
+figure { margin: 12px 0; }
+figcaption { font-size: 0.9em; color: #666; text-align: center;
+             margin-top: 4px; font-style: italic; }
 """
 
 
@@ -625,9 +643,22 @@ def open_help_in_browser() -> None:
     """통합 도움말 HTML 을 임시 파일에 쓰고 기본 브라우저로 오픈.
 
     매 호출마다 새로 빌드 — `HELP_TEXTS` 변경 즉시 반영.
-    파일은 OS 임시 폴더에 생성 (`wafer_map_help.html`). 같은 이름이라 누적 안 됨.
+
+    이미지 처리: `assets/help/` 의 모든 파일을 같은 임시 폴더로 자동 복사 →
+    HTML 본문에서 `<img src="파일명.png">` 형식으로 참조 가능 (상대 경로).
+    PyInstaller 배포 시에도 동일하게 동작.
     """
+    out_dir = Path(tempfile.gettempdir())
+    src_dir = _help_assets_dir()
+    if src_dir.exists():
+        for f in src_dir.iterdir():
+            if f.is_file():
+                try:
+                    shutil.copy2(f, out_dir / f.name)
+                except OSError:
+                    pass
+
     html = build_help_html()
-    out = Path(tempfile.gettempdir()) / "wafer_map_help.html"
+    out = out_dir / "wafer_map_help.html"
     out.write_text(html, encoding="utf-8")
     webbrowser.open(out.as_uri())
