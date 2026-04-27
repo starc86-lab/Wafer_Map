@@ -254,6 +254,11 @@ def _load_dataframe(
             s, metadata.extra_header_rows = _strip_extra_header_rows(s)
             first_line = s.splitlines()[0] if s.splitlines() else ""
             sep = "\t" if "\t" in first_line else ","
+            # sep=콤마 일 때 줄 시작 공백/탭 제거 — Excel 복사 시 줄 앞에 공백이
+            # 들어와 컬럼명에 leading 공백이 붙거나 sep 인식 깨지는 케이스 대응.
+            # sep=탭 이면 줄 시작 탭이 의미 있는 빈 셀이라 보존 (drop_leading 이 처리).
+            if sep == ",":
+                s = re.sub(r"^[ \t]+", "", s, flags=re.MULTILINE)
             df = pd.read_csv(io.StringIO(s), sep=sep, on_bad_lines="warn")
             return _drop_leading_empty_columns(df), metadata
         path = Path(s)
@@ -305,8 +310,15 @@ def _row_values(row: pd.Series, data_cols: list[str]) -> np.ndarray:
 
     정책: 뒤쪽 NaN을 잘라냄 (`MAX_DATA_ID` 뒤쪽은 빈칸이라는 데이터 특성).
     중간 NaN은 보존 (의도적 결측일 수 있음).
+
+    방어: `row[data_cols]` 가 1D 가 아닌 경우 (헤더 컬럼명 중복 등) 첫 발생만 사용.
     """
-    arr = pd.to_numeric(row[data_cols], errors="coerce").to_numpy(dtype=float)
+    sel = row[data_cols]
+    if isinstance(sel, pd.DataFrame):
+        # 컬럼명 중복으로 DataFrame 반환 — row 가 한 행이라 (1, N) 모양이지만
+        # 더 안전하게 첫 행만 추출
+        sel = sel.iloc[0] if sel.shape[0] >= 1 else pd.Series(dtype=float)
+    arr = pd.to_numeric(sel, errors="coerce").to_numpy(dtype=float)
     valid = ~np.isnan(arr)
     if not valid.any():
         return arr[:0]
