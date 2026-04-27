@@ -11,6 +11,41 @@ from __future__ import annotations
 import os
 
 
+def _generate_arrow_svg(direction: str, color: str, filename: str) -> None:
+    """QScrollBar 양 끝 화살표 SVG (8×8) 를 assets/ 에 생성.
+
+    Qt QSS 의 sub-control (`up-arrow` 등) 은 image 만 받음 — border 트릭 안 됨.
+    Fusion 스타일의 native arrow 는 sub-line 을 QSS 로 스타일링하면 사라져서
+    명시적 image url 이 필요.
+    """
+    if direction == "up":
+        points = "4,1.5 7,6.5 1,6.5"
+    elif direction == "down":
+        points = "1,1.5 7,1.5 4,6.5"
+    elif direction == "left":
+        points = "1.5,4 6.5,1 6.5,7"
+    elif direction == "right":
+        points = "1.5,1 6.5,4 1.5,7"
+    else:
+        return
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" '
+        'viewBox="0 0 8 8">'
+        f'<polygon points="{points}" fill="{color}"/></svg>'
+    )
+    os.makedirs("assets", exist_ok=True)
+    path = os.path.join("assets", filename)
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                if f.read() == svg:
+                    return
+        except Exception:
+            pass
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(svg)
+
+
 def _generate_check_svg(color: str, filename: str) -> None:
     """QCheckBox::indicator:checked 에 쓸 체크마크 SVG를 assets/에 생성."""
     svg = (
@@ -38,6 +73,14 @@ def build_stylesheet(t: dict, font: str) -> str:
 
     check_filename = f"check_{t['accent'].replace('#','')}.svg"
     _generate_check_svg(t["accent"], check_filename)
+
+    # 스크롤바 화살표 SVG 4종 — text 색 사용 (다크/라이트 자동 적응)
+    arrow_color_hex = t["text"].replace("#", "")
+    arrow_files = {}
+    for direction in ("up", "down", "left", "right"):
+        fn = f"arrow_{direction}_{arrow_color_hex}.svg"
+        _generate_arrow_svg(direction, t["text"], fn)
+        arrow_files[direction] = f"assets/{fn}"
 
     # accent hex → rgba (QSS 반투명 배경용)
     ac = t["accent"].lstrip("#")
@@ -197,16 +240,13 @@ QScrollBar:vertical {{
 QScrollBar::handle:horizontal {{
     background-color: {t['border']};
     border-radius: 5px;
-    min-width: 20px;
+    min-width: 25px;
 }}
 QScrollBar::handle:vertical {{
     background-color: {t['border']};
     border-radius: 5px;
-    min-height: 20px;
+    min-height: 25px;
 }}
-/* sub-line / add-line 영역만 명시 (배경 + 크기). arrow sub-control 은
-   QSS 명시 안 하면 Fusion 스타일이 native 삼각형 자동 그림 — 가장 깔끔.
-   (border 트릭으로 삼각형 만들면 sub-control 에선 사각형으로 렌더되는 Qt 한계) */
 QScrollBar::sub-line:horizontal {{
     background: {t['surface_alt']};
     width: 16px; subcontrol-position: left;  subcontrol-origin: margin;
@@ -226,6 +266,23 @@ QScrollBar::add-line:vertical {{
     background: {t['surface_alt']};
     height: 16px; subcontrol-position: bottom; subcontrol-origin: margin;
     border: 1px solid {t['border']};
+}}
+/* 양 끝 화살표 — 명시적 SVG (Fusion native 가 sub-line 스타일 시 사라짐) */
+QScrollBar::up-arrow:vertical {{
+    image: url({arrow_files['up']});
+    width: 8px; height: 8px;
+}}
+QScrollBar::down-arrow:vertical {{
+    image: url({arrow_files['down']});
+    width: 8px; height: 8px;
+}}
+QScrollBar::left-arrow:horizontal {{
+    image: url({arrow_files['left']});
+    width: 8px; height: 8px;
+}}
+QScrollBar::right-arrow:horizontal {{
+    image: url({arrow_files['right']});
+    width: 8px; height: 8px;
 }}
 QStatusBar {{ background-color: {t['surface_alt']}; color: {t['text_sub']}; }}
 QToolTip {{
