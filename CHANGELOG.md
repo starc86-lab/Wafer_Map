@@ -5,6 +5,112 @@ Wafer Map 버전 이력. SemVer(Major.Minor.Patch) 기준.
 - **Minor**: 기능 추가 / UI 변경
 - **Patch**: 버그 수정
 
+## [0.3.0] — 2026-04-27
+
+0.2.0 이후 핵심 축은 (1) 입력 검증 모듈 분리 + ReasonBar 단일 채널 정책, (2) DELTA 좌표 fallback 매트릭스 + RECIPE PRE/POST 호환 룰, (3) Run 단일 약속 + silent 분기 일관화, (4) Startup warmup 백그라운드 분리.
+
+### 입력 검증 모듈 신설 (`core/input_validation` / `core/delta_validation` / `core/input_summary`)
+
+paste 단계에서 정합성 검증 → ReasonBar 표시 + Run 비활성화. 어제까지 `_on_visualize` 가 검증·skip·다이얼로그·clear 5가지 책임을 떠안아 silent 분기로 결과 영역과 입력 상태가 어긋나던 문제 해결.
+
+- **단일 입력 검증** (`input_validation.validate`):
+  - `extra_header` (info) — 헤더 행 2개+ 발견. 사용자가 여러 결과 통합 paste 한 케이스. 첫 헤더만 사용
+  - `repeat_measurement` (info) — `(WAFERID, PARAMETER)` 재등장 → `__rep1, __rep2` suffix 로 분리 (정상 데이터)
+  - `para_set_mismatch` (error, Run 차단) — 일부 웨이퍼 PARA set 다름. 사용자가 일부 행 누락 paste 한 케이스
+- **양쪽 입력 검증** (`delta_validation.validate_delta`):
+  - `delta_no_intersect` (error) — A·B WAFERID 교집합 0
+  - `delta_coord_unresolved` (error) — 좌표 fallback 매트릭스 모든 경로 실패
+  - `delta_coord_fallback` (ok) — 옆집 빌리기 또는 라이브러리 fallback 성공 — 어떤 경로인지 메시지 명시 (`B 좌표 없음. A 와 동일 RECIPE 로 A 좌표 사용.` 등 4가지 분기)
+  - `delta_recipe_mismatch` (warn) — RECIPE 다름 (PRE/POST 제외 후 베이스 비교)
+  - `delta_no_common_value_para` (warn) — A∩B VALUE PARA = ∅ (union 으로 콤보 노출)
+  - `delta_repeats_in_input` (warn) — A 또는 B 에 `__rep` 분리된 wafer 존재
+- **input_summary** — 카운트 단일 함수화 (n_wafers / n_parameter / n_coord_pairs)
+
+### ReasonBar 단일 채널 + severity 4단계
+
+- 신규 widget `widgets/reason_bar.py` — Control 와 Result 패널 사이 한 줄 사유 표시
+- 4단계 severity + 색 팔레트 (paste_area / reason_bar 공통):
+  - `error` (#d32f2f 빨강) — Run 차단
+  - `warn` (#e76f51 주황) — Run 활성, 주의
+  - `ok` (#2a9d8f 민트) — fallback 성공 알림. `⚠` prefix 안 붙임
+  - `info` (#666 회색) — 정보
+- paste 시점 검증 결과 cache (`_delta_warnings`) → `_refresh_controls` + ReasonBar 양쪽 재사용
+
+### Run 단일 약속 + silent 분기 0 (`_show_blocking_reason` 헬퍼)
+
+- "Run 클릭 = 결과 영역이 현재 입력 상태와 동기화. 잔재 없음."
+- 모든 차단 사유 → `_show_blocking_reason(code, severity, message)` 헬퍼 (result_panel.clear + ReasonBar.set_warnings 한 번에)
+- **QMessageBox 사용 0** — 다이얼로그 차단 UX 제거. import 도 제거
+- 일부 wafer 좌표 실패 (skip) → ReasonBar warn (이전 silent continue)
+- 라이브러리 자동 fallback 성공 → ReasonBar ok (이전 silent 적용)
+- DELTA `coords None` / `matched=0` → ReasonBar error (이전 silent clear)
+- n 불일치 사후 검사 → 다이얼로그 → ReasonBar warn 으로 변경
+- ReasonBar wafer 식별자 포맷 = cell 타이틀과 동일 `{lot_id}.{pad_slot(slot_id)}{rep}` (사용자 직관성: WAFERID 영구 키 대신 현재 상태 표시)
+
+### DELTA 좌표 fallback 매트릭스 + 합집합 매칭
+
+- `compute_delta` 좌표 정책 — **합집합 + NaN 룰**:
+  - 양쪽 매칭 점: dv = va − vb
+  - A only 점: dv = va (B = 0 가정)
+  - B only 점: dv = −vb (A = 0 가정)
+  - 한쪽만 가진 PARA 도 union 으로 콤보 노출 → DELTA 가능
+- `_resolve_delta_coords` 매트릭스 (A·B 좌표 유무 × RECIPE 호환):
+  - 양쪽 좌표 O → 각자
+  - 한쪽 누락 + 호환 → 옆집 빌리기
+  - 한쪽 누락 + 비호환 → 라이브러리 fallback (해당 RECIPE 매칭 시)
+  - 양쪽 누락 + 호환 → 라이브러리 (한쪽 RECIPE 라도 매칭 시)
+  - 양쪽 누락 + 비호환 → A·B 라이브러리 각자 매칭 시 사용
+  - 그 외 → 시각화 불가 (error)
+
+### RECIPE 호환 룰 단일 진실 원천 (`core/recipe_util`)
+
+- 구분자 `_` 만 인정 (사내 RECIPEID 규칙)
+- `_PRE` / `_POST` suffix 항상 제외 후 베이스 비교 (양방향)
+- 대소문자 무관
+- 호환 예: `Z_TEST_01__PRE` ↔ `Z_TEST_01__POST` ↔ `Z_TEST_01`
+- 비호환 예: `Z_TEST_01-POST` (하이픈) / `Z_TEST_01POST` (구분자 X)
+- DELTA 호환 판정 + `coord_library.find_by_recipe` 3-stage fallback (정확 일치 → PRE/POST 베이스 → similarity 3+ 토큰 + n_points) 에서 공통 사용
+
+### Δ-Interp mode
+
+- Control 패널 체크박스 (A·B 모두 유효 시 활성)
+- 양쪽 좌표가 부분만 겹칠 때 unmatched 점에 RBF 보간으로 상대값 채움 → 정상 delta
+- 비활성 시 NaN 룰 (a_only → dv=va, b_only → dv=-vb)
+- Settings 의 `chart_common.interp_method` / radial 옵션들 그대로 사용
+
+### Startup warmup 백그라운드 분리 (체감 응답성)
+
+- 이전 `_async_warmups` 단일 콜백이 GUI 스레드 ~1.5s 점유 → 윈도우 응답성 저하
+- 분리 구조:
+  - GUI 스레드 단계 분할: `_gl_warmup` 즉시 → 다음 틱 `_pg_widget_warmup`
+  - 백그라운드 `threading.Thread`: `_bg_warmup` (scipy RBF dummy + lazy 모듈 prefetch)
+- 측정: GUI 스레드 ~167ms (gl 132 + pg 35), bg 스레드 ~1.1s (병렬). 이전 대비 GUI 점유 89% 감소
+- 환경변수 `WAFERMAP_BENCH=1` 설정 시 단계별 시간 stdout 출력
+
+### signature skip 폐기
+
+- 같은 입력 재클릭 = reset 의미 (사용자 정책)
+- 매번 새로 시각화. cell 재생성 비용 무시 가능
+- 이전 N1 버그 (라이브러리 변경 후 재시도 silent skip) 자동 해결
+- `_applied_cam_dist` 등 별도 추적기로 사용자 카메라 조정값만 보존
+
+### 검증 샘플 19종 (`samples/cases/z_test_*.csv`)
+
+`debug/gen_delta_samples.py` generator 로 모든 검증 케이스 커버:
+- post1~post11: DELTA 정상 + RECIPE 변형 (suffix / 구분자)
+- post12: A·B VALUE PARA 교집합 0 (no_common_value_para warn)
+- post13: 다른 WAFERID (no_intersect error)
+- post14: 반복 측정 (repeats_in_input warn)
+- post15: 헤더 행 2개 (extra_header info)
+- post16: wafer 별 PARA set 다름 (para_set_mismatch error)
+- post17: 일부 wafer 좌표 실패 (skip warn) — RECIPE 토큰 완전 분리로 라이브러리 similarity fallback 차단
+- post18: VALUE n vs 좌표 n 불일치 (n_mismatch warn)
+- post19: 동일 RECIPE → 라이브러리 자동 fallback (ok)
+
+### 회사명 / 버전 표시
+- 좌상단 표기 변경: `KP TF` → `SK hynix`
+- 버전 0.3.0
+
 ## [0.2.0] — 2026-04-25
 
 사내 베타 0.1.0 이후 ~87 커밋. 주요 축은 (1) 1D Radial Graph + fitting 고도화, (2) 3D radial mesh 전환, (3) Copy Graph FBO 전환, (4) 좌표 라이브러리 pair-단위 개편, (5) VALUE/좌표 자동 선택 고도화.

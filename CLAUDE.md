@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-현재 버전: **0.2.0** (FBO Copy Graph + 1D Radial + 3D radial mesh 등, 2026-04-25). 버전 이력은 [CHANGELOG.md](CHANGELOG.md) 참고, 사용자 가이드는 [USER_GUIDE.md](USER_GUIDE.md).
+현재 버전: **0.3.0** (입력 검증 + ReasonBar 단일 채널 + DELTA 좌표 fallback + Startup warmup 분리, 2026-04-27). 버전 이력은 [CHANGELOG.md](CHANGELOG.md) 참고, 사용자 가이드는 [USER_GUIDE.md](USER_GUIDE.md).
 
 ## 개발자 정보
 - 한국인, 코딩 중급 수준
@@ -391,12 +391,61 @@ Wafer Map/
 └── coord_library.json           ← 좌표 프리셋 영구 저장소 (.gitignore)
 ```
 
-**입력 검증 + DELTA fallback 정책 (0.2.1~)**
-- **검증 분리**: 단일 입력 = `core/input_validation`, 양쪽 입력 = `core/delta_validation`. paste 직후 호출 → 결과 cache → `_refresh_controls` (Run 활성/비활성) + ReasonBar (사유 표시) 양쪽에서 재사용
-- **severity 정책**: `error` (Run 차단) / `warn` (Run 활성, 주의 알림) / `ok` (Run 활성, fallback 성공 알림 — 민트 색) / `info` (정보) — 색은 `paste_area._SEVERITY_COLORS` / `reason_bar` 동일 팔레트 (#d32f2f / #e76f51 / #2a9d8f / #666). `ok` 는 정상 동작 알림이라 `⚠` prefix 안 붙임
-- **DELTA 좌표 fallback 매트릭스** (`_resolve_delta_coords` + `delta_validation`): A·B 좌표 유무 × RECIPE 호환 → 옆집 빌리기 (양쪽 RECIPE 베이스 동일) / 라이브러리 / 결합. 자세한 표는 `widgets/main_window.py::_resolve_delta_coords` docstring
-- **RECIPE 호환 룰** (`core/recipe_util`): 구분자 `_` 만 인정 + `_PRE`/`_POST` suffix 항상 제외 후 베이스 비교 + 대소문자 무관. `Z_TEST_01__PRE` ↔ `Z_TEST_01__POST` ↔ `Z_TEST_01` 모두 호환. `Z_TEST_01-POST` (하이픈) / `Z_TEST_01POST` (구분자 X) 는 비호환. DELTA 호환 판정 + `coord_library.find_by_recipe` 양쪽에서 사용 (단일 진실 원천)
-- **Δ-Interp mode**: 양쪽 좌표가 부분만 겹칠 때 unmatched 점에 보간값으로 채워 정상 delta. 체크박스 (Control 패널) 활성 시 compute_delta 가 `interp_factory` 받아 `RBFInterpolator` 로 a_only/b_only 점 채움. 비활성 시 NaN 룰 (a_only → dv=va, b_only → dv=-vb)
+**입력 검증 + ReasonBar 단일 채널 정책 (0.3.0~)**
+
+배경 — silent 분기로 인한 디버깅·UX 혼란 해결. 어제까지 `_on_visualize` 가 검증·skip·다이얼로그·clear 5가지를 다 떠안아 결과 영역과 입력 상태가 동기화 안 되는 문제. 분리 + 단일 채널화로 해결.
+
+- **검증 분리** (단일 책임):
+  - `core/input_summary` — 카운트 (n_wafers / n_parameter / n_coord_pairs)
+  - `core/input_validation` — 단일 입력 정합성 (extra_header info / repeat_measurement info / para_set_mismatch error)
+  - `core/delta_validation` — 양쪽 입력 정합성 (no_intersect/coord_unresolved error / coord_fallback ok / recipe_mismatch/no_common_value_para/repeats_in_input warn)
+  - paste 직후 호출 → 결과 cache (`_delta_warnings`) → `_refresh_controls` (Run 활성/비활성 결정) + ReasonBar (사유 표시) 양쪽에서 재사용. 검증 한 번 → 두 채널 갱신.
+
+- **severity 4단계 + 색 팔레트** (paste_area + ReasonBar 공통):
+  - `error` (#d32f2f, 빨강) — Run 차단. `_SEVERITY_RANK = 3`
+  - `warn`  (#e76f51, 주황) — Run 활성, 주의. `RANK = 2`
+  - `ok`    (#2a9d8f, 민트) — Run 활성, **fallback 성공 알림**. `⚠` prefix 안 붙임 (정상 동작 톤). `RANK = 1`
+  - `info`  (#666,    회색) — 정보. `RANK = 0`
+  - 여러 건 동시 표시 시 max severity 색 채택, 메시지는 `, ` join
+
+- **Run 단일 약속 + silent 분기 0** (사용자 정책 2026-04-27):
+  - "Run 클릭 = 결과 영역이 현재 입력 상태와 동기화" — 잔재 없음
+  - 차단 사유는 모두 `_show_blocking_reason(code, severity, message)` 헬퍼로 표시 (result_panel.clear + ReasonBar.set_warnings 한 번에)
+  - paste 시점 `_delta_warnings` 보존 + 차단 사유 합쳐 표시 (ValidationWarning 리스트 합집합)
+  - QMessageBox 사용 0 — 다이얼로그 차단 UX 제거. 모든 사유는 ReasonBar 단일 채널
+  - 일부 wafer 좌표 실패 (skip) 와 라이브러리 자동 fallback (성공) 도 ReasonBar 알림 — silent 동작 0
+
+- **DELTA 좌표 fallback 매트릭스** (`_resolve_delta_coords` + `delta_validation`):
+  - 양쪽 좌표 O → 각자 사용 (compute_delta 합집합 매칭)
+  - A 좌표 O + B 좌표 X + RECIPE 호환 → 옆집 (B 가 A 좌표 빌림) → ok
+  - A 좌표 O + B 좌표 X + RECIPE 비호환 + B 라이브러리 매칭 ✓ → ok
+  - A 좌표 O + B 좌표 X + RECIPE 비호환 + B 라이브러리 매칭 X → error (Run 차단)
+  - A 좌표 X + B 좌표 O 도 대칭
+  - 양쪽 좌표 X + 호환 + 라이브러리 매칭 ✓ → ok
+  - 양쪽 좌표 X + 비호환 + A·B 라이브러리 모두 매칭 ✓ → ok (각자 사용)
+  - 그 외 → error
+  - 자세한 docstring: `widgets/main_window.py::_resolve_delta_coords`
+
+- **RECIPE 호환 룰** (`core/recipe_util` — 단일 진실 원천):
+  - 구분자 `_` 만 인정 + `_PRE` / `_POST` suffix 항상 제외 후 베이스 비교 + 대소문자 무관
+  - `Z_TEST_01__PRE` ↔ `Z_TEST_01__POST` ↔ `Z_TEST_01` 모두 호환
+  - `Z_TEST_01-POST` (하이픈) / `Z_TEST_01POST` (구분자 X) 는 비호환
+  - DELTA 호환 판정 + `coord_library.find_by_recipe` (3-stage fallback: 정확 일치 → PRE/POST 베이스 일치 → similarity 3+ 토큰 매칭) 에서 사용
+
+- **DELTA 합집합 매칭 + NaN 룰** (`core/delta::compute_delta`):
+  - 양쪽 매칭 점: dv = va − vb (정상)
+  - A only 점: dv = va (B = 0 가정)
+  - B only 점: dv = −vb (A = 0 가정)
+  - 한쪽만 가진 PARA 도 union 으로 콤보 노출 — DELTA 가능
+  - tolerance: 1mm 직선거리
+
+- **Δ-Interp mode** (체크박스, Control 패널, A·B 모두 유효 시 활성):
+  - 활성 시 a_only / b_only 점에 RBF 보간으로 상대값 채움 → 정상 delta
+  - 비활성 시 NaN 룰 (위 조항)
+  - `compute_delta(..., interp_factory=...)` 로 Settings 의 보간법 사용
+  - `DeltaWafer.interp_indices` 에 보간 점 인덱스 기록 (시각화 마커용, 현재 미사용 deferred)
+
+- **signature skip 폐기** (2026-04-27): 같은 입력 재클릭 = reset 의미. 매번 새로 시각화. cell 재생성 비용 무시 가능. `_applied_cam_dist` 등 별도 추적기로 카메라 상태만 보존
 
 **3D 렌더링 메모**
 - 셰이더는 `shaded` 하드코딩. (normalColor/heightColor는 콤보 변경해도 시각적 효과 의미 없거나 컬러맵 무시되어 제거)

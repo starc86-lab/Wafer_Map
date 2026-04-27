@@ -4,7 +4,7 @@
 
 ## 빠른 시작
 
-1. `Wafer_Map_0.2.0.zip` 압축 풀기 → 폴더 안의 `Wafer Map.exe` 실행 (무설치).
+1. `Wafer_Map_0.3.0.zip` 압축 풀기 → 폴더 안의 `Wafer Map.exe` 실행 (무설치).
 2. 계측 장비·Excel에서 **long-form CSV** (헤더 포함)를 전체 선택 → Ctrl+C.
 3. 앱의 **Input A** 영역에 Ctrl+V.
 4. VALUE / X / Y 콤보가 자동 선택됨. 필요 시 수동 변경.
@@ -18,10 +18,63 @@
 ### Pre-Post Delta 시각화
 - **Input A에 Pre Data**, **Input B에 Post Data** 페이스트.
 - WAFERID가 동일한 데이터만 매칭되어 Δ = A − B 로 계산.
-- 좌표(X/Y)가 완전히 일치하는 측정점만 사용 (tolerance 1 μm).
+- **좌표 합집합 매칭** (tolerance 1mm): 양쪽 매칭 점은 정상 delta, 한쪽만 있는 점도 시각화 (NaN 룰 — A only → dv=va, B only → dv=−vb).
+- **Δ-Interp mode** 체크박스 (Control 패널, 양쪽 입력 시 활성): 한쪽만 있는 점에 RBF 보간으로 상대값 채워 정상 delta 표시. 비활성 시 NaN 룰 적용.
+- **RECIPE 호환** — `_PRE` / `_POST` suffix 자동 제외 후 베이스 비교. `Z_TEST_01__PRE` ↔ `Z_TEST_01__POST` ↔ `Z_TEST_01` 모두 호환. 구분자 `_` 만 인정 (하이픈/구분자 없음은 비호환).
+- **DELTA 좌표 fallback**: A 또는 B 한쪽 좌표 누락 시 자동 fallback (옆집 빌리기 / 라이브러리 매칭). 어떤 경로로 해결됐는지 ReasonBar 에 민트색 메시지 표시.
 
 ### 다중 웨이퍼
 - 같은 페이스트 안에 여러 웨이퍼가 들어 있으면 자동 분리 (WAFERID 그룹핑).
+
+## 입력 검증 + ReasonBar (사유 표시)
+
+페이스트 직후·Visualize 직후 **Input 라벨** 과 **ReasonBar** (Control 와 결과 사이 한 줄) 에 검증 결과가 표시됨. 색으로 의미 구분:
+
+| 색 | 의미 | 동작 |
+|---|---|---|
+| 🟢 민트 | 정상 / fallback 성공 | Run 가능, 어떻게 성공했는지 안내 |
+| ⚪ 회색 | 정보 알림 | Run 가능, 부가 정보 |
+| 🟠 주황 | 주의 | Run 가능, 결과 신뢰성 확인 권장 |
+| 🔴 빨강 | 차단 사유 | Run 비활성, 사유 해결 필요 |
+
+### Input 라벨 (페이스트 직후)
+- 정상: `웨이퍼 N장, Parameter N개, 좌표 N개` (민트)
+- 헤더 행 2개+ 발견: `헤더 행 N개 발견 — 첫 헤더만 사용` (회색 info)
+- 반복 측정 분리: `반복 측정 N건 발견 — __rep1, __rep2 ...` (회색 info)
+- 일부 wafer PARA set 다름: `일부 웨이퍼 PARA 다름 (...) — 시각화 불가` (빨강 error, **Run 차단**)
+- 필수 컬럼 누락: `⚠ 필수 컬럼 부족: ...` (빨강 error, **Run 차단**)
+
+### ReasonBar (DELTA 모드 / Run 결과)
+
+**DELTA 좌표 fallback (페이스트 직후)**:
+- `B 좌표 없음. A 와 동일 RECIPE 로 A 좌표 사용.` (민트 ok)
+- `B 좌표 없음. B RECIPE 라이브러리 좌표 사용.` (민트 ok)
+- `양쪽 좌표 없음. 라이브러리 좌표 사용.` (민트 ok)
+- `B 좌표 없음. RECIPE 비호환 + 라이브러리 매칭 없음 — 시각화 불가.` (빨강 error)
+
+**DELTA 기타**:
+- `WAFERID 교집합 없음 (A N장, B N장)` (빨강 error)
+- `RECIPE 다름 (A=..., B=...)` (주황 warn — 시각화 가능, 의미 해석 주의)
+- `A·B 공통 VALUE PARA 없음 — 한쪽만 가진 PARA 도 선택 가능` (주황 warn)
+- `A 또는 B 에 WAFERID 중복 N건 — 첫 측정 set 끼리 계산` (주황 warn)
+
+**Run 후 (단일 모드)**:
+- `wafer N개 좌표 라이브러리 자동 적용: lot.slot, ...` (민트 ok — 자체 X/Y 없어 라이브러리에서 가져온 wafer 안내)
+- `좌표 해결 실패 wafer N개 표시 안 됨: lot.slot, ...` (주황 warn — 시각화는 진행, 일부 wafer 만 빠짐)
+- `포인트 개수 불일치 — VALUE T1: 50 pt vs 좌표 X/Y: 55 pt` (주황 warn — 시각화 진행, 결과 신뢰성 확인)
+
+**Run 후 (DELTA 모드 차단)**:
+- `DELTA: 양쪽 좌표 결정 실패 — 좌표 라이브러리 매칭 필요` (빨강 error)
+- `DELTA: 매칭된 wafer 0 — 시각화할 데이터 없음` (빨강 error)
+
+### 차단 사유 해결 가이드
+
+| 사유 | 해결 |
+|---|---|
+| WAFERID 교집합 없음 | A·B 입력의 WAFERID 컬럼 확인. 같은 wafer 끼리 매칭 가능한지. |
+| 좌표 결정 실패 | Settings → 좌표 라이브러리에 해당 RECIPE 좌표 미리 저장. 또는 입력에 X/Y PARAMETER 행 추가. |
+| 일부 웨이퍼 PARA 다름 | 페이스트한 데이터에 일부 행 누락 있는지 확인. 누락된 PARA 행 보충. |
+| 필수 컬럼 부족 | 헤더에 `WAFERID`/`LOT ID`/`SLOTID`/`PARAMETER`/`RECIPE`/`DATA1`+ 있는지 확인. |
 
 ## 좌표 프리셋 라이브러리
 
@@ -107,4 +160,4 @@ VALUE 파싱은 되지만 X/Y 좌표가 입력에 없는 경우 대비.
 
 ## 버전 / 피드백
 
-현재 버전은 창 좌상단에 표시. 이슈·요청은 GitHub Issues 또는 사내 채널로.
+현재 버전은 창 우상단에 표시 (`v0.3.0 | © 2026 SK hynix | Jihwan Park`). 이슈·요청은 GitHub Issues 또는 사내 채널로.

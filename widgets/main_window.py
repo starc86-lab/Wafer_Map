@@ -16,7 +16,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QGuiApplication, QIcon, QShowEvent
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QGridLayout, QHBoxLayout, QLabel, QMainWindow,
-    QMessageBox, QPushButton, QSizePolicy, QSpinBox, QSplitter, QToolBar,
+    QPushButton, QSizePolicy, QSpinBox, QSplitter, QToolBar,
     QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -172,7 +172,7 @@ class MainWindow(QMainWindow):
         right_lay = QVBoxLayout(right_col)
         right_lay.setContentsMargins(0, 0, 0, 0)
         right_lay.setSpacing(4)
-        version_label = QLabel(f"v{VERSION} | © 2026 KP TF | Jihwan Park")
+        version_label = QLabel(f"v{VERSION} | © 2026 SK hynix | Jihwan Park")
         version_label.setStyleSheet(
             "color: gray; background: transparent; "
             "font-size: 9pt; font-style: italic;"
@@ -372,6 +372,28 @@ class MainWindow(QMainWindow):
         self._reset_preset_override()
         self._update_delta_validation()
         self._refresh_controls()
+
+    def _show_blocking_reason(
+        self, code: str, severity: str, message: str,
+    ) -> None:
+        """Run 차단 사유를 단일 채널 (ReasonBar) 로 표시 + 결과 영역 비움.
+
+        규약 (사용자 정책 2026-04-27 — silent 분기 일관화):
+          - 결과 영역 = 항상 "현재 입력 상태" 동기화. 잔재 없음.
+          - 사유 = ReasonBar 단일 채널. 다이얼로그·_summary 사용 안 함.
+          - paste 시점 `_delta_warnings` 는 보존 — 차단 사유와 합쳐 표시.
+
+        Args:
+            code: 사유 식별자 (분기 분류용)
+            severity: "error" / "warn" / "ok" / "info"
+            message: 사용자 표시 한국어 텍스트
+        """
+        from core.input_validation import ValidationWarning  # 재사용
+        extra = list(self._delta_warnings) + [
+            ValidationWarning(code=code, severity=severity, message=message)
+        ]
+        self._reason_bar.set_warnings(extra)
+        self._result_panel.clear()
 
     def _update_delta_validation(self) -> None:
         """양쪽 ParseResult 가 모두 있으면 DELTA 검증 + cache + ReasonBar 표시.
@@ -791,47 +813,61 @@ class MainWindow(QMainWindow):
             combo.blockSignals(False)
 
     def _on_visualize(self) -> None:
-        v = self._current_value()
-        xy = self._current_xy()
-        x = xy[0] if xy else ""
-        y = xy[1] if xy else ""
-        if not v:
-            return
-
         # signature skip 정책 폐기 (2026-04-27) — 같은 입력 재클릭 시에도 매번
         # 새로 시각화. 사용자 의도: Run 재클릭 = reset 같은 의도. 라이브러리/외부
         # 상태 변경 후 재시도가 silent skip 되는 버그 (N1) 도 자동 해결.
         # cell 재생성 비용은 보통 한 번 클릭이라 무시. 카메라/zoom 사용자 조정값은
         # `_applied_cam_dist` 등 별도 추적기로 보존 (Settings camera_distance 변경
         # 안 했으면 setCameraPosition 호출 안 함).
+        #
+        # 차단 사유는 모두 `_show_blocking_reason` (ReasonBar 단일 채널) 로 통일 —
+        # 결과 영역은 항상 현재 입력 상태와 동기화. silent return / silent clear 없음.
 
-        # 좌표 콤보 비어있음 → 팝업 안내. 입력에 X/Y 없고 라이브러리 매칭도 없는 케이스.
-        if not (x and y):
-            self._result_panel.clear()
-            QMessageBox.warning(
-                self, "좌표 없음",
-                "X / Y 좌표를 확인할 수 없어 시각화할 수 없습니다.\n\n"
-                "다음 중 하나를 시도하세요:\n"
-                "  · 입력 데이터에 X, Y 좌표 PARAMETER 행이 있는지 확인\n"
-                "  · '좌표 불러오기' 로 저장된 프리셋 선택\n"
-                "  · Settings → 좌표 라이브러리 → 수동 추가",
+        v = self._current_value()
+        xy = self._current_xy()
+        x = xy[0] if xy else ""
+        y = xy[1] if xy else ""
+        a, b = self._result_a, self._result_b
+
+        # 양쪽 입력 없음 — Run 자체가 의미 없음 (사용자가 Run 비활성에도 클릭한 케이스)
+        if not (a or b):
+            self._show_blocking_reason(
+                "no_input", "error",
+                "입력 없음 — A 또는 B 에 데이터 paste 필요",
             )
             return
 
-        # 렌더링 먼저 → Qt paint 완료 후 n 불일치 경고 팝업 (QTimer 한 틱 지연)
-        a, b = self._result_a, self._result_b
+        # VALUE 콤보 빈 상태 — 측정 PARA 가 입력에 없는 케이스
+        if not v:
+            self._show_blocking_reason(
+                "no_value_para", "error",
+                "VALUE PARAMETER 없음 — 시각화할 측정값이 없습니다",
+            )
+            return
+
+        # 좌표 콤보 빈 상태 — 입력에 X/Y 없고 라이브러리 매칭도 없는 케이스
+        if not (x and y):
+            self._show_blocking_reason(
+                "no_coord", "error",
+                "X / Y 좌표 없음 — 입력 데이터 또는 좌표 라이브러리 확인 필요",
+            )
+            return
+
+        # 렌더링 먼저 → Qt paint 완료 후 n 불일치 경고 (QTimer 한 틱 지연)
         if a and b:
             self._visualize_delta(a, b, v, x, y)
         elif a or b:
             self._visualize_single(a or b, v, x, y)
-        else:
-            self._result_panel.clear()
 
         if self._preset_override is None:
             QTimer.singleShot(0, lambda: self._warn_n_mismatch_once(v, x, y))
 
     def _warn_n_mismatch_once(self, v: str, x: str, y: str) -> None:
-        """현재 입력에서 VALUE/X/Y n 이 모두 같은지 검사. 다르면 경고 팝업 1회."""
+        """현재 입력에서 VALUE/X/Y n 이 모두 같은지 검사. 다르면 ReasonBar 에 warn.
+
+        시각화는 성공한 케이스라 결과 영역 그대로 두고, ReasonBar 에 사후 알림만
+        추가. silent 분기 일관화 정책 — 다이얼로그 사용 안 함.
+        """
         available_ns = self._build_selection_context()[0]
         v_n = available_ns.get(v)
         x_n = available_ns.get(x)
@@ -840,11 +876,12 @@ class MainWindow(QMainWindow):
             return
         if v_n == x_n == y_n:
             return
-        QMessageBox.warning(
-            self, "포인트 개수 불일치",
-            f"VALUE와 좌표 포인트 개수가 다릅니다.\n"
-            f"{v}: {v_n} pt\n"
-            f"{x} / {y}: {x_n if x_n == y_n else f'{x_n}/{y_n}'} pt",
+        coord_n = f"{x_n}" if x_n == y_n else f"{x_n}/{y_n}"
+        # 기존 ReasonBar 메시지 (좌표 skip warn 등) 가 있을 수 있어 단일 메시지로 덮음.
+        # n 불일치는 시각화 결과 신뢰성에 직결되는 정보라 우선순위 높음.
+        self._reason_bar.set_message(
+            f"⚠ 포인트 개수 불일치 — VALUE {v}: {v_n} pt vs 좌표 {x}/{y}: {coord_n} pt",
+            severity="warn",
         )
 
 
@@ -854,6 +891,10 @@ class MainWindow(QMainWindow):
         from core.interp import is_collinear  # lazy: scipy.interpolate 무거움
         library = CoordLibrary()
         displays: list[WaferDisplay] = []
+        # ReasonBar 표시용 — cell 타이틀과 동일한 `LotID.SlotNo{rep}` 포맷 (사용자
+        # 직관성: WAFERID 는 영구 고유 키지만 "현재 상태" 를 보여주는 게 자연스러움)
+        skipped_labels: list[str] = []        # 좌표 해결 실패한 wafer
+        lib_fallback_labels: list[str] = []   # 라이브러리 자동 매칭된 wafer
         # 좌표 선택 유효성: VALUE/X/Y 이름이 서로 달라야 좌표로 취급
         coord_valid = bool(v and x and y and v != x and v != y and x != y)
         view_mode = self.cb_view.currentText() or "2D"
@@ -900,14 +941,23 @@ class MainWindow(QMainWindow):
                     x_mm = np.asarray(preset.x_mm, dtype=float)
                     y_mm = np.asarray(preset.y_mm, dtype=float)
                     from_lib = True
+                    rep = _rep_suffix(w.wafer_id)
+                    lib_fallback_labels.append(
+                        f"{w.lot_id}.{_pad_slot(w.slot_id)}{rep}"
+                    )
 
             if x_mm is None:
-                continue  # 좌표 해결 실패 → 스킵 (NaN cell 도 좌표 필요)
+                # 좌표 해결 실패 → 스킵 + ReasonBar 알림용 카운트 (silent skip 금지)
+                rep = _rep_suffix(w.wafer_id)
+                skipped_labels.append(f"{w.lot_id}.{_pad_slot(w.slot_id)}{rep}")
+                continue
 
             n = min(len(x_mm), len(y_mm))
             if val is not None:
                 n = min(n, len(val))
             if n == 0:
+                rep = _rep_suffix(w.wafer_id)
+                skipped_labels.append(f"{w.lot_id}.{_pad_slot(w.slot_id)}{rep}")
                 continue
             x_mm, y_mm = x_mm[:n], y_mm[:n]
             val_n = val[:n] if val is not None else np.full(n, np.nan, dtype=float)
@@ -929,24 +979,42 @@ class MainWindow(QMainWindow):
 
         self._enforce_library_limits(library)
 
-        # 모든 웨이퍼 좌표 해결 실패 → 결과 영역 비우고 사용자에게 안내
+        # 모든 웨이퍼 좌표 해결 실패 → 결과 영역 비우고 ReasonBar 에 사유 표시
         if not displays and len(result.wafers) > 0:
-            self._result_panel.clear()
-            QMessageBox.warning(
-                self, "좌표 없음",
-                "X/Y 좌표를 확인할 수 없어 시각화할 수 없습니다.\n\n"
-                "다음 중 하나를 시도하세요:\n"
-                "  · 입력 데이터에 X, Y 좌표 PARAMETER 가 있는지 확인\n"
-                "  · Control 패널의 X / Y 콤보에서 올바른 좌표 이름 선택\n"
-                "  · '좌표 불러오기' 로 저장된 프리셋 선택\n"
-                "  · 좌표 라이브러리에 현재 RECIPE 에 맞는 프리셋 수동 추가",
+            self._show_blocking_reason(
+                "single_no_coord_all", "error",
+                "전체 wafer 좌표 해결 실패 — X/Y PARAMETER 확인 또는 좌표 라이브러리 매칭 필요",
             )
             return
 
         self._apply_z_scale_mode(displays, view_mode)
         self._result_panel.set_displays(displays, v, view_mode=view_mode)
-        # 단일 시각화는 사유/경고 메시지 없음 — ReasonBar 비움.
-        self._reason_bar.set_message("", severity="info")
+        # ReasonBar 종합: 라이브러리 자동 fallback (ok) + skip (warn) 합쳐서 표시.
+        # 둘 다 있으면 set_warnings 가 max severity (warn) 색 채택, 둘 다 메시지 노출.
+        from core.input_validation import ValidationWarning  # 재사용
+        notices: list[ValidationWarning] = []
+        if lib_fallback_labels:
+            head = ", ".join(lib_fallback_labels[:3])
+            tail = (f" 외 {len(lib_fallback_labels) - 3}개"
+                    if len(lib_fallback_labels) > 3 else "")
+            notices.append(ValidationWarning(
+                code="single_lib_fallback", severity="ok",
+                message=(f"wafer {len(lib_fallback_labels)}개 좌표 라이브러리 "
+                         f"자동 적용: {head}{tail}"),
+            ))
+        if skipped_labels:
+            head = ", ".join(skipped_labels[:3])
+            tail = (f" 외 {len(skipped_labels) - 3}개"
+                    if len(skipped_labels) > 3 else "")
+            notices.append(ValidationWarning(
+                code="single_skip_no_coord", severity="warn",
+                message=(f"좌표 해결 실패 wafer {len(skipped_labels)}개 표시 안 됨: "
+                         f"{head}{tail}"),
+            ))
+        if notices:
+            self._reason_bar.set_warnings(notices)
+        else:
+            self._reason_bar.set_message("", severity="info")
         self._connect_cell_er_signals()
 
     def _visualize_delta(
@@ -970,9 +1038,13 @@ class MainWindow(QMainWindow):
         # 일부 누락은 input_validation case 3 가 paste 단계에서 Run 비활성으로 차단.
         coords_per_wafer = self._resolve_delta_coords(a, b, x, y, library)
         if coords_per_wafer is None:
-            # 좌표 결정 실패 (양쪽 누락 + 라이브러리 매칭 X) — paste 시점 delta_validation
-            # 이 이미 error 로 Run 비활성. 방어적 분기.
-            self._result_panel.clear()
+            # 좌표 결정 실패 (양쪽 누락 + 라이브러리 매칭 X). paste 시점 delta_validation
+            # 이 이미 error 로 Run 비활성하지만 외부 라이브러리 변경 후 재시도 등
+            # edge case 대비 방어적 분기 — ReasonBar 에 명시적 사유 표시.
+            self._show_blocking_reason(
+                "delta_coord_unresolved_runtime", "error",
+                "DELTA: 양쪽 좌표 결정 실패 — 좌표 라이브러리 매칭 필요",
+            )
             return
 
         # Δ-Interp mode — 활성 시 a_only/b_only 점에 RBF 보간으로 채움.
@@ -997,7 +1069,13 @@ class MainWindow(QMainWindow):
 
         dr = compute_delta(a, b, v, coords_per_wafer, interp_factory=interp_factory)
         if dr.matched == 0:
-            self._result_panel.clear()
+            # 좌표 합집합 룰로 a_only/b_only 도 매칭 카운트 — matched=0 은 거의 안 발생.
+            # paste 시점 `delta_no_intersect` (WAFERID 교집합 0) 이 이미 error 로 차단되니
+            # 여기 도달하면 진짜 edge case (모든 좌표 0개 등).
+            self._show_blocking_reason(
+                "delta_compute_failed", "error",
+                "DELTA: 매칭된 wafer 0 — 시각화할 데이터 없음",
+            )
             return
 
         displays = []
