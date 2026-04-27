@@ -197,13 +197,16 @@ QScrollBar:vertical {{
 QScrollBar::handle:horizontal {{
     background-color: {t['border']};
     border-radius: 5px;
-    min-width: 40px;
+    min-width: 20px;
 }}
 QScrollBar::handle:vertical {{
     background-color: {t['border']};
     border-radius: 5px;
-    min-height: 40px;
+    min-height: 20px;
 }}
+/* sub-line / add-line 영역만 명시 (배경 + 크기). arrow sub-control 은
+   QSS 명시 안 하면 Fusion 스타일이 native 삼각형 자동 그림 — 가장 깔끔.
+   (border 트릭으로 삼각형 만들면 sub-control 에선 사각형으로 렌더되는 Qt 한계) */
 QScrollBar::sub-line:horizontal {{
     background: {t['surface_alt']};
     width: 16px; subcontrol-position: left;  subcontrol-origin: margin;
@@ -223,26 +226,6 @@ QScrollBar::add-line:vertical {{
     background: {t['surface_alt']};
     height: 16px; subcontrol-position: bottom; subcontrol-origin: margin;
     border: 1px solid {t['border']};
-}}
-QScrollBar::left-arrow:horizontal {{
-    border-style: solid; border-width: 5px 7px 5px 0;
-    border-color: transparent {t['text']} transparent transparent;
-    width: 0; height: 0;
-}}
-QScrollBar::right-arrow:horizontal {{
-    border-style: solid; border-width: 5px 0 5px 7px;
-    border-color: transparent transparent transparent {t['text']};
-    width: 0; height: 0;
-}}
-QScrollBar::up-arrow:vertical {{
-    border-style: solid; border-width: 0 5px 7px 5px;
-    border-color: transparent transparent {t['text']} transparent;
-    width: 0; height: 0;
-}}
-QScrollBar::down-arrow:vertical {{
-    border-style: solid; border-width: 7px 5px 0 5px;
-    border-color: {t['text']} transparent transparent transparent;
-    width: 0; height: 0;
 }}
 QStatusBar {{ background-color: {t['surface_alt']}; color: {t['text_sub']}; }}
 QToolTip {{
