@@ -211,6 +211,24 @@ def _strip_extra_header_rows(text: str) -> tuple[str, int]:
     return "".join(cleaned), skipped
 
 
+def _drop_leading_empty_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """헤더 시작부의 빈 컬럼들을 drop.
+
+    엑셀에서 셀 영역 복사 시 좌측에 행 번호·빈 열 등이 섞여 들어오는 케이스 대비.
+    헤더 셀이 비었거나 (`Unnamed: 0` 같은 자동 이름) + 컬럼 데이터가 모두 NaN
+    이면 drop. 연속된 만큼 반복.
+    """
+    while len(df.columns) > 0:
+        first_col = df.columns[0]
+        name = str(first_col).strip()
+        is_unnamed = name.startswith("Unnamed:") or name == "" or name.lower() == "nan"
+        if is_unnamed and df.iloc[:, 0].isna().all():
+            df = df.iloc[:, 1:]
+        else:
+            break
+    return df
+
+
 def _load_dataframe(
     source: str | Path | pd.DataFrame,
 ) -> tuple[pd.DataFrame, ParseMetadata]:
@@ -218,10 +236,13 @@ def _load_dataframe(
 
     raw 텍스트는 `_preclean` + `_strip_extra_header_rows` 처리 후 메타에
     `extra_header_rows` 카운트 기록. 파일 경로 / DataFrame 입력은 메타 빈 채로.
+
+    DataFrame 결과는 항상 `_drop_leading_empty_columns` 적용 — 엑셀 복사 시
+    좌측 빈 열이 끼어들어오는 케이스 자동 제거.
     """
     metadata = ParseMetadata()
     if isinstance(source, pd.DataFrame):
-        return source.copy(), metadata
+        return _drop_leading_empty_columns(source.copy()), metadata
     if isinstance(source, (str, Path)):
         s = str(source)
         # 개행/탭이 있으면 원시 텍스트, 아니면 파일 경로로 해석
@@ -230,11 +251,13 @@ def _load_dataframe(
             s, metadata.extra_header_rows = _strip_extra_header_rows(s)
             first_line = s.splitlines()[0] if s.splitlines() else ""
             sep = "\t" if "\t" in first_line else ","
-            return pd.read_csv(io.StringIO(s), sep=sep), metadata
+            df = pd.read_csv(io.StringIO(s), sep=sep)
+            return _drop_leading_empty_columns(df), metadata
         path = Path(s)
         if not path.exists():
             raise FileNotFoundError(path)
-        return pd.read_csv(path), metadata
+        df = pd.read_csv(path)
+        return _drop_leading_empty_columns(df), metadata
     raise TypeError(f"지원하지 않는 source 타입: {type(source)}")
 
 
