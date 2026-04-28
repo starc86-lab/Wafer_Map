@@ -194,6 +194,8 @@ class MainWindow(QMainWindow):
         btn_help.setText("❓ 도움말")
         btn_help.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         btn_help.setStyleSheet("QToolButton { padding: 4px 10px; }")
+        btn_help.setEnabled(False)  # 도움말 작성 완료 후 활성화 예정
+        btn_help.setToolTip("준비 중")
         btn_help.clicked.connect(self._open_help)
         br_lay.addWidget(btn_help)
 
@@ -230,8 +232,8 @@ class MainWindow(QMainWindow):
     def _build_central(self) -> None:
         splitter = QSplitter(Qt.Orientation.Vertical)
         splitter.addWidget(self._make_input_panel())
-        # ReasonBar (Input ↔ Control 사이) + Control row 묶음 — splitter 자식 1개.
-        # 사용자가 paste 직후 Run 누르기 전에 검증 결과 인지하도록 paste 가까이 배치.
+        # Control row + ReasonBar 묶음 (사용자 정책 2026-04-28):
+        #   Control 위, ReasonBar 아래 — Run/Clear 가 ReasonBar 우측에 위치
         control_section = QWidget()
         control_section.setSizePolicy(
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed,
@@ -240,8 +242,11 @@ class MainWindow(QMainWindow):
         cv.setContentsMargins(0, 0, 0, 0)
         cv.setSpacing(0)
         self._reason_bar = ReasonBar()
-        cv.addWidget(self._reason_bar)
         cv.addWidget(self._make_control_panel())
+        cv.addWidget(self._reason_bar)
+        # ReasonBar 우측에 Run/Clear 추가 (control_panel 빌드 후라 buttons 존재)
+        self._reason_bar.add_right_widget(self.btn_visualize)
+        self._reason_bar.add_right_widget(self.btn_clear)
         splitter.addWidget(control_section)
         splitter.addWidget(self._make_result_panel())
         splitter.setStretchFactor(0, 2)
@@ -322,8 +327,8 @@ class MainWindow(QMainWindow):
         self.btn_clear.setFixedWidth(HEADER_BUTTON_WIDTH)
         self.btn_clear.clicked.connect(self._on_clear_results)
 
-        # PARA 조합 — 두 PARA + 두 좌표 합쳐 시각화
-        self.btn_para_combine = QPushButton("PARA 조합")
+        # Para 조합 — 두 PARA + 두 좌표 합쳐 시각화
+        self.btn_para_combine = QPushButton("Para 조합")
         self.btn_para_combine.setEnabled(False)  # 입력 있을 때만 활성
         self.btn_para_combine.clicked.connect(self._open_para_combine_dialog)
 
@@ -361,7 +366,7 @@ class MainWindow(QMainWindow):
         self.chk_delta_interp.toggled.connect(self._on_delta_interp_toggled)
 
         for label, widget in [
-            ("VALUE:", self.cb_value),
+            ("Para:", self.cb_value),
             ("좌표:", self.cb_coord),
         ]:
             lay.addWidget(QLabel(label))
@@ -379,8 +384,7 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.chk_r_symmetry)
         lay.addWidget(self.chk_delta_interp)
         lay.addStretch(1)
-        lay.addWidget(self.btn_visualize)
-        lay.addWidget(self.btn_clear)
+        # btn_visualize / btn_clear 는 ReasonBar 우측에 add (Control 패널 X)
         # 자연 높이를 측정해 fix — splitter 안에서 핸들로 변경 불가
         w.adjustSize()
         w.setFixedHeight(w.sizeHint().height())
@@ -1544,17 +1548,30 @@ class MainWindow(QMainWindow):
         sentinel:
           cb_value:  ("__combined__", p1, p2)
           cb_coord:  ("__combined__", (x1, y1), (x2, y2))
+
+        라벨에 측정점 개수 [N+M pt] 표시 (단일 콤보와 동일 형식).
         """
         if self._combined is None:
             return
         c = self._combined
-        # 합성 PARA 라벨
-        v_label = f"{c['value'][0]} + {c['value'][1]}"
-        v_data = ("__combined__", c["value"][0], c["value"][1])
-        # 합성 좌표 라벨
+        p1, p2 = c["value"]
         x1, y1 = c["coord1"]
         x2, y2 = c["coord2"]
-        coord_label = f"{x1}/{y1} + {x2}/{y2}"
+
+        # 측정점 개수 추출 — 첫 wafer 기준 (단일 콤보와 동일 정책)
+        result = self._result_a or self._result_b
+        if result and result.wafers:
+            first = next(iter(result.wafers.values()))
+            n_p1 = first.parameters[p1].n if p1 in first.parameters else 0
+            n_p2 = first.parameters[p2].n if p2 in first.parameters else 0
+            n_c1 = first.parameters[x1].n if x1 in first.parameters else 0
+            n_c2 = first.parameters[x2].n if x2 in first.parameters else 0
+        else:
+            n_p1 = n_p2 = n_c1 = n_c2 = 0
+
+        v_label = f"{p1} + {p2}  [{n_p1}+{n_p2} pt]"
+        v_data = ("__combined__", p1, p2)
+        coord_label = f"{x1}/{y1} + {x2}/{y2}  [{n_c1}+{n_c2} pt]"
         coord_data = ("__combined__", c["coord1"], c["coord2"])
 
         self.cb_value.blockSignals(True)

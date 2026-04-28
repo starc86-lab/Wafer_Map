@@ -32,8 +32,12 @@ def _gather_paras(result: ParseResult | None) -> dict[str, int]:
 
 
 def _value_paras(all_ns: dict[str, int]) -> list[str]:
-    """좌표 PARA 제외한 측정 PARA 만 (입력 순서 유지)."""
-    return [n for n in all_ns if not _is_coord_name(n)]
+    """좌표 PARA 제외 + n>=2 만 (단일 PARA 콤보 정책과 동일).
+
+    n=0 (빈 측정), n=1 (단일값 _AVG 류) 은 맵 시각화 불가라 제외.
+    """
+    return [name for name, n in all_ns.items()
+            if not _is_coord_name(name) and n >= 2]
 
 
 def _coord_pairs(all_ns: dict[str, int]) -> list[tuple[str, str, int]]:

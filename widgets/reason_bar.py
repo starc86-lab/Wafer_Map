@@ -16,28 +16,36 @@ _FONT_PX = 11
 
 
 class ReasonBar(QFrame):
-    """한 줄 사유 표시 바."""
+    """한 줄 사유 표시 바 — 좌측 사유 / 우측 액션 버튼 (Run, Clear 등).
+
+    사용자 정책 2026-04-28: Run/Clear 를 ReasonBar 우측에 배치, ReasonBar 자체는
+    Control 패널 아래로 이동.
+    """
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("reasonBar")
-        self.setFixedHeight(24)
+        # 버튼 들어가는 만큼 높이 ↑ — 기본 32px (Run 버튼 표준 높이 수용)
+        self.setFixedHeight(36)
 
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(10, 0, 10, 0)
-        lay.setSpacing(0)
+        self._lay = QHBoxLayout(self)
+        self._lay.setContentsMargins(10, 4, 10, 4)
+        self._lay.setSpacing(6)
 
         self._label = QLabel("")
         self._label.setStyleSheet(f"color: #111; font-size: {_FONT_PX}px;")
-        lay.addWidget(self._label)
-        lay.addStretch(1)
+        self._lay.addWidget(self._label)
+        self._lay.addStretch(1)
 
-        # control 패널과 result 패널 사이의 시각적 구분
         self.setStyleSheet(
             "#reasonBar { background-color: #fafafa; "
             "border-top: 1px solid #d0d0d0; "
             "border-bottom: 1px solid #d0d0d0; }"
         )
+
+    def add_right_widget(self, widget) -> None:
+        """우측에 액션 위젯 추가 (Run / Clear 등)."""
+        self._lay.addWidget(widget)
 
     def set_message(self, text: str, severity: str = "info") -> None:
         """severity: 'info' / 'ok' / 'warn' (모두 검정) / 'error' (빨강).
