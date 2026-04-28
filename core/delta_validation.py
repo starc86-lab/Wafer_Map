@@ -95,20 +95,21 @@ def validate_delta(
         warnings.append(ValidationWarning(
             code="delta_no_intersect",
             severity="error",
-            message=f"DELTA: WAFERID 교집합 없음 (A {len(a_keys)}장, B {len(b_keys)}장)",
+            message="WAFERID 교집합 없음",
         ))
 
     # delta_repeats_in_input — A/B 에 __rep 분리된 wafer 존재
+    # 사내 시스템 정책: 첫 set 이 시간상 가장 최신 측정 → 첫 set 사용 = 최신 측정 사용
     a_reps = sum(1 for k in a_keys if "__rep" in k)
     b_reps = sum(1 for k in b_keys if "__rep" in k)
     if a_reps or b_reps:
         if a_reps and b_reps:
-            msg = (f"DELTA: A {a_reps}건 + B {b_reps}건 WAFERID 중복 — "
-                   "첫 측정 set 끼리 계산")
+            msg = (f"A 웨이퍼 중복 {a_reps}건, B 웨이퍼 중복 {b_reps}건, "
+                   "최신 측정 데이터 사용")
         elif a_reps:
-            msg = f"DELTA: A 에 WAFERID 중복 {a_reps}건 — 첫 측정 set 끼리 계산"
+            msg = f"A에 웨이퍼 중복 {a_reps}건, 최신 측정 데이터 사용"
         else:
-            msg = f"DELTA: B 에 WAFERID 중복 {b_reps}건 — 첫 측정 set 끼리 계산"
+            msg = f"B에 웨이퍼 중복 {b_reps}건, 최신 측정 데이터 사용"
         warnings.append(ValidationWarning(
             code="delta_repeats_in_input",
             severity="warn",
@@ -130,34 +131,27 @@ def validate_delta(
     if not (a_has and b_has):
         # 어느 한쪽 (또는 양쪽) 좌표 누락 — fallback 매트릭스에서 실패 분기만 메시지
         if a_has and not b_has:
-            # 호환 (옆집) 또는 B 라이브러리 매칭 시 성공 → 무메시지
             if not can_borrow and not _lib_has(rb):
                 warnings.append(ValidationWarning(
                     code="delta_coord_unresolved", severity="error",
-                    message=("DELTA: B 좌표 없음. RECIPE 비호환 + 라이브러리 "
-                             "매칭 없음 — 시각화 불가."),
+                    message="B 좌표 없음",
                 ))
         elif b_has and not a_has:
             if not can_borrow and not _lib_has(ra):
                 warnings.append(ValidationWarning(
                     code="delta_coord_unresolved", severity="error",
-                    message=("DELTA: A 좌표 없음. RECIPE 비호환 + 라이브러리 "
-                             "매칭 없음 — 시각화 불가."),
+                    message="A 좌표 없음",
                 ))
         else:  # 양쪽 모두 누락
-            if can_borrow:
-                if not (_lib_has(ra) or _lib_has(rb)):
-                    warnings.append(ValidationWarning(
-                        code="delta_coord_unresolved", severity="error",
-                        message="DELTA: 양쪽 좌표 없음. 라이브러리 매칭 없음 — 시각화 불가.",
-                    ))
-            else:
-                if not (_lib_has(ra) and _lib_has(rb)):
-                    warnings.append(ValidationWarning(
-                        code="delta_coord_unresolved", severity="error",
-                        message=("DELTA: 양쪽 좌표 없음. RECIPE 비호환 + "
-                                 "라이브러리 한쪽 이상 매칭 없음 — 시각화 불가."),
-                    ))
+            failed = (
+                (can_borrow and not (_lib_has(ra) or _lib_has(rb))) or
+                (not can_borrow and not (_lib_has(ra) and _lib_has(rb)))
+            )
+            if failed:
+                warnings.append(ValidationWarning(
+                    code="delta_coord_unresolved", severity="error",
+                    message="A, B 좌표 없음",
+                ))
 
     # delta_no_common_value_para — A∩B VALUE PARA = ∅
     # 좌표 PARA (X/Y) 는 제외하고 비교. 한쪽만 가진 PARA 도 union 으로 콤보에
@@ -175,8 +169,7 @@ def validate_delta(
             warnings.append(ValidationWarning(
                 code="delta_no_common_value_para",
                 severity="warn",
-                message=("DELTA: A·B 공통 VALUE PARA 없음 — "
-                         "한쪽만 가진 PARA 도 선택 가능 (없는 쪽은 0 처리)"),
+                message="공통 PARA 없음",
             ))
 
     # delta_recipe_mismatch — RECIPE 다름 (PRE/POST 호환 룰 적용 후)
@@ -184,7 +177,7 @@ def validate_delta(
         warnings.append(ValidationWarning(
             code="delta_recipe_mismatch",
             severity="warn",
-            message=f"DELTA: RECIPE 다름 (A={ra}, B={rb})",
+            message="RECIPE 다름",
         ))
 
     return warnings
