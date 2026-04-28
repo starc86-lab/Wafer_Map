@@ -524,28 +524,10 @@ class MainWindow(QMainWindow):
         if not results:
             return {}, {}, 0
 
-        # VALUE 후보 PARAMETER — **합집합(union)** 사용. 일부 웨이퍼만 가진 PARAMETER
-        # 도 콤보에 노출 → 해당 VALUE 선택 시 누락 웨이퍼는 NaN 으로 시각화.
-        # 이전 intersection 방식은 한 웨이퍼라도 누락이면 콤보에서 제외되어 선택
-        # 불가한 버그.
-        if a is not None and b is not None:
-            matched_ids = set(a.wafers) & set(b.wafers)
-            if matched_ids:
-                per_wafer_params = (
-                    [set(a.wafers[w].parameters) for w in matched_ids] +
-                    [set(b.wafers[w].parameters) for w in matched_ids]
-                )
-                common = set.union(*per_wafer_params)
-            else:
-                common = set()
-        else:
-            r = results[0]
-            per_result = [set(w.parameters) for w in r.wafers.values()]
-            common = set.union(*per_result) if per_result else set()
-
-        # 각 PARAMETER 의 n / WaferRecord 는 **그 PARAMETER 를 가진 첫 웨이퍼** 기준.
-        # (first_wafer 고정이 아니라 param 별 개별 탐색 — union 이라 일부 param 은
-        # first_wafer 에 없을 수 있음)
+        # VALUE 후보 PARAMETER — **합집합(union)** + **입력 순서 보존**.
+        # 일부 웨이퍼만 가진 PARAMETER 도 콤보에 노출 → 누락 웨이퍼는 NaN 시각화.
+        # 입력 순서: 첫 wafer 의 PARA 등장 순서대로 + 다른 wafer 의 추가 PARA 는
+        # 처음 나타난 순서로 끝에 append (사용자 정책 2026-04-28).
         all_wafers = []
         if a is not None and b is not None:
             matched_ids = set(a.wafers) & set(b.wafers)
@@ -557,14 +539,14 @@ class MainWindow(QMainWindow):
         if not all_wafers:
             return {}, {}, 0
 
+        # 입력 순서대로 union — dict 사용해 자동 dedupe + insertion order 유지
         available_ns: dict[str, int] = {}
         params: dict = {}
-        for name in common:
-            for w in all_wafers:
-                if name in w.parameters:
-                    available_ns[name] = w.parameters[name].n
-                    params[name] = w.parameters[name]
-                    break
+        for w in all_wafers:
+            for name, rec in w.parameters.items():
+                if name not in available_ns:
+                    available_ns[name] = rec.n
+                    params[name] = rec
         return available_ns, params, len(results[0].data_columns)
 
     def _fill_coord_combo(

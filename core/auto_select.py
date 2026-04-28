@@ -184,23 +184,17 @@ def select_value_by_variability(
     if not qualified:
         return None, []
 
-    # 그룹 분리: non-suffix (주) vs suffix (보조)
+    # 자동 선택 — 그룹 분리 + 정렬 휴리스틱 (콤보 순서와 무관)
     main_cand = [q for q in qualified if not _has_group_suffix(q[0])]
     sub_cand = [q for q in qualified if _has_group_suffix(q[0])]
-
-    # 자동 선택 대상: 주 그룹 우선, 없으면 보조
     primary = main_cand if main_cand else sub_cand
     # 정렬: is_int (정수/die index) 는 후순위로 밀기 → metric 내림차순 → pattern → 알파벳
     primary.sort(key=lambda t: (t[3], -t[1], -t[2], t[0]))
     selected = primary[0][0]
 
-    # 콤보:
-    #   1) 선택된 것
-    #   2) 나머지 주 그룹 (알파벳) — DIE_ROW 등 정수값도 포함
-    #   3) 보조 그룹 (알파벳)
-    rem_main = sorted(t[0] for t in main_cand if t[0] != selected)
-    sub_alpha = sorted(t[0] for t in sub_cand)
-    ordered = [selected] + rem_main + sub_alpha
+    # 콤보 순서 — 입력 순서 그대로 (사용자 정책 2026-04-28).
+    # qualified 가 parameters dict 순회 순서로 채워졌으므로 그대로 사용.
+    ordered = [q[0] for q in qualified]
     return selected, ordered
 
 
