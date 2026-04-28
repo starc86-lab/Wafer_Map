@@ -1581,12 +1581,12 @@ class MainWindow(QMainWindow):
         """
         is_common = self.cb_zscale.currentText() == "공통"
         pct = float(self.sp_z_range.value())
-        if not is_common and pct == 0:
-            # 개별 + margin 없음 → cell 자체 계산 (기존 경로, 비용 절약)
-            for d in displays:
-                d.z_range = None
-                d.z_range_1d = None
-            return
+        # 이전엔 개별+pct=0 일 때 z_range=None 으로 cell 자체 계산 경로로 보냈으나,
+        # cell 의 sampling grid (apply_cut 일 때 [0, eff_R] + [R]) 가 _apply 의 grid
+        # (linspace(0, R)) 와 달라 r-symmetry mode 의 spline overshoot 시 capture
+        # 되는 extreme 이 미세하게 달라짐. pct 0→1% 진입 순간 _apply 로 전환되며
+        # 큰 jump 보임. 항상 _apply 경로로 통일해서 일관된 grid 사용 (사용자 정책
+        # 2026-04-30).
 
         # 각 wafer 의 rendered 범위 추정 — **실제 렌더와 동일 rings/seg** 로 샘플.
         # 이전 코드의 희소 샘플(15×90) 은 실제 렌더(20×180) 의 극값을 놓쳐 공통
