@@ -1548,18 +1548,15 @@ class MainWindow(QMainWindow):
                 d.z_range_1d = _margin(*meas) if meas is not None else None
 
     def _open_para_combine_dialog(self) -> None:
-        """PARA 조합 다이얼로그 — 두 PARA + 두 좌표 페어 선택 후 합성 항목 등록."""
+        """Para 조합 다이얼로그 — 두 PARA + 두 좌표 페어 선택 후 합성 항목 등록.
+
+        다이얼로그 콤보는 항상 오리지널 PARA 만 (이미 사용된 PARA 도 유지).
+        예: T1+T1_A 만든 후에도 T1 으로 또 다른 조합 (T1+T1_B) 가능
+        (사용자 정책 2026-04-29).
+        """
         from widgets.para_combine_dialog import ParaCombineDialog
         a, b = self._result_a, self._result_b
-        # 이미 합성에 사용된 PARA 들 추출 → 다이얼로그 콤보에서 제외
-        # (합성 위에 또 합성 막기, 사용자 정책 2026-04-28)
-        excluded: set[str] = set()
-        for i in range(self.cb_value.count()):
-            data = self.cb_value.itemData(i)
-            if isinstance(data, tuple) and data and data[0] == "__combined__":
-                excluded.add(data[1])
-                excluded.add(data[2])
-        dlg = ParaCombineDialog(a, b, excluded_paras=excluded, parent=self)
+        dlg = ParaCombineDialog(a, b, parent=self)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         result = dlg.result()

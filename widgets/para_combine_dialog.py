@@ -79,7 +79,6 @@ class ParaCombineDialog(QDialog):
         self,
         result_a: ParseResult | None,
         result_b: ParseResult | None,
-        excluded_paras: set[str] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -87,7 +86,9 @@ class ParaCombineDialog(QDialog):
         self.setModal(True)
         self.resize(540, 280)
 
-        # 후보 추출 — DELTA 모드면 A∩B 교집합 (이름 기준)
+        # 후보 추출 — DELTA 모드면 A∩B 교집합 (이름 기준).
+        # _gather_paras 가 이미 합성 임시 키 (` + ` 포함) 는 제외 — 오리지널만.
+        # 사용된 PARA 도 그대로 유지 (T1+T1_A 만들고 T1+T1_B 도 가능).
         a_paras = _gather_paras(result_a)
         b_paras = _gather_paras(result_b)
         if a_paras and b_paras:
@@ -96,10 +97,6 @@ class ParaCombineDialog(QDialog):
             paras = a_paras
         else:
             paras = b_paras
-
-        # 이미 합성에 사용된 PARA 제외 (사용자 정책 2026-04-28 — 중복 합성 방지)
-        excluded = excluded_paras or set()
-        paras = {k: v for k, v in paras.items() if k not in excluded}
 
         # 좌표 페어 (DELTA 면 교집합 — pair 의 (x,y) 이름 같은 것만)
         a_coord_pairs = _coord_pairs(a_paras) if a_paras else []
