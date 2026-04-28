@@ -162,6 +162,21 @@ QPushButton[class="primary"] {{
 QSplitter::handle {{ background-color: {t['border']}; }}
 QScrollArea {{ background: transparent; border: none; }}
 QDialog {{ background-color: {t['bg']}; color: {t['text']}; }}
+/* ReasonBar — Control 패널과 Result 패널 사이의 메시지 한 줄 위젯.
+   배경은 Control 패널과 동일 (theme bg) — 시각 구분은 border 로만. */
+#reasonBar {{
+    background-color: {t['bg']};
+    border-top: 1px solid {t['border']};
+    border-bottom: 1px solid {t['border']};
+}}
+#reasonBarTitle, #reasonBarLabel {{
+    color: {t['text']};
+    background: transparent;
+    font-size: 11px;
+}}
+#reasonBarTitle {{ font-weight: bold; }}
+#reasonBarLabel[severity="error"] {{ color: {t['danger']}; }}
+#reasonBarLabel[severity="ok"]    {{ color: {t['success']}; font-weight: bold; }}
 QCheckBox {{ background: transparent; spacing: 8px; font-size: {F['small']}px; }}
 QCheckBox::indicator {{
     width: 18px; height: 18px; border-radius: 4px;

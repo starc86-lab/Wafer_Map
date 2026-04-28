@@ -52,7 +52,6 @@ class ResultPanel(QWidget):
         self._clear_layout()
         ph = QLabel(
             "그래프를 우클릭하여 그래프 이미지나 데이터를 Clipboard로 Copy할 수 있습니다.\n"
-            "그래프 이미지 Copy 시에 그래프가 가려지지 않도록 주의하세요 (화면에 보이는 그대로 Copy됨).\n"
             "\n"
             "3D 그래프 Tips\n"
             "- Ctrl + 드래그 : 그래프 이동\n"

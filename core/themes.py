@@ -341,7 +341,7 @@ DEFAULT_SETTINGS = {
         # Moving Avg Window 전처리 — 각 측정점 r_i 중심 ±w/2 mm 내 평균으로 v 를
         # 치환 (r 위치 유지, 값만 스무스). 0 = 비활성. exact 보간 3종 + Univariate
         # 에서만 유효 (SavGol/LOWESS 는 내부 sliding 과 중복, Polynomial 은 전역 fit).
-        "radial_bin_size_mm": 0,
+        "radial_bin_size_mm": 3,
         # 1D Radial Graph 표시 — 체크 시 2D/3D 그래프와 Summary 표 사이에 (r, v)
         # 산점도 + spline 실선 위젯 추가. Y축은 2D/3D 와 독립, 실측 min/max 기반.
         # 개별/공통 Z-scale 모드와 Z-Margin 은 1D 그래프끼리 동작 (2D/3D 와 별도 계산).

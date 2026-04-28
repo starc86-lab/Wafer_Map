@@ -145,15 +145,25 @@ class UiSettingsCard(QGroupBox):
     def __init__(self, settings: dict[str, Any], parent: QWidget | None = None) -> None:
         super().__init__("UI 설정", parent)
 
+        # 테마 / 글꼴 콤보 — DEFAULT_SETTINGS 의 값에 ` (기본)` 접미 표시.
+        # itemData 는 bare name 유지 (settings.json 저장값 안전).
+        from core.themes import DEFAULT_SETTINGS as _DEF
+        default_theme = _DEF.get("theme", "Light")
+        default_font = _DEF.get("font", "Segoe UI")
+
         self.cb_theme = _limit_width(QComboBox())
-        self.cb_theme.addItems(sorted(THEMES.keys()))
-        idx = self.cb_theme.findText(settings.get("theme", "Light"))
+        for name in sorted(THEMES.keys()):
+            label = f"{name} (기본)" if name == default_theme else name
+            self.cb_theme.addItem(label, name)
+        idx = self.cb_theme.findData(settings.get("theme", default_theme))
         if idx >= 0:
             self.cb_theme.setCurrentIndex(idx)
 
         self.cb_font = _limit_width(QComboBox())
-        self.cb_font.addItems(FONTS)
-        idx = self.cb_font.findText(settings.get("font", "Segoe UI"))
+        for name in FONTS:
+            label = f"{name} (기본)" if name == default_font else name
+            self.cb_font.addItem(label, name)
+        idx = self.cb_font.findData(settings.get("font", default_font))
         if idx >= 0:
             self.cb_font.setCurrentIndex(idx)
 
@@ -187,8 +197,8 @@ class UiSettingsCard(QGroupBox):
 
     def gather(self) -> dict[str, Any]:
         return {
-            "theme": self.cb_theme.currentText(),
-            "font": self.cb_font.currentText(),
+            "theme": self.cb_theme.currentData(),
+            "font": self.cb_font.currentData(),
             "font_scale": float(self.cb_scale.currentData()),
             "window_save_enabled": self.chk_save_window.isChecked(),
         }
@@ -199,10 +209,10 @@ class UiSettingsCard(QGroupBox):
         for w in widgets:
             w.blockSignals(True)
         try:
-            idx = self.cb_theme.findText(settings.get("theme", "Light"))
+            idx = self.cb_theme.findData(settings.get("theme", "Light"))
             if idx >= 0:
                 self.cb_theme.setCurrentIndex(idx)
-            idx = self.cb_font.findText(settings.get("font", "Segoe UI"))
+            idx = self.cb_font.findData(settings.get("font", "Segoe UI"))
             if idx >= 0:
                 self.cb_font.setCurrentIndex(idx)
             target_scale = float(settings.get("font_scale", 1.0) or 1.0)
@@ -771,9 +781,13 @@ class DesignTab(QWidget):
         }
 
     def reset_to_defaults(self) -> None:
-        """모든 카드 DEFAULT_SETTINGS 값으로 되돌리기."""
+        """그래프 카드만 DEFAULT_SETTINGS 값으로 되돌리기.
+
+        UI 설정 카드 (테마·글꼴·윈도우 크기 저장·글자 크기) 는 제외 — 디자인 취향
+        영역이라 사용자 마지막 값 유지 (사용자 정책 2026-04-29). UI 초기값은
+        settings.json 누락 시에만 적용됨 (load_settings 의 DEFAULT_SETTINGS merge).
+        """
         from core.themes import DEFAULT_SETTINGS
-        self._ui_card.reload(DEFAULT_SETTINGS)
         self._card_common.reload(DEFAULT_SETTINGS.get("chart_common", {}))
         self._card_2d.reload(DEFAULT_SETTINGS.get("chart_2d", {}))
         self._card_3d.reload(DEFAULT_SETTINGS.get("chart_3d", {}))
@@ -1009,7 +1023,8 @@ class SettingsDialog(QDialog):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Settings")
-        self.resize(760, 740)
+        # 5개 카드 (UI / Chart Common / 2D / 3D / 1D Radial) 모두 스크롤 없이 보이는 높이
+        self.resize(760, 940)
         self.setModal(False)
         # FBO 캡처 경로 도입으로 Settings 창이 Copy Graph 에 포함되던 이슈 해결됨.
         # QDialog 기본 windowFlags (Qt.Dialog + transient owner 관계) 사용.

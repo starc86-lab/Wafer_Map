@@ -17,7 +17,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QGuiApplication, QIcon, QShowEvent
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QGridLayout, QHBoxLayout, QLabel, QMainWindow,
-    QPushButton, QSizePolicy, QSpinBox, QSplitter, QToolBar,
+    QDoubleSpinBox, QPushButton, QSizePolicy, QSpinBox, QSplitter, QToolBar,
     QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -45,54 +45,64 @@ from widgets.wafer_cell import WaferDisplay
 COMBINED_TAG = "__combined__"
 
 
-def _make_v_sentinel(p1: str, p2: str) -> tuple:
-    return (COMBINED_TAG, p1, p2)
-
-
-def _make_coord_sentinel(c1: tuple[str, str], c2: tuple[str, str]) -> tuple:
-    return (COMBINED_TAG, c1, c2)
-
-
 def _is_combined_data(data) -> bool:
     return isinstance(data, tuple) and len(data) >= 1 and data[0] == COMBINED_TAG
 
 
+def _wrap_if_composite(name: str) -> str:
+    """operand 가 합성 친화 키 (` + ` 또는 ` ∪ ` 포함) 면 괄호로 감싸 우선순위 명시.
+
+    예: 'T1' → 'T1', 'T1 + T2' → '(T1 + T2)', '(T1 ∪ T2) + T3' → '((T1 ∪ T2) + T3)'.
+    임의 깊이 합성에서 sum/concat 혼합 시 모호성 제거 (사용자 정책 2026-04-29).
+    """
+    if " + " in name or " ∪ " in name:
+        return f"({name})"
+    return name
+
+
 @dataclass
 class CombinedItem:
-    """한 합성 단위 — 두 PARA + 두 좌표 페어 + mode.
+    """한 합성 단위 — N-ary operands + per-operand coord + mode.
 
-    mode (확장 예정):
-      - "concat" (현재) : 두 점 집합을 단순 연결 (다른 좌표 합치는 케이스)
-      - "sum"   (예정)  : 같은 좌표일 때 두 PARA 값 element-wise 합
+    mode:
+      - "concat" : 두 (이상) 점 집합을 단순 연결 (다른 좌표 합치는 케이스)
+      - "sum"    : 모든 operand 좌표 동일 — 값 element-wise 합. coords 모두 같음.
 
-    합성 키 (`v_key`/`x_key`/`y_key`) 는 wafer.parameters 에 임시 등록될 친화 이름.
-    sentinel 은 콤보 itemData 식별자 — 데이터 내용(친화 이름) 과 분리.
+    invariant: len(operands) == len(coords) >= 2. mode=="sum" 이면 coords 전부 동일.
+    operand 는 plain PARA 이름 ("T1") 또는 다른 합성의 친화 키 ("sum(T1+T2)") —
+    recursive 단계에서 자동 활용. 친화 키 (`v_key`/`x_key`/`y_key`) 는
+    wafer.parameters 에 임시 등록될 사용자 친화 이름.
     """
-    p1: str
-    p2: str
-    coord1: tuple[str, str]
-    coord2: tuple[str, str]
+    operands: list[str]
+    coords: list[tuple[str, str]]
     mode: str = "concat"
 
     @property
     def v_sentinel(self) -> tuple:
-        return _make_v_sentinel(self.p1, self.p2)
+        return (COMBINED_TAG, "v", self.mode, tuple(self.operands))
 
     @property
     def coord_sentinel(self) -> tuple:
-        return _make_coord_sentinel(self.coord1, self.coord2)
+        return (COMBINED_TAG, "c", self.mode, tuple(self.coords))
 
     @property
     def v_key(self) -> str:
-        return f"{self.p1} + {self.p2}"
+        # sum: ` + ` (element-wise 덧셈) / concat: ` ∪ ` (합집합)
+        # 합성 operand 자동 괄호 — 임의 깊이 sum/concat 혼합 시 우선순위 명시
+        sep = " + " if self.mode == "sum" else " ∪ "
+        return sep.join(_wrap_if_composite(op) for op in self.operands)
 
     @property
     def x_key(self) -> str:
-        return f"{self.coord1[0]} + {self.coord2[0]}"
+        if self.mode == "sum":
+            return self.coords[0][0]
+        return " ∪ ".join(_wrap_if_composite(c[0]) for c in self.coords)
 
     @property
     def y_key(self) -> str:
-        return f"{self.coord1[1]} + {self.coord2[1]}"
+        if self.mode == "sum":
+            return self.coords[0][1]
+        return " ∪ ".join(_wrap_if_composite(c[1]) for c in self.coords)
 
 
 @dataclass
@@ -348,6 +358,11 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(0, 2)
         splitter.setStretchFactor(1, 0)   # control은 fixed라 stretch 의미 없음
         splitter.setStretchFactor(2, 3)
+        # Control + ReasonBar 묶음 collapse 차단 — splitter 핸들 위로 끌어올려도
+        # 숨김되지 않도록 (사용자 정책 2026-04-29).
+        splitter.setCollapsible(1, False)
+        # 자연 높이 (Control panel + ReasonBar) 를 minimum 으로 강제
+        control_section.setMinimumHeight(control_section.sizeHint().height())
         self._main_splitter = splitter
         self.setCentralWidget(splitter)
 
@@ -400,21 +415,27 @@ class MainWindow(QMainWindow):
         self._z_margin_pct_indiv = 0
         self._last_zscale_mode = self.cb_zscale.currentText()  # "개별"
         self.lbl_z_range = QLabel("Z-Margin:")
-        self.sp_z_range = QSpinBox()
-        self.sp_z_range.setRange(0, 200)
-        self.sp_z_range.setSingleStep(5)
+        # 1% 단위 step + 사용자 직접 입력 시 소수 1자리까지 허용 (사용자 정책 2026-04-29)
+        self.sp_z_range = QDoubleSpinBox()
+        self.sp_z_range.setRange(0.0, 200.0)
+        self.sp_z_range.setSingleStep(1.0)
+        self.sp_z_range.setDecimals(1)
         self.sp_z_range.setSuffix("%")
         _init_pct = (self._z_margin_pct_common if self._last_zscale_mode == "공통"
                      else self._z_margin_pct_indiv)
-        self.sp_z_range.setValue(_init_pct)
+        self.sp_z_range.setValue(float(_init_pct))
         self.sp_z_range.setFixedWidth(72)
         self.sp_z_range.valueChanged.connect(self._on_z_range_changed)
 
-        from widgets.paste_area import HEADER_BUTTON_WIDTH
-        # Run — 폭 축소 (Run Analysis → Run). 다른 버튼보단 폭 크게 강조 유지.
+        from widgets.paste_area import HEADER_BUTTON_WIDTH, HEADER_BUTTON_SPACING
+        # Run — Input B 의 [Text]+[Table] 두 버튼 폭과 동일 (88*2+6=182). 그러면
+        # 그 위 [Clear] 와 Run 옆 [Clear] 가 우측 정렬로 자동 일치.
+        # (사용자 정책 2026-04-29: ReasonBar 이동 후 폭 넉넉해져 정렬 통일)
         self.btn_visualize = QPushButton("▶  Run")
         self.btn_visualize.setProperty("class", "primary")
-        self.btn_visualize.setFixedWidth(int(HEADER_BUTTON_WIDTH * 1.4))  # 약 123px
+        self.btn_visualize.setFixedWidth(
+            HEADER_BUTTON_WIDTH * 2 + HEADER_BUTTON_SPACING,
+        )
         self.btn_visualize.setEnabled(False)
         self.btn_visualize.clicked.connect(self._on_visualize)
 
@@ -996,19 +1017,15 @@ class MainWindow(QMainWindow):
             self._show_blocking_reason("no_input", "error", "입력 없음")
             return
 
-        # PARA 조합 모드 — sentinel 감지 시 state 에서 item 조회 → 임시 PARA 등록
+        # PARA 조합 모드 — sentinel 감지 시 state 에서 item 조회. 친화 키는 Apply
+        # 시점에 wafer.parameters 에 등록되어 있음 (재 inject 불필요).
         v_data = self.cb_value.currentData()
         coord_data = self.cb_coord.currentData()
         item = None
         if _is_combined_data(v_data) and _is_combined_data(coord_data):
             item = self._combined_state.get_by_v_sentinel(v_data)
         if item is not None:
-            v, x, y = self._inject_combined_temp_paras(a, b, item)
-            if v is None:
-                self._show_blocking_reason(
-                    "combined_no_data", "error", "조합 데이터 없음",
-                )
-                return
+            v, x, y = item.v_key, item.x_key, item.y_key
         else:
             v = self._current_value()
             xy = self._current_xy()
@@ -1033,20 +1050,20 @@ class MainWindow(QMainWindow):
     def _inject_combined_temp_paras(
         self, a, b, item: CombinedItem,
     ) -> tuple[str | None, str | None, str | None]:
-        """두 PARA + 두 좌표 페어를 wafer.parameters 에 합성 임시 키로 등록.
+        """N-ary operands 를 wafer.parameters 에 합성 임시 키로 등록.
 
-        합성 키 = 사용자 친화 이름 (`T1 + T1_A` / `X + X_A` / `Y + Y_A`).
-        cell 타이틀 / Summary 자동으로 친화 이름 표시. paste 변경 시 result 새로
-        만들어져 임시 PARA 자동 정리.
+        concat: 좌표/값 모두 operand 별로 concatenate, 길이 = sum(n_i).
+        sum: 좌표 동일 (coords[0]) — 그대로 사용, 값만 element-wise 합. 길이 = n.
+
+        합성 키 = 친화 이름 (`item.v_key` / `item.x_key` / `item.y_key`). cell 타이틀 /
+        Summary 자동으로 친화 이름 표시. paste 변경 시 result 새로 만들어져 임시
+        PARA 자동 정리.
 
         Returns:
             (v_name, x_name, y_name) — 임시 키. 데이터 0 wafer 면 (None, None, None).
         """
         from main import WaferRecord  # lazy
-        from core.coords import normalize_to_mm
 
-        p1, p2 = item.p1, item.p2
-        (x1, y1), (x2, y2) = item.coord1, item.coord2
         v_key, x_key, y_key = item.v_key, item.x_key, item.y_key
 
         injected = 0
@@ -1054,37 +1071,57 @@ class MainWindow(QMainWindow):
             if result is None:
                 continue
             for w in result.wafers.values():
-                # 두 PARA + 두 좌표 모두 있어야 합성 가능
-                needed = (p1, x1, y1, p2, x2, y2)
+                # 모든 operand + 좌표 PARA 가 wafer 에 있어야 합성 가능
+                needed: set[str] = set(item.operands)
+                for c in item.coords:
+                    needed.add(c[0])
+                    needed.add(c[1])
                 if not all(n in w.parameters for n in needed):
                     continue
-                xa = np.asarray(w.parameters[x1].values, dtype=float)
-                ya = np.asarray(w.parameters[y1].values, dtype=float)
-                va = np.asarray(w.parameters[p1].values, dtype=float)
-                xb = np.asarray(w.parameters[x2].values, dtype=float)
-                yb = np.asarray(w.parameters[y2].values, dtype=float)
-                vb = np.asarray(w.parameters[p2].values, dtype=float)
-                # mm 환산 (좌표만)
-                xa_mm, _ = normalize_to_mm(xa)
-                ya_mm, _ = normalize_to_mm(ya)
-                xb_mm, _ = normalize_to_mm(xb)
-                yb_mm, _ = normalize_to_mm(yb)
-                # 짧은 쪽 기준 길이 정렬
-                na = min(len(xa_mm), len(ya_mm), len(va))
-                nb = min(len(xb_mm), len(yb_mm), len(vb))
-                x_concat = np.concatenate([xa_mm[:na], xb_mm[:nb]])
-                y_concat = np.concatenate([ya_mm[:na], yb_mm[:nb]])
-                v_concat = np.concatenate([va[:na], vb[:nb]])
-                n_total = len(x_concat)
+
+                if item.mode == "sum":
+                    # 단일 좌표 (coords[0]). values 모두 같은 길이 가정 — 짧은 쪽 기준 정렬.
+                    cx, cy = item.coords[0]
+                    x_arr = np.asarray(w.parameters[cx].values, dtype=float)
+                    y_arr = np.asarray(w.parameters[cy].values, dtype=float)
+                    x_mm, _ = normalize_to_mm(x_arr)
+                    y_mm, _ = normalize_to_mm(y_arr)
+                    n = min(len(x_mm), len(y_mm))
+                    v_sum = np.zeros(n, dtype=float)
+                    for op in item.operands:
+                        v = np.asarray(w.parameters[op].values, dtype=float)
+                        n = min(n, len(v))
+                        v_sum = v_sum[:n] + v[:n]
+                    x_final = x_mm[:n]
+                    y_final = y_mm[:n]
+                    v_final = v_sum
+                else:
+                    # concat: operand 별로 (x,y,v) 슬라이스 → concatenate
+                    xs, ys, vs = [], [], []
+                    for op, (cx, cy) in zip(item.operands, item.coords):
+                        x_arr = np.asarray(w.parameters[cx].values, dtype=float)
+                        y_arr = np.asarray(w.parameters[cy].values, dtype=float)
+                        v_arr = np.asarray(w.parameters[op].values, dtype=float)
+                        x_mm, _ = normalize_to_mm(x_arr)
+                        y_mm, _ = normalize_to_mm(y_arr)
+                        nk = min(len(x_mm), len(y_mm), len(v_arr))
+                        xs.append(x_mm[:nk])
+                        ys.append(y_mm[:nk])
+                        vs.append(v_arr[:nk])
+                    x_final = np.concatenate(xs)
+                    y_final = np.concatenate(ys)
+                    v_final = np.concatenate(vs)
+
+                n_total = len(x_final)
                 # WaferRecord 임시 등록 (paste 변경 시 result 새로 만들어지면 자동 사라짐)
                 w.parameters[v_key] = WaferRecord(
-                    values=v_concat, n=n_total, max_data_id=None,
+                    values=v_final, n=n_total, max_data_id=None,
                 )
                 w.parameters[x_key] = WaferRecord(
-                    values=x_concat, n=n_total, max_data_id=None,
+                    values=x_final, n=n_total, max_data_id=None,
                 )
                 w.parameters[y_key] = WaferRecord(
-                    values=y_concat, n=n_total, max_data_id=None,
+                    values=y_final, n=n_total, max_data_id=None,
                 )
                 injected += 1
         if injected == 0:
@@ -1543,7 +1580,7 @@ class MainWindow(QMainWindow):
         단 범위만 wafer 자체).
         """
         is_common = self.cb_zscale.currentText() == "공통"
-        pct = int(self.sp_z_range.value())
+        pct = float(self.sp_z_range.value())
         if not is_common and pct == 0:
             # 개별 + margin 없음 → cell 자체 계산 (기존 경로, 비용 절약)
             for d in displays:
@@ -1658,48 +1695,97 @@ class MainWindow(QMainWindow):
         """
         from widgets.para_combine_dialog import ParaCombineDialog
         a, b = self._result_a, self._result_b
-        dlg = ParaCombineDialog(a, b, parent=self)
+        dlg = ParaCombineDialog(
+            a, b, parent=self, combined_state=self._combined_state,
+        )
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         result = dlg.result()
         if result is None:
             return
-        item = CombinedItem(
-            p1=result["value"][0],
-            p2=result["value"][1],
-            coord1=result["coord1"],
-            coord2=result["coord2"],
-        )
+        # 다이얼로그가 mode 자동 판정 (좌표 동일 → sum, 아니면 concat)
+        p1, p2 = result["value"]
+        c1, c2 = result["coord1"], result["coord2"]
+        mode = result.get("mode", "concat")
+        # 같은 mode CombinedItem 의 v_key 면 자동 flatten (sum 도 concat 도 동일 정책).
+        if mode == "sum":
+            ops_a, _ = self._flatten_same_mode(p1, "sum", c1)
+            ops_b, _ = self._flatten_same_mode(p2, "sum", c1)
+            ops = ops_a + ops_b
+            item = CombinedItem(operands=ops, coords=[c1] * len(ops), mode="sum")
+        else:
+            ops_a, coords_a = self._flatten_same_mode(p1, "concat", c1)
+            ops_b, coords_b = self._flatten_same_mode(p2, "concat", c2)
+            item = CombinedItem(
+                operands=ops_a + ops_b,
+                coords=coords_a + coords_b,
+                mode="concat",
+            )
+        # Apply 시점에 즉시 wafer.parameters 등록 — 다이얼로그 재오픈 즉시 보이도록.
+        # 실패 (operand wafer 매칭 0) 시 state 추가 안 함 + 사유 표시.
+        a, b = self._result_a, self._result_b
+        v, x, y = self._inject_combined_temp_paras(a, b, item)
+        if v is None:
+            self._show_blocking_reason(
+                "combined_no_data", "error", "조합 대상 데이터 없음 (operand 누락)",
+            )
+            return
         self._combined_state.add(item)
         self._fill_combined_item_into_combos(item)
+
+    def _flatten_same_mode(
+        self, name: str, mode: str, fallback_coord: tuple[str, str],
+    ) -> tuple[list[str], list[tuple[str, str]]]:
+        """operand 가 같은 mode CombinedItem 의 v_key 면 그 operands/coords 로 펼침.
+
+        sum 끼리 / concat 끼리는 평탄화 → 라벨 단순. 다른 mode 면 그대로 (+ 괄호 자동
+        적용은 v_key 단계에서 처리). 사용자 정책 2026-04-29: "그냥 추가될 때마다
+        이어붙이기".
+        """
+        for it in self._combined_state.items:
+            if it.mode == mode and it.v_key == name:
+                return list(it.operands), list(it.coords)
+        return [name], [fallback_coord]
         # _refresh_controls() 호출 X — 콤보 재생성하면 합성 항목 사라짐.
 
-    # 합성 항목 prefix 아이콘 — Windows 10 호환 link emoji
+    # 합성 항목 prefix 아이콘 — concat/sum 통일 (사용자 정책 2026-04-29)
     _COMBINED_ICON = "🔗"
 
     def _fill_combined_item_into_combos(self, item: CombinedItem) -> None:
         """합성 항목 한 개를 cb_value / cb_coord 에 추가 + 선택.
 
         같은 sentinel 이 이미 있으면 선택만 (중복 추가 X), 없으면 prepend (누적).
-        라벨에 측정점 개수 [N+M pt] + 🔗 prefix.
+        라벨 포맷:
+          - sum   : `🔗 T1 + T2 + T3  [N pt]`   / `X/Y  [N pt]` (좌표 plain)
+          - concat: `🔗 T1 ∪ T1_A  [N1+N2 pt]` / `🔗 X/Y ∪ X_A/Y_A  [N1+N2 pt]`
+        n_pt 는 첫 wafer 기준 (operand 가 plain PARA 든 합성 친화 키 든 동일하게 조회).
         """
-        # 측정점 개수 추출 — 첫 wafer 기준 (단일 콤보와 동일 정책)
         result = self._result_a or self._result_b
-        if result and result.wafers:
-            first = next(iter(result.wafers.values()))
-            n_p1 = first.parameters[item.p1].n if item.p1 in first.parameters else 0
-            n_p2 = first.parameters[item.p2].n if item.p2 in first.parameters else 0
-            n_c1 = first.parameters[item.coord1[0]].n if item.coord1[0] in first.parameters else 0
-            n_c2 = first.parameters[item.coord2[0]].n if item.coord2[0] in first.parameters else 0
-        else:
-            n_p1 = n_p2 = n_c1 = n_c2 = 0
+        first = next(iter(result.wafers.values())) if result and result.wafers else None
+
+        def _n(name: str) -> int:
+            if first is None or name not in first.parameters:
+                return 0
+            return first.parameters[name].n
 
         ic = self._COMBINED_ICON
-        v_label = f"{ic} {item.p1} + {item.p2}  [{n_p1}+{n_p2} pt]"
-        coord_label = (
-            f"{ic} {item.coord1[0]}/{item.coord1[1]} + "
-            f"{item.coord2[0]}/{item.coord2[1]}  [{n_c1}+{n_c2} pt]"
-        )
+        if item.mode == "sum":
+            # sum: operands 의 n 은 모두 같아야 함 (좌표 동일이므로). 첫 항목 기준.
+            n_pt = _n(item.operands[0])
+            v_label = f"{ic} {item.v_key}  [{n_pt} pt]"
+            x, y = item.coords[0]
+            coord_label = f"{x}/{y}  [{n_pt} pt]"
+        else:
+            ns = [_n(p) for p in item.operands]
+            cns = [_n(c[0]) for c in item.coords]
+            v_label = (
+                f"{ic} {item.v_key}  [{'+'.join(str(n) for n in ns)} pt]"
+            )
+            coord_label = (
+                f"{ic} "
+                f"{' ∪ '.join(f'{c[0]}/{c[1]}' for c in item.coords)}  "
+                f"[{'+'.join(str(n) for n in cns)} pt]"
+            )
 
         self.cb_value.blockSignals(True)
         self.cb_coord.blockSignals(True)
@@ -1806,7 +1892,7 @@ class MainWindow(QMainWindow):
 
         공통 / 개별 각각 별도 세션 저장 → 모드 간 전환 시 각자 마지막 값 복원.
         """
-        prev_pct = int(self.sp_z_range.value())
+        prev_pct = float(self.sp_z_range.value())
         if self._last_zscale_mode == "공통":
             self._z_margin_pct_common = prev_pct
         else:
@@ -1814,7 +1900,7 @@ class MainWindow(QMainWindow):
         new_pct = (self._z_margin_pct_common if mode == "공통"
                    else self._z_margin_pct_indiv)
         self.sp_z_range.blockSignals(True)
-        self.sp_z_range.setValue(new_pct)
+        self.sp_z_range.setValue(float(new_pct))
         self.sp_z_range.blockSignals(False)
         self._last_zscale_mode = mode
 
@@ -1855,12 +1941,12 @@ class MainWindow(QMainWindow):
         if self._result_a and self._result_b:
             self._on_visualize()
 
-    def _on_z_range_changed(self, value: int) -> None:
+    def _on_z_range_changed(self, value: float) -> None:
         """Z-Margin 스핀박스 변경 — 현재 모드 세션값 갱신 + 재렌더. 저장 안 함."""
         if self.cb_zscale.currentText() == "공통":
-            self._z_margin_pct_common = int(value)
+            self._z_margin_pct_common = float(value)
         else:
-            self._z_margin_pct_indiv = int(value)
+            self._z_margin_pct_indiv = float(value)
         cells = self._result_panel.cells
         if not cells:
             return

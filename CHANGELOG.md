@@ -5,6 +5,58 @@ Wafer Map 버전 이력. SemVer(Major.Minor.Patch) 기준.
 - **Minor**: 기능 추가 / UI 변경
 - **Patch**: 버그 수정
 
+## [0.4.0] — 2026-04-29
+
+핵심 — (1) PARA 조합 기능 확장 (sum + concat recursive + 임의 깊이 중첩) + (2) 데이터 모델 단일 진실원 리팩토링 (`CombinedState` / `CombinedItem`) + (3) UI 마이너 개선 (Settings 높이·Default 정책·ReasonBar 테마/라벨/✓·Z-Margin 정밀화).
+
+### PARA 조합 — sum / concat 통합 + recursive
+
+기존 concat-only 합성을 sum 모드로 확장. 좌표 동일 여부로 mode 자동 판정.
+
+- **mode 자동 판정** — 두 좌표 페어 동일 → `sum` (element-wise 덧셈), 다름 → `concat` (점 집합 합집합). 사용자가 mode 라디오 안 누름.
+- **새 표기 (사용자 정책 2026-04-29)**:
+  - sum: `T1 + T2`  (수학적 덧셈 — 좌표 단일 표시)
+  - concat: `T1 ∪ T1_A`  (합집합 기호 — 좌표는 `X/Y ∪ X_A/Y_A`)
+- **recursive 자동 flatten** — 같은 mode 끼리는 그냥 이어붙임:
+  - sum 평탄: `(T1+T2) + T3` (같은 좌표) → `T1 + T2 + T3`
+  - concat 평탄: `(T1 ∪ T1_A) ∪ T1_B` → `T1 ∪ T1_A ∪ T1_B`
+- **합성 operand 자동 괄호** — 다른 mode 혼합 시 우선순위 명시:
+  - `(T1 + T2) ∪ T_A`
+  - `(((T1 ∪ T2) + T3 + T4) ∪ (T5 + T6)) ∪ T7` 까지 임의 깊이 처리 (`_wrap_if_composite` — 한 줄 규칙: operand 가 ` + ` 또는 ` ∪ ` 포함 시 괄호)
+- **다이얼로그 미리보기에 flatten + 괄호 미리 반영** — Apply 후 콤보 라벨과 동일 형태 미리 표시.
+- **Apply 시점 inject** — 친화 키 (`T1 + T2`, `T1 ∪ T1_A`, `X ∪ X_A` 등) 가 Apply 직후 `wafer.parameters` 에 등록 → 다이얼로그 재오픈 즉시 합성 PARA 가 콤보에 보임 (Run 안 눌러도 됨).
+- **이모지 통일** — 합성 항목 prefix `🔗` (sum/concat 동일).
+
+### CombinedState/CombinedItem 단일 진실원 (`widgets/main_window.py`)
+
+기존 `_combined dict` + `_combined_pairs mapping` + `"__combined__"` sentinel 문자열 산재로 7번 사용자 검증 사이클 발생. 데이터 분산이 근본 원인. 단일 진실원으로 리팩토링:
+
+- `CombinedItem(operands: list[str], coords: list[tuple[str,str]], mode: str)` — N-ary dataclass. sentinel / 친화키 / coord_sentinel / parens 모두 property
+- `CombinedState.items` — 누적 목록. `add` (sentinel dedup) / `get_by_v_sentinel` / `temp_keys` (정확 정리용 키 set) / `clear`
+- 모듈 헬퍼 `_is_combined_data` / `_wrap_if_composite` — sentinel 검사 + 자동 괄호 통일
+- `_flatten_same_mode` — sum/concat 공통 평탄화
+
+### UI / Settings 마이너 개선
+
+- **Settings 다이얼로그 높이** 740 → 940px — 5개 카드 (UI / Chart Common / 2D / 3D / 1D Radial) 모두 스크롤 없이 표시
+- **Default 버튼 UI 카드 제외** — 테마·글꼴·윈도우 저장·글자 크기 보존, 그래프 카드만 reset (디자인 취향 보호, 사용자 정책 2026-04-29). 처음 실행 시엔 `core/themes.DEFAULT_SETTINGS` 의 값 (`theme: Light`, `font: Segoe UI`, `font_scale: 1.0`) 적용
+- **테마 / 글꼴 콤보 표시** — 기본값에 `(기본)` 접미 (`Light (기본)`, `Segoe UI (기본)`). itemData 는 bare name 유지 → settings.json 저장값 변동 없음
+- **Moving Avg Window default** 0 → 3 mm
+- **Z-Margin 스핀박스 정밀화** — `QSpinBox` (step 5, 정수) → `QDoubleSpinBox` (step 1, 소수 1자리). 사용자가 직접 `12.5%` 같은 값 입력 가능
+- **Run 버튼 폭 182px** — `[Text](88) + spacing(6) + [Table](88)` 합과 동일 → ReasonBar 의 `[Run][Clear]` 가 Input B 의 `[Text][Table][Clear]` 와 우측 정렬 자동 일치
+- **ReasonBar 개선**:
+  - 테마 적응 (`#fafafa` 하드코딩 제거 → 전역 QSS `#reasonBar` rule 이 theme bg + border)
+  - 좌측 `Message:` 라벨 추가 (왼쪽 빈 공간에 의미 부여)
+  - 정상 상태 (warning 0건) `✓` 표시 (theme `success` 색)
+  - 높이 36 → 44 + 마진 4 → 6 (Run/Clear 위·아래 패딩 확보)
+  - splitter collapse 차단 (`setCollapsible(1, False)` + `setMinimumHeight(sizeHint)`) — 핸들 위로 끌어도 Control + ReasonBar 영역 안 사라짐
+  - severity 색은 dynamic property 기반 QSS selector (`#reasonBarLabel[severity="error"]` 등) → 테마 변경 시 자동 반영
+- **Result 패널 안내 문구 정리** — "Copy 시 그래프 가려지지 않도록 주의" 줄 삭제 (FBO offscreen 캡처 도입으로 무관)
+
+### 데이터 / 테스트 자원
+
+- 새 샘플 `samples/cases/case_inner_outer_combined.csv` — inner T1~T4 (X/Y, 13pt) + outer T_A~T_D (X_A/Y_A 등 4개 좌표계, 11pt). sum / concat / mixed / deep recursive 모든 시나리오 시연용
+
 ## [0.3.0] — 2026-04-27
 
 0.2.0 이후 핵심 축은 (1) 입력 검증 모듈 분리 + ReasonBar 단일 채널 정책, (2) DELTA 좌표 fallback 매트릭스 + RECIPE PRE/POST 호환 룰, (3) Run 단일 약속 + silent 분기 일관화, (4) Startup warmup 백그라운드 분리.

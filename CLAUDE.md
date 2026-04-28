@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-현재 버전: **0.3.0** (입력 검증 + ReasonBar 단일 채널 + DELTA 좌표 fallback + Startup warmup 분리, 2026-04-27). 버전 이력은 [CHANGELOG.md](CHANGELOG.md) 참고, 사용자 가이드는 [USER_GUIDE.md](USER_GUIDE.md).
+현재 버전: **0.4.0** (PARA 조합 sum/concat recursive + CombinedState 단일 진실원 + UI 마이너, 2026-04-29). 버전 이력은 [CHANGELOG.md](CHANGELOG.md) 참고, 사용자 가이드는 [USER_GUIDE.md](USER_GUIDE.md).
 
 ## 개발자 정보
 - 한국인, 코딩 중급 수준
@@ -368,8 +368,9 @@ Wafer Map/
 │   ├── delta_validation.py      ← 양쪽 입력 정합성 (no_intersect/coord_unresolved error, coord_fallback ok, recipe_mismatch/no_common_value_para/repeats_in_input warn)
 │   └── recipe_util.py           ← RECIPE 호환 판정 단일 진실 원천 (`_+(PRE|POST)$` 베이스 비교, 구분자 `_` 만)
 ├── widgets/
-│   ├── main_window.py           ← 3-패널 QSplitter, 컨트롤 패널 fixed-height, view_mode 분기, closeEvent 윈도우 저장
-│   ├── reason_bar.py            ← Run 결과 사유 한 줄 표시 (info/ok/warn/error 색 분기, ok 는 ⚠ prefix 없음)
+│   ├── main_window.py           ← 3-패널 QSplitter + CombinedItem/CombinedState (PARA 조합 단일 진실원), view_mode 분기, closeEvent 윈도우 저장
+│   ├── reason_bar.py            ← Message 라벨 + 사유 한 줄 표시. severity dynamic property 기반 QSS selector (테마 자동 반영). 빈 상태 ✓ 표시
+│   ├── para_combine_dialog.py   ← Para 조합 다이얼로그 — mode 자동 판정 (좌표 동일 → sum) + recursive flatten + composites 콤보 노출 (state 기반)
 │   ├── paste_area.py            ← Ctrl+V 타겟 (Text/Table 토글 + Clear). 단일 입력 검증 라벨 (severity 색)
 │   ├── wafer_cell.py            ← WaferDisplay/WaferCell — 2D pyqtgraph + 3D GLSurfacePlotItem 동적 swap
 │   ├── result_panel.py          ← (MAP+Summary) 쌍을 가로 나열, 합성 Copy Graph용 컨테이너
@@ -380,7 +381,7 @@ Wafer Map/
 │   ├── sample_data.csv          ← 실제 포맷 테스트 CSV (2 웨이퍼)
 │   ├── sample_data.py           ← 샘플 점 생성기
 │   ├── sample_*.py              ← 라이브러리 비교 샘플 7종 (matplotlib/plotly/pyqtgraph/pyvista/vispy/wfmap/cap1tan)
-│   └── cases/                   ← 9 케이스 CSV (case01_basic..case07_x_multi, case_no_coords)
+│   └── cases/                   ← 케이스 CSV (case01..case12, case_no_coords, case_inner_outer_combined — sum/concat 시연용)
 ├── tests/
 │   ├── test_auto_select.py      ← auto_select 통합 테스트 10케이스
 │   └── compare_interp.py        ← 4 보간 방법 한 화면 비교 (debug/output_compare_interp.png)
@@ -390,6 +391,31 @@ Wafer Map/
 ├── settings.json                ← 런타임 설정 (.gitignore)
 └── coord_library.json           ← 좌표 프리셋 영구 저장소 (.gitignore)
 ```
+
+**PARA 조합 — sum / concat recursive (0.4.0~)**
+
+서로 다른 PARA + 좌표 페어를 합쳐 하나의 시각화로. Apply 후 main 콤보에 합성 항목으로 누적 등록 → Run 으로 시각화. recursive 가능 (합성 결과를 또 합성).
+
+- **데이터 모델 단일 진실원**: `widgets/main_window.py::CombinedItem` (N-ary dataclass) + `CombinedState` (누적 list). 기존 `_combined dict + _combined_pairs mapping + sentinel 문자열` 산재 → 7번 사용자 검증 사이클 발생 → 단일 진실원으로 리팩토링 (2026-04-29).
+- **mode 자동 판정** (다이얼로그):
+  - 두 좌표 페어 동일 → `sum` (element-wise 덧셈, 좌표 단일)
+  - 다름 → `concat` (점 집합 합집합, 좌표 union)
+- **친화 키 표기 (`v_key`/`x_key`/`y_key`)**:
+  - sum: ` + ` (예 `T1 + T2 + T3`, 좌표 단일 `X` / `Y`)
+  - concat: ` ∪ ` (예 `T1 ∪ T1_A`, 좌표 `X ∪ X_A` / `Y ∪ Y_A`)
+- **recursive 자동 flatten** (`_flatten_same_mode`): 같은 mode 끼리는 평탄화. 다른 mode 면 그대로.
+- **합성 operand 자동 괄호** (`_wrap_if_composite`): operand 가 ` + ` 또는 ` ∪ ` 포함 시 괄호. 한 줄 규칙으로 임의 깊이 처리:
+  - `(T1 + T2) ∪ T_A`
+  - `(((T1 ∪ T2) + T3 + T4) ∪ (T5 + T6)) ∪ T7`
+- **Apply 시점 inject** (`_inject_combined_temp_paras`): 친화 키를 즉시 `wafer.parameters` 에 등록. 다음 다이얼로그 열 때 합성 PARA 가 `_gather_paras` 통과해 콤보에 노출되어 recursive 가능. paste 변경 시 `_clear_combined` 가 `state.temp_keys()` 기준 정확 제거.
+- **다이얼로그 콤보 노출** (`para_combine_dialog`):
+  - `_gather_paras` 는 ` + ` / ` ∪ ` 모두 필터 (plain PARA 만 반환)
+  - composite 항목은 `combined_state` 에서 직접 빌드해 콤보에 추가 (🔗 prefix)
+  - composite operand 선택 시 `_auto_pick_coord` 가 state 의 매핑으로 즉시 결정 (suffix 매칭 우회)
+- **콤보 라벨**:
+  - sum: `🔗 T1 + T2  [13 pt]` / `X/Y  [13 pt]` (좌표 plain)
+  - concat: `🔗 T1 ∪ T1_A  [13+11 pt]` / `🔗 X/Y ∪ X_A/Y_A  [13+11 pt]` (operand 별 n breakdown)
+- **이모지 통일** `🔗` (sum/concat 동일).
 
 **입력 검증 + ReasonBar 단일 채널 정책 (0.3.0~)**
 

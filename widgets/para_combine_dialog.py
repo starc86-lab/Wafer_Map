@@ -20,18 +20,20 @@ from main import ParseResult
 
 # ── 후보 추출 헬퍼 ─────────────────────────────────────────────
 def _gather_paras(result: ParseResult | None) -> dict[str, int]:
-    """ParseResult 에서 PARA → n. 입력 순서 보존.
+    """ParseResult 에서 plain PARA → n. 입력 순서 보존.
 
-    합성 임시 키 (이름에 ` + ` 포함, `_inject_combined_temp_paras` 가 등록한 잔재)
-    는 제외 — 다이얼로그 콤보에 합성 PARA / 좌표가 잘못 노출되는 것 방지.
-    PARA 콤보 / 좌표 콤보 모두 동일 정책 (사용자 정책 2026-04-28).
+    합성 친화 키 (` + ` 또는 ` ∪ ` 포함) 는 모두 제외 — 합성 항목은 별도로
+    `combined_state` 에서 가져와 콤보에 추가 (사용자 정책 2026-04-29). 좌표 합성 키
+    (`X ∪ X_A`, sum 의 X 는 plain 과 동일하므로 통과) 도 동일 정책.
     """
     if result is None:
         return {}
     out: dict[str, int] = {}
     for w in result.wafers.values():
         for name, rec in w.parameters.items():
-            if name in out or " + " in name:
+            if name in out:
+                continue
+            if " + " in name or " ∪ " in name:
                 continue
             out[name] = rec.n
     return out
@@ -64,6 +66,11 @@ def _intersect_dict(a: dict[str, int], b: dict[str, int]) -> dict[str, int]:
     return {k: v for k, v in a.items() if k in b}
 
 
+def _wrap(name: str) -> str:
+    """미리보기용 — 합성 operand 자동 괄호. main_window._wrap_if_composite 와 동일 규칙."""
+    return f"({name})" if (" + " in name or " ∪ " in name) else name
+
+
 # ── 다이얼로그 ────────────────────────────────────────────────
 class ParaCombineDialog(QDialog):
     """PARA 조합 다이얼로그.
@@ -80,14 +87,20 @@ class ParaCombineDialog(QDialog):
         result_a: ParseResult | None,
         result_b: ParseResult | None,
         parent: QWidget | None = None,
+        combined_state=None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Para 조합")
         self.setModal(True)
         self.resize(540, 280)
 
+        # 미리보기 flatten 용 — main_window 의 CombinedState. dialog 는 외부 모듈
+        # import 안 하고 duck typing (items 속성 + mode/v_key/operands 만 사용).
+        self._combined_state = combined_state
+
         # 후보 추출 — DELTA 모드면 A∩B 교집합 (이름 기준).
-        # _gather_paras 가 이미 합성 임시 키 (` + ` 포함) 는 제외 — 오리지널만.
+        # _gather_paras 가 ` ∪ ` 포함 키만 제외 (concat 합성 결과). sum 합성 결과
+        # (` + ` 패턴) 는 통과 → sum recursive 가능.
         # 사용된 PARA 도 그대로 유지 (T1+T1_A 만들고 T1+T1_B 도 가능).
         a_paras = _gather_paras(result_a)
         b_paras = _gather_paras(result_b)
@@ -109,6 +122,36 @@ class ParaCombineDialog(QDialog):
 
         self._value_paras = _value_paras(paras)
         self._para_n = paras  # PARA → n 조회용
+
+        # 합성 항목 — combined_state 에서 직접 빌드. wafer.parameters 에 Apply 시점에
+        # 등록된 친화 키들이 있어 거기서 n 조회 가능 (없으면 0).
+        # composites_v: list[(v_key, n)] / composites_coord: list[(x_key, y_key, n)]
+        self._composites_v: list[tuple[str, int]] = []
+        self._composites_coord: list[tuple[str, str, int]] = []
+        # composite v_key 별 (x_key, y_key) 매핑 — auto-pick 용
+        self._composite_v_to_coord: dict[str, tuple[str, str]] = {}
+        if combined_state is not None:
+            # n 조회 — 첫 wafer 의 wafer.parameters[v_key].n (Apply inject 됨)
+            first_w = None
+            for r in (result_a, result_b):
+                if r and r.wafers:
+                    first_w = next(iter(r.wafers.values()))
+                    break
+
+            def _n_of(name: str) -> int:
+                if first_w is None or name not in first_w.parameters:
+                    return 0
+                return first_w.parameters[name].n
+
+            for it in getattr(combined_state, "items", []):
+                v_n = _n_of(it.v_key)
+                self._composites_v.append((it.v_key, v_n))
+                self._composite_v_to_coord[it.v_key] = (it.x_key, it.y_key)
+                # sum 좌표는 plain (이미 _coord_pairs 에 있음) — concat 만 추가
+                if it.mode == "concat":
+                    self._composites_coord.append(
+                        (it.x_key, it.y_key, _n_of(it.x_key)),
+                    )
 
         # ── UI ────────────────────────────────────────
         lay = QVBoxLayout(self)
@@ -186,9 +229,12 @@ class ParaCombineDialog(QDialog):
             for name in self._value_paras:
                 n = self._para_n.get(name, 0)
                 cb.addItem(f"{name}  [{n} pt]", name)
+            # 합성 항목 — 🔗 prefix 로 시각 구분
+            for v_key, n in self._composites_v:
+                cb.addItem(f"🔗 {v_key}  [{n} pt]", v_key)
             cb.blockSignals(False)
         # PARA 1 자동 선택 (첫 후보)
-        if self._value_paras:
+        if self._value_paras or self._composites_v:
             self.cb_p1.setCurrentIndex(1)  # 0 은 placeholder
 
     def _fill_coord_combos(self) -> None:
@@ -198,12 +244,18 @@ class ParaCombineDialog(QDialog):
             cb.addItem("— 선택 —", None)
             for x, y, n in self._coord_pairs:
                 cb.addItem(f"{x} / {y}  [{n} pt]", (x, y))
+            # composite 좌표 (concat 결과만 — sum 좌표는 plain 과 동일)
+            for x, y, n in self._composites_coord:
+                cb.addItem(f"🔗 {x} / {y}  [{n} pt]", (x, y))
             cb.blockSignals(False)
 
     # ── 좌표 자동 매칭 (suffix + n 일치) ─────────────────
     def _auto_pick_coord(self, para_name: str | None) -> tuple[str, str] | None:
         if not para_name:
             return None
+        # composite operand → state 의 매핑으로 즉시 결정 (suffix 매칭 X)
+        if para_name in self._composite_v_to_coord:
+            return self._composite_v_to_coord[para_name]
         para_n = self._para_n.get(para_name)
         # 1순위: PARA 의 suffix 와 같은 X/Y 페어 (예: T1_A → X_A/Y_A)
         para_suffix = self._suffix_of(para_name)
@@ -263,17 +315,37 @@ class ParaCombineDialog(QDialog):
         if r is None:
             self._lbl_preview.setText("—")
             self.btn_apply.setEnabled(False)
+            return
+        p1, p2 = r["value"]
+        x1, y1 = r["coord1"]
+        x2, y2 = r["coord2"]
+        if r["mode"] == "sum":
+            # sum recursive flatten 미리 반영 + 합성 operand 자동 괄호 (사용자 정책 2026-04-29)
+            ops = self._flatten_sum(p1) + self._flatten_sum(p2)
+            v_text = " + ".join(_wrap(op) for op in ops)
+            self._lbl_preview.setText(f"{v_text}    {x1}/{y1}")
         else:
-            p1, p2 = r["value"]
-            x1, y1 = r["coord1"]
-            x2, y2 = r["coord2"]
-            self._lbl_preview.setText(
-                f"{p1} + {p2}    {x1}/{y1} + {x2}/{y2}"
-            )
-            self.btn_apply.setEnabled(True)
+            v_text = f"{_wrap(p1)} ∪ {_wrap(p2)}"
+            x_text = f"{_wrap(x1)} ∪ {_wrap(x2)}"
+            y_text = f"{_wrap(y1)} ∪ {_wrap(y2)}"
+            self._lbl_preview.setText(f"{v_text}    {x_text}/{y_text}")
+        self.btn_apply.setEnabled(True)
+
+    def _flatten_sum(self, name: str) -> list[str]:
+        """operand 가 기존 sum CombinedItem 의 v_key 면 그 operands 로 펼침."""
+        st = self._combined_state
+        if st is None:
+            return [name]
+        for it in getattr(st, "items", []):
+            if getattr(it, "mode", None) == "sum" and getattr(it, "v_key", None) == name:
+                return list(it.operands)
+        return [name]
 
     def _extract(self) -> dict | None:
-        """콤보 4개 모두 선택됐고 각자 다른 항목이면 dict 반환, 아니면 None."""
+        """콤보 4개 모두 선택됐고 PARA 가 서로 다르면 dict 반환, 아니면 None.
+
+        mode 자동 판정: 두 좌표 페어가 같으면 "sum", 다르면 "concat".
+        """
         p1 = self.cb_p1.currentData()
         p2 = self.cb_p2.currentData()
         c1 = self.cb_c1.currentData()
@@ -282,7 +354,8 @@ class ParaCombineDialog(QDialog):
             return None
         if p1 == p2:
             return None  # 같은 PARA 두 번 의미 없음
-        return {"value": (p1, p2), "coord1": c1, "coord2": c2}
+        mode = "sum" if c1 == c2 else "concat"
+        return {"value": (p1, p2), "coord1": c1, "coord2": c2, "mode": mode}
 
     # ── 외부 API ────────────────────────────────────
     def result(self) -> dict | None:
