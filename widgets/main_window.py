@@ -98,6 +98,10 @@ class MainWindow(QMainWindow):
         self._delta_warnings: list = []
         self._main_splitter_restored = False
         self._preset_override: CoordPreset | None = None
+        # PARA 조합 — Apply 시 dict 채워져 cb_value/cb_coord 에 합성 항목 추가.
+        # paste 변경 시 자동 해제 (사용자 정책 2026-04-28).
+        # 형식: {"value": (p1, p2), "coord1": (x1, y1), "coord2": (x2, y2)}
+        self._combined: dict | None = None
 
         self._build_toolbar()
         self._build_central()
@@ -305,14 +309,11 @@ class MainWindow(QMainWindow):
         self.sp_z_range.setFixedWidth(72)
         self.sp_z_range.valueChanged.connect(self._on_z_range_changed)
 
-        from widgets.paste_area import HEADER_BUTTON_WIDTH, HEADER_BUTTON_SPACING
-        # Run Analysis (2칸 폭) + Clear (1칸 폭) — 합치면 paste_area 의 Text+Table+Clear
-        # 폭과 동일 (시작/끝 X 정합 유지).
-        self.btn_visualize = QPushButton("▶  Run Analysis")
+        from widgets.paste_area import HEADER_BUTTON_WIDTH
+        # Run — 폭 축소 (Run Analysis → Run). 다른 버튼보단 폭 크게 강조 유지.
+        self.btn_visualize = QPushButton("▶  Run")
         self.btn_visualize.setProperty("class", "primary")
-        self.btn_visualize.setFixedWidth(
-            HEADER_BUTTON_WIDTH * 2 + HEADER_BUTTON_SPACING
-        )
+        self.btn_visualize.setFixedWidth(int(HEADER_BUTTON_WIDTH * 1.4))  # 약 123px
         self.btn_visualize.setEnabled(False)
         self.btn_visualize.clicked.connect(self._on_visualize)
 
@@ -320,6 +321,11 @@ class MainWindow(QMainWindow):
         self.btn_clear = QPushButton("Clear")
         self.btn_clear.setFixedWidth(HEADER_BUTTON_WIDTH)
         self.btn_clear.clicked.connect(self._on_clear_results)
+
+        # PARA 조합 — 두 PARA + 두 좌표 합쳐 시각화
+        self.btn_para_combine = QPushButton("PARA 조합")
+        self.btn_para_combine.setEnabled(False)  # 입력 있을 때만 활성
+        self.btn_para_combine.clicked.connect(self._open_para_combine_dialog)
 
         # 좌표 콤보 변경 시 pair 기반 로직 + VALUE 리스트 재필터
         self.cb_coord.currentIndexChanged.connect(self._on_coord_changed)
@@ -361,6 +367,7 @@ class MainWindow(QMainWindow):
             lay.addWidget(QLabel(label))
             lay.addWidget(widget)
         lay.addWidget(self.btn_load_preset)
+        lay.addWidget(self.btn_para_combine)
         lay.addSpacing(16)
         lay.addWidget(QLabel("View:"))
         lay.addWidget(self.cb_view)
@@ -387,12 +394,14 @@ class MainWindow(QMainWindow):
     def _on_a_parsed(self, result: ParseResult | None) -> None:
         self._result_a = result
         self._reset_preset_override()
+        self._clear_combined()  # 입력 변경 시 PARA 조합 자동 해제
         self._update_delta_validation()
         self._refresh_controls()
 
     def _on_b_parsed(self, result: ParseResult | None) -> None:
         self._result_b = result
         self._reset_preset_override()
+        self._clear_combined()
         self._update_delta_validation()
         self._refresh_controls()
 
@@ -497,6 +506,10 @@ class MainWindow(QMainWindow):
             any_input and bool(available_ns) and all_valid and not delta_blocking
         )
         self.btn_load_preset.setEnabled(any_input)
+        # PARA 조합 — 입력 + Run 활성 시점 (paste valid + delta 검증 통과) 에 활성
+        self.btn_para_combine.setEnabled(
+            any_input and bool(available_ns) and all_valid and not delta_blocking
+        )
         # Δ-Interp mode — A·B 모두 유효한 입력일 때만 활성 (DELTA 모드 전용)
         delta_ready = (self._result_a is not None and self._result_b is not None
                        and self.paste_a.is_valid and self.paste_b.is_valid
@@ -842,35 +855,39 @@ class MainWindow(QMainWindow):
 
     def _on_visualize(self) -> None:
         # signature skip 정책 폐기 (2026-04-27) — 같은 입력 재클릭 시에도 매번
-        # 새로 시각화. 사용자 의도: Run 재클릭 = reset 같은 의도. 라이브러리/외부
-        # 상태 변경 후 재시도가 silent skip 되는 버그 (N1) 도 자동 해결.
-        # cell 재생성 비용은 보통 한 번 클릭이라 무시. 카메라/zoom 사용자 조정값은
-        # `_applied_cam_dist` 등 별도 추적기로 보존 (Settings camera_distance 변경
-        # 안 했으면 setCameraPosition 호출 안 함).
-        #
-        # 차단 사유는 모두 `_show_blocking_reason` (ReasonBar 단일 채널) 로 통일 —
-        # 결과 영역은 항상 현재 입력 상태와 동기화. silent return / silent clear 없음.
-
-        v = self._current_value()
-        xy = self._current_xy()
-        x = xy[0] if xy else ""
-        y = xy[1] if xy else ""
+        # 새로 시각화. 차단 사유는 모두 ReasonBar 단일 채널.
         a, b = self._result_a, self._result_b
 
-        # 양쪽 입력 없음 — Run 자체가 의미 없음 (사용자가 Run 비활성에도 클릭한 케이스)
         if not (a or b):
             self._show_blocking_reason("no_input", "error", "입력 없음")
             return
 
-        # VALUE 콤보 빈 상태 — 측정 PARA 가 입력에 없는 케이스
-        if not v:
-            self._show_blocking_reason("no_value_para", "error", "측정값 없음")
-            return
-
-        # 좌표 콤보 빈 상태 — 입력에 X/Y 없고 라이브러리 매칭도 없는 케이스
-        if not (x and y):
-            self._show_blocking_reason("no_coord", "error", "좌표 없음")
-            return
+        # PARA 조합 모드 — sentinel 감지 시 임시 PARA 등록 후 기존 흐름 재사용
+        v_data = self.cb_value.currentData()
+        coord_data = self.cb_coord.currentData()
+        is_combined = (
+            isinstance(v_data, tuple) and v_data and v_data[0] == "__combined__"
+            and isinstance(coord_data, tuple) and coord_data
+            and coord_data[0] == "__combined__"
+        )
+        if is_combined:
+            v, x, y = self._inject_combined_temp_paras(a, b, v_data, coord_data)
+            if v is None:
+                self._show_blocking_reason(
+                    "combined_no_data", "error", "조합 데이터 없음",
+                )
+                return
+        else:
+            v = self._current_value()
+            xy = self._current_xy()
+            x = xy[0] if xy else ""
+            y = xy[1] if xy else ""
+            if not v:
+                self._show_blocking_reason("no_value_para", "error", "측정값 없음")
+                return
+            if not (x and y):
+                self._show_blocking_reason("no_coord", "error", "좌표 없음")
+                return
 
         # 렌더링 먼저 → Qt paint 완료 후 n 불일치 경고 (QTimer 한 틱 지연)
         if a and b:
@@ -880,6 +897,63 @@ class MainWindow(QMainWindow):
 
         if self._preset_override is None:
             QTimer.singleShot(0, lambda: self._warn_n_mismatch_once(v, x, y))
+
+    def _inject_combined_temp_paras(
+        self, a, b, v_data: tuple, coord_data: tuple,
+    ) -> tuple[str | None, str | None, str | None]:
+        """두 PARA + 두 좌표 페어를 wafer.parameters 에 합성 임시 키로 등록.
+
+        합성 키 = 사용자 친화 이름 (`T1 + T1_A` / `X + X_A` / `Y + Y_A`).
+        cell 타이틀 / Summary 자동으로 친화 이름 표시. paste 변경 시 result 새로
+        만들어져 임시 PARA 자동 정리.
+
+        Returns:
+            (v_name, x_name, y_name) — 임시 키. 데이터 0 wafer 면 (None, None, None).
+        """
+        from main import WaferRecord  # lazy
+        from core.coords import normalize_to_mm
+
+        _, p1, p2 = v_data
+        _, (x1, y1), (x2, y2) = coord_data
+        v_key = f"{p1} + {p2}"
+        x_key = f"{x1} + {x2}"
+        y_key = f"{y1} + {y2}"
+
+        injected = 0
+        for result in (a, b):
+            if result is None:
+                continue
+            for w in result.wafers.values():
+                # 두 PARA + 두 좌표 모두 있어야 합성 가능
+                needed = (p1, x1, y1, p2, x2, y2)
+                if not all(n in w.parameters for n in needed):
+                    continue
+                xa = np.asarray(w.parameters[x1].values, dtype=float)
+                ya = np.asarray(w.parameters[y1].values, dtype=float)
+                va = np.asarray(w.parameters[p1].values, dtype=float)
+                xb = np.asarray(w.parameters[x2].values, dtype=float)
+                yb = np.asarray(w.parameters[y2].values, dtype=float)
+                vb = np.asarray(w.parameters[p2].values, dtype=float)
+                # mm 환산 (좌표만)
+                xa_mm, _ = normalize_to_mm(xa)
+                ya_mm, _ = normalize_to_mm(ya)
+                xb_mm, _ = normalize_to_mm(xb)
+                yb_mm, _ = normalize_to_mm(yb)
+                # 짧은 쪽 기준 길이 정렬
+                na = min(len(xa_mm), len(ya_mm), len(va))
+                nb = min(len(xb_mm), len(yb_mm), len(vb))
+                x_concat = np.concatenate([xa_mm[:na], xb_mm[:nb]])
+                y_concat = np.concatenate([ya_mm[:na], yb_mm[:nb]])
+                v_concat = np.concatenate([va[:na], vb[:nb]])
+                n_total = len(x_concat)
+                # WaferRecord 임시 등록 (paste 변경 시 result 새로 만들어지면 자동 사라짐)
+                w.parameters[v_key] = WaferRecord(values=v_concat, n=n_total)
+                w.parameters[x_key] = WaferRecord(values=x_concat, n=n_total)
+                w.parameters[y_key] = WaferRecord(values=y_concat, n=n_total)
+                injected += 1
+        if injected == 0:
+            return None, None, None
+        return v_key, x_key, y_key
 
     def _warn_n_mismatch_once(self, v: str, x: str, y: str) -> None:
         """현재 입력에서 VALUE/X/Y n 이 모두 같은지 검사. 다르면 ReasonBar 에 warn.
@@ -1288,6 +1362,9 @@ class MainWindow(QMainWindow):
         """
         if not wafer.recipe:
             return
+        # PARA 조합 합성 키 (`X + X_A` 형식) 는 라이브러리 저장 의미 X — skip
+        if " + " in x_name or " + " in y_name or " + " in v_name:
+            return
         if x_name not in wafer.parameters or y_name not in wafer.parameters:
             return
         if v_name not in wafer.parameters:
@@ -1435,6 +1512,69 @@ class MainWindow(QMainWindow):
             for d, rend, meas in zip(displays, per_d_render, per_d_measured):
                 d.z_range = _margin(*rend) if rend is not None else None
                 d.z_range_1d = _margin(*meas) if meas is not None else None
+
+    def _open_para_combine_dialog(self) -> None:
+        """PARA 조합 다이얼로그 — 두 PARA + 두 좌표 페어 선택 후 합성 항목 등록."""
+        from widgets.para_combine_dialog import ParaCombineDialog
+        a, b = self._result_a, self._result_b
+        dlg = ParaCombineDialog(a, b, parent=self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        result = dlg.result()
+        if result is None:
+            return
+        self._combined = result
+        self._fill_combined_into_combos()
+        self._refresh_controls()
+
+    def _fill_combined_into_combos(self) -> None:
+        """합성 항목을 cb_value / cb_coord 에 추가 + 선택. sentinel itemData 사용.
+
+        sentinel:
+          cb_value:  ("__combined__", p1, p2)
+          cb_coord:  ("__combined__", (x1, y1), (x2, y2))
+        """
+        if self._combined is None:
+            return
+        c = self._combined
+        # 합성 PARA 라벨
+        v_label = f"{c['value'][0]} + {c['value'][1]}"
+        v_data = ("__combined__", c["value"][0], c["value"][1])
+        # 합성 좌표 라벨
+        x1, y1 = c["coord1"]
+        x2, y2 = c["coord2"]
+        coord_label = f"{x1}/{y1} + {x2}/{y2}"
+        coord_data = ("__combined__", c["coord1"], c["coord2"])
+
+        self.cb_value.blockSignals(True)
+        self.cb_coord.blockSignals(True)
+        try:
+            # 기존 합성 항목 제거 후 새로 추가
+            self._remove_combined_from_combos()
+            self.cb_value.insertItem(0, v_label, v_data)
+            self.cb_value.setCurrentIndex(0)
+            self.cb_coord.insertItem(0, coord_label, coord_data)
+            self.cb_coord.setCurrentIndex(0)
+        finally:
+            self.cb_value.blockSignals(False)
+            self.cb_coord.blockSignals(False)
+        # 콤보 변경 시그널 수동 emit (재시각화 등 후속 처리)
+        self.cb_value.currentIndexChanged.emit(self.cb_value.currentIndex())
+
+    def _remove_combined_from_combos(self) -> None:
+        """cb_value / cb_coord 에서 합성 sentinel 항목 제거 (있으면)."""
+        for combo in (self.cb_value, self.cb_coord):
+            for i in range(combo.count() - 1, -1, -1):
+                data = combo.itemData(i)
+                if isinstance(data, tuple) and data and data[0] == "__combined__":
+                    combo.removeItem(i)
+
+    def _clear_combined(self) -> None:
+        """합성 상태 해제 + 콤보에서 항목 제거. paste 변경 시 호출."""
+        if self._combined is None:
+            return
+        self._combined = None
+        self._remove_combined_from_combos()
 
     def _open_help(self) -> None:
         """통합 도움말 HTML 을 기본 브라우저로 오픈."""
