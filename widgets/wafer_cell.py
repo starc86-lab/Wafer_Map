@@ -599,7 +599,8 @@ class WaferCell(QFrame):
         from core.themes import FONT_SIZES
         _body_px = FONT_SIZES.get("body", 14)
 
-        self._er_row = QWidget()
+        # parent=self 명시 — 미명시 시 잠시 top-level 로 native window 승격 위험
+        self._er_row = QWidget(self)
         er_outer = QVBoxLayout(self._er_row)
         er_outer.setContentsMargins(8, 2, 8, 2)
         er_outer.setSpacing(0)
@@ -646,8 +647,12 @@ class WaferCell(QFrame):
         row2.addStretch(1)
         er_outer.addLayout(row2)
 
-        self._er_row.setVisible(bool(getattr(display, "is_delta", False)))
+        # addWidget 먼저 (parent 확정) → 그 후 setVisible.
+        # 순서 반대면 _er_row 가 잠시 top-level QWidget 으로 native window 표시 →
+        # 팝업 깜빡임 (사용자 보고 2026-04-28). is_delta=True 시 setVisible(True) 가
+        # promotion 트리거.
         outer_lay.addWidget(self._er_row)
+        self._er_row.setVisible(bool(getattr(display, "is_delta", False)))
 
         # signal 연결 — editingFinished (엔터/포커스 아웃) 만 emit (textChanged 는
         # 타이핑 매 키마다라 과함)

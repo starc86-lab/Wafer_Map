@@ -98,71 +98,6 @@ def _bg_warmup() -> None:
         pass
 
 
-def _install_dialog_tracer() -> None:
-    """모든 QDialog show()/exec() 호출 시 stderr 에 traceback 출력 (디버그).
-
-    DELTA Run 시 정체불명 팝업 추적용 (사용자 보고 2026-04-28).
-    원인 파악 후 제거.
-    """
-    import traceback
-    from PySide6.QtWidgets import QDialog
-
-    _orig_exec = QDialog.exec
-    _orig_show = QDialog.show
-
-    def _traced_exec(self):
-        sys.stderr.write(
-            f"\n[DIALOG-TRACE] exec({type(self).__name__}, "
-            f"title={self.windowTitle()!r})\n"
-        )
-        traceback.print_stack(file=sys.stderr)
-        sys.stderr.write("[DIALOG-TRACE] /end\n")
-        return _orig_exec(self)
-
-    def _traced_show(self):
-        sys.stderr.write(
-            f"\n[DIALOG-TRACE] show({type(self).__name__}, "
-            f"title={self.windowTitle()!r})\n"
-        )
-        traceback.print_stack(file=sys.stderr)
-        sys.stderr.write("[DIALOG-TRACE] /end\n")
-        return _orig_show(self)
-
-    QDialog.exec = _traced_exec
-    QDialog.show = _traced_show
-
-
-def _install_window_tracer(app) -> None:
-    """모든 top-level QWidget 의 ShowEvent 추적 — "Python" 제목 미설정 창 잡기.
-
-    QDialog 아닌 QWidget (예: GLViewWidget) 이 직접 native window 로 표시되는
-    경우 추적. application-level event filter — 노이즈 적음 (top-level only).
-    """
-    import traceback
-    from PySide6.QtCore import QEvent, QObject
-    from PySide6.QtWidgets import QWidget
-
-    class _Tracer(QObject):
-        def eventFilter(self, obj, event):
-            if event.type() == QEvent.Type.Show and isinstance(obj, QWidget):
-                if obj.isWindow():
-                    # WA_DontShowOnScreen 인 경우는 노이즈라 제외
-                    from PySide6.QtCore import Qt
-                    if not obj.testAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen):
-                        sys.stderr.write(
-                            f"\n[WIN-TRACE] show({type(obj).__name__}, "
-                            f"title={obj.windowTitle()!r}, "
-                            f"size={obj.width()}x{obj.height()})\n"
-                        )
-                        traceback.print_stack(file=sys.stderr)
-                        sys.stderr.write("[WIN-TRACE] /end\n")
-            return False
-
-    # app 자체에 보관 (GC 방지)
-    app._win_tracer = _Tracer()
-    app.installEventFilter(app._win_tracer)
-
-
 def main() -> int:
     # Windows 작업표시줄 아이콘 표시 — AppUserModelID 명시 설정.
     # 미설정 시 dev 에서는 python.exe 의 AUMID 가 사용되어 Python 로고가 작업표시줄에
@@ -187,10 +122,6 @@ def main() -> int:
 
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
-
-    # 디버그: 모든 QDialog show/exec + top-level QWidget show 추적
-    _install_dialog_tracer()
-    _install_window_tracer(app)
 
     # 해상도 기반 기본 창 크기 준비
     screen = QGuiApplication.primaryScreen().availableGeometry()
