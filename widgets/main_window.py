@@ -1525,7 +1525,8 @@ class MainWindow(QMainWindow):
             return
         self._combined = result
         self._fill_combined_into_combos()
-        self._refresh_controls()
+        # _refresh_controls() 호출 X — 콤보 재생성하면 합성 항목 사라짐.
+        # Run 활성 상태는 paste 시점에 이미 결정되어 변경 불필요.
 
     def _fill_combined_into_combos(self) -> None:
         """합성 항목을 cb_value / cb_coord 에 추가 + 선택. sentinel itemData 사용.
