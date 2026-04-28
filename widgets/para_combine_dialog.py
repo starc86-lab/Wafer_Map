@@ -20,14 +20,20 @@ from main import ParseResult
 
 # ── 후보 추출 헬퍼 ─────────────────────────────────────────────
 def _gather_paras(result: ParseResult | None) -> dict[str, int]:
-    """ParseResult 에서 PARA → n. 입력 순서 보존."""
+    """ParseResult 에서 PARA → n. 입력 순서 보존.
+
+    합성 임시 키 (이름에 ` + ` 포함, `_inject_combined_temp_paras` 가 등록한 잔재)
+    는 제외 — 다이얼로그 콤보에 합성 PARA / 좌표가 잘못 노출되는 것 방지.
+    PARA 콤보 / 좌표 콤보 모두 동일 정책 (사용자 정책 2026-04-28).
+    """
     if result is None:
         return {}
     out: dict[str, int] = {}
     for w in result.wafers.values():
         for name, rec in w.parameters.items():
-            if name not in out:
-                out[name] = rec.n
+            if name in out or " + " in name:
+                continue
+            out[name] = rec.n
     return out
 
 
