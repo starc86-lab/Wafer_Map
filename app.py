@@ -98,6 +98,40 @@ def _bg_warmup() -> None:
         pass
 
 
+def _install_dialog_tracer() -> None:
+    """모든 QDialog show()/exec() 호출 시 stderr 에 traceback 출력 (디버그).
+
+    DELTA Run 시 정체불명 팝업 추적용 (사용자 보고 2026-04-28).
+    원인 파악 후 제거.
+    """
+    import traceback
+    from PySide6.QtWidgets import QDialog
+
+    _orig_exec = QDialog.exec
+    _orig_show = QDialog.show
+
+    def _traced_exec(self):
+        sys.stderr.write(
+            f"\n[DIALOG-TRACE] exec({type(self).__name__}, "
+            f"title={self.windowTitle()!r})\n"
+        )
+        traceback.print_stack(file=sys.stderr)
+        sys.stderr.write("[DIALOG-TRACE] /end\n")
+        return _orig_exec(self)
+
+    def _traced_show(self):
+        sys.stderr.write(
+            f"\n[DIALOG-TRACE] show({type(self).__name__}, "
+            f"title={self.windowTitle()!r})\n"
+        )
+        traceback.print_stack(file=sys.stderr)
+        sys.stderr.write("[DIALOG-TRACE] /end\n")
+        return _orig_show(self)
+
+    QDialog.exec = _traced_exec
+    QDialog.show = _traced_show
+
+
 def main() -> int:
     # Windows 작업표시줄 아이콘 표시 — AppUserModelID 명시 설정.
     # 미설정 시 dev 에서는 python.exe 의 AUMID 가 사용되어 Python 로고가 작업표시줄에
@@ -122,6 +156,9 @@ def main() -> int:
 
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
+
+    # 디버그: 모든 QDialog show/exec 호출 시 stderr traceback (정체불명 팝업 추적)
+    _install_dialog_tracer()
 
     # 해상도 기반 기본 창 크기 준비
     screen = QGuiApplication.primaryScreen().availableGeometry()
