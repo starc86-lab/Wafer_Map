@@ -5,10 +5,10 @@
 호출처가 적절한 채널 (paste 영역, ReasonBar 등) 에 표시한다. 본 모듈은 데이터를
 수정하지 않음.
 
-검사 대상 4가지 케이스 중 본 모듈이 다루는 3가지:
-- 케이스 2: 헤더 행 2개+         → `metadata.extra_header_rows > 0` (severity=info)
-  사용자가 여러 결과들 통합해서 한번에 paste 하는 use case. 첫 헤더만 남기고
-  나머지는 main.py 의 `_strip_extra_header_rows` 가 절단.
+검사 대상 4가지 케이스 중 본 모듈이 다루는 2가지:
+- 케이스 2 (헤더 행 2개+): main.py 의 `_strip_extra_header_rows` 가 자동 처리.
+  실수 반복이면 케이스 4 (repeat_measurement) 로 인지, 의도 통합이면 그래프로
+  자연스럽게 보임. 별도 알림 불필요 — 메시지 X.
 - 케이스 3: wafer 별 PARA set 다름 → 직접 분석 (severity=warn, Run 활성).
   사내 실제 데이터에 흔한 케이스 (일부 wafer 만 추가 측정). VALUE 콤보 union
   + `_visualize_single` 이 PARA 없는 wafer 는 NaN cell + (no data) 타이틀로 처리.
@@ -56,14 +56,9 @@ def validate(result: ParseResult) -> list[ValidationWarning]:
     if not result.wafers:
         return warnings  # 방어적 — 빈 결과는 호출처가 별도 처리
 
-    # 케이스 2 — 헤더 행 2개 이상 발견 — 사용자 통합 입력 가능, 첫 헤더만 사용 (Run 활성)
-    extra = result.metadata.extra_header_rows
-    if extra > 0:
-        warnings.append(ValidationWarning(
-            code="extra_header",
-            severity="info",
-            message=f"헤더 행 {extra + 1}개 발견 — 첫 헤더만 사용",
-        ))
+    # 케이스 2 (헤더 행 2개+) 메시지 제거 — 파서가 첫 헤더만 사용 + 데이터 합치기로
+    # 자동 처리. 실수 반복이면 `repeat_measurement_groups` 가 __rep1 으로 분리해
+    # 사용자 인지. 의도 통합이면 그래프로 자연스럽게 보임. 별도 알림 불필요.
 
     # 케이스 3 — wafer 별 PARA set 다름 — warn (Run 활성)
     # 정책 (사용자 정책 2026-04-27, #6): 사내 실제 데이터에 wafer 별 PARA 다른
