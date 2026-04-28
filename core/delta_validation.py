@@ -4,21 +4,14 @@ DELTA 모드 (양쪽 입력) 정합성 검증 — 두 `ParseResult` 비교.
 input_validation 이 단일 입력 검증을 담당하는 것과 같은 패턴. ParseResult 만으로
 사전 판단 가능한 항목만 다룸 (compute_delta 호출 불필요).
 
-검사 항목:
+검사 항목 (사용자 정책 2026-04-28 — 표시 정보 최소화):
 - `delta_no_intersect`     — A·B 의 WAFERID 교집합 0 (severity=error, Run 차단)
-- `delta_repeats_in_input` — A 또는 B 에 `__rep` 분리된 wafer 가 존재 (severity=warn).
-  base 끼리만 매칭한다는 명시적 알림. compute_delta 가 wafer_id 문자열 그대로
-  매칭하므로 `__rep1` 은 자동으로 매칭 후보 안 됨 — 본 검사는 사용자 인지용.
-- `delta_coord_fallback`   — A 또는 B 의 *전체* 좌표 PARA 누락 → 다른 쪽 좌표 또는
-  라이브러리 좌표로 *해결됨* (severity=ok). 어느 경로로 성공했는지 메시지에 명시.
-  A 일부 wafer 만 좌표 누락은 input_validation 의 `coord_para_missing` 영역.
 - `delta_coord_unresolved` — 좌표 fallback 실패 (severity=error, Run 차단). 어느 쪽
-  좌표가 없는지 메시지에 명시.
+  좌표가 없는지 메시지에 명시. fallback **성공** 케이스는 의도된 자동 동작이라
+  알림 X (이전 `delta_coord_fallback` ok 제거).
+- `delta_repeats_in_input` — A 또는 B 에 `__rep` 분리된 wafer 존재 (severity=warn).
 - `delta_no_common_value_para` — A∩B VALUE PARA = ∅ (severity=warn).
-  union PARA 로 콤보 채워서 한쪽만 가진 PARA 도 시각화 가능 (NaN 룰 적용).
 - `delta_recipe_mismatch`  — A·B 의 RECIPE 다름 (severity=warn).
-  _PRE / _POST suffix 는 항상 제외 후 베이스 비교 — 같으면 같은 RECIPE.
-  A=*_POST / B=*_PRE 같은 역방향도 호환 (DELTA 부호는 그대로 A - B).
 
 호출자:
 - 호출 시점: paste 변경 직후 (양쪽 ParseResult 모두 있을 때) 한 번
@@ -122,18 +115,8 @@ def validate_delta(
             message=msg,
         ))
 
-    # delta_coord_fallback / delta_coord_unresolved — 양쪽 좌표 매트릭스
-    # (사용자 정책 2026-04-27, Step 2):
-    #   A 있음 + B 없음 + 호환    → B 좌표 없음. A 와 동일 RECIPE 로 A 좌표 사용     ok
-    #   A 있음 + B 없음 + 비호환  → B 좌표 없음. B RECIPE 라이브러리 좌표 사용       ok
-    #                              → B 좌표 없음. RECIPE 비호환 + 라이브러리 매칭 X    error
-    #   A 없음 + B 있음 + 호환    → A 좌표 없음. B 와 동일 RECIPE 로 B 좌표 사용     ok
-    #   A 없음 + B 있음 + 비호환  → A 좌표 없음. A RECIPE 라이브러리 좌표 사용       ok
-    #                              → A 좌표 없음. RECIPE 비호환 + 라이브러리 매칭 X    error
-    #   A 없음 + B 없음 + 호환    → 양쪽 좌표 없음. 라이브러리 좌표 사용             ok
-    #                              → 양쪽 좌표 없음. 라이브러리 매칭 X                error
-    #   A 없음 + B 없음 + 비호환  → 양쪽 좌표 없음. A·B 라이브러리 좌표 각자 사용     ok
-    #                              → 양쪽 좌표 없음. RECIPE 비호환 + 라이브러리 매칭 X  error
+    # delta_coord_unresolved — 좌표 fallback **실패** 케이스만 표시 (사용자 정책
+    # 2026-04-28). fallback 성공 (옆집 / 라이브러리) 은 의도된 자동 동작이라 알림 X.
     a_has = _has_coord_paras(a)
     b_has = _has_coord_paras(b)
     ra = _first_recipe(a)
@@ -145,56 +128,36 @@ def validate_delta(
         return bool(recipe) and bool(CoordLibrary().find_by_recipe(recipe))
 
     if not (a_has and b_has):
-        # 어느 한쪽 (또는 양쪽) 좌표 누락 — fallback 정책 분기
+        # 어느 한쪽 (또는 양쪽) 좌표 누락 — fallback 매트릭스에서 실패 분기만 메시지
         if a_has and not b_has:
-            if can_borrow:
-                msg = "DELTA: B 좌표 없음. A 와 동일 RECIPE 로 A 좌표 사용."
+            # 호환 (옆집) 또는 B 라이브러리 매칭 시 성공 → 무메시지
+            if not can_borrow and not _lib_has(rb):
                 warnings.append(ValidationWarning(
-                    code="delta_coord_fallback", severity="ok", message=msg))
-            elif _lib_has(rb):
-                msg = "DELTA: B 좌표 없음. B RECIPE 라이브러리 좌표 사용."
-                warnings.append(ValidationWarning(
-                    code="delta_coord_fallback", severity="ok", message=msg))
-            else:
-                msg = ("DELTA: B 좌표 없음. RECIPE 비호환 + 라이브러리 매칭 없음 — "
-                       "시각화 불가.")
-                warnings.append(ValidationWarning(
-                    code="delta_coord_unresolved", severity="error", message=msg))
+                    code="delta_coord_unresolved", severity="error",
+                    message=("DELTA: B 좌표 없음. RECIPE 비호환 + 라이브러리 "
+                             "매칭 없음 — 시각화 불가."),
+                ))
         elif b_has and not a_has:
-            if can_borrow:
-                msg = "DELTA: A 좌표 없음. B 와 동일 RECIPE 로 B 좌표 사용."
+            if not can_borrow and not _lib_has(ra):
                 warnings.append(ValidationWarning(
-                    code="delta_coord_fallback", severity="ok", message=msg))
-            elif _lib_has(ra):
-                msg = "DELTA: A 좌표 없음. A RECIPE 라이브러리 좌표 사용."
-                warnings.append(ValidationWarning(
-                    code="delta_coord_fallback", severity="ok", message=msg))
-            else:
-                msg = ("DELTA: A 좌표 없음. RECIPE 비호환 + 라이브러리 매칭 없음 — "
-                       "시각화 불가.")
-                warnings.append(ValidationWarning(
-                    code="delta_coord_unresolved", severity="error", message=msg))
+                    code="delta_coord_unresolved", severity="error",
+                    message=("DELTA: A 좌표 없음. RECIPE 비호환 + 라이브러리 "
+                             "매칭 없음 — 시각화 불가."),
+                ))
         else:  # 양쪽 모두 누락
             if can_borrow:
-                if _lib_has(ra) or _lib_has(rb):
-                    msg = "DELTA: 양쪽 좌표 없음. 라이브러리 좌표 사용."
+                if not (_lib_has(ra) or _lib_has(rb)):
                     warnings.append(ValidationWarning(
-                        code="delta_coord_fallback", severity="ok", message=msg))
-                else:
-                    msg = "DELTA: 양쪽 좌표 없음. 라이브러리 매칭 없음 — 시각화 불가."
-                    warnings.append(ValidationWarning(
-                        code="delta_coord_unresolved", severity="error", message=msg))
+                        code="delta_coord_unresolved", severity="error",
+                        message="DELTA: 양쪽 좌표 없음. 라이브러리 매칭 없음 — 시각화 불가.",
+                    ))
             else:
-                if _lib_has(ra) and _lib_has(rb):
-                    msg = ("DELTA: 양쪽 좌표 없음. RECIPE 비호환 → "
-                           "A·B 라이브러리 좌표 각자 사용.")
+                if not (_lib_has(ra) and _lib_has(rb)):
                     warnings.append(ValidationWarning(
-                        code="delta_coord_fallback", severity="ok", message=msg))
-                else:
-                    msg = ("DELTA: 양쪽 좌표 없음. RECIPE 비호환 + "
-                           "라이브러리 한쪽 이상 매칭 없음 — 시각화 불가.")
-                    warnings.append(ValidationWarning(
-                        code="delta_coord_unresolved", severity="error", message=msg))
+                        code="delta_coord_unresolved", severity="error",
+                        message=("DELTA: 양쪽 좌표 없음. RECIPE 비호환 + "
+                                 "라이브러리 한쪽 이상 매칭 없음 — 시각화 불가."),
+                    ))
 
     # delta_no_common_value_para — A∩B VALUE PARA = ∅
     # 좌표 PARA (X/Y) 는 제외하고 비교. 한쪽만 가진 PARA 도 union 으로 콤보에
