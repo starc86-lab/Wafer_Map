@@ -113,9 +113,10 @@ class PasteArea(QWidget):
 
         lay.addWidget(self._stacked, stretch=1)
 
-        # ── 요약 라벨 — 카운트 / 실패 사유 한 줄. warning 은 ReasonBar 로 통합 ──
+        # ── 요약 라벨 — 카운트 · 실패 사유 한 줄. warning 은 ReasonBar 로 통합 ──
+        # 폰트 11px 로 축소 (눈에 덜 띄도록, 사용자 정책 2026-04-28)
         self._summary = QLabel("— 입력 대기 —")
-        self._summary.setStyleSheet("color: gray;")
+        self._summary.setStyleSheet("color: gray; font-size: 11px;")
         lay.addWidget(self._summary)
 
     # ── 외부 API ───────────────────────────────────────
@@ -200,11 +201,11 @@ class PasteArea(QWidget):
         # 검증 결과는 paste_area 가 보관만 (UI 표시는 ReasonBar — main_window 가 처리)
         warns = validate(result)
         s = summarize(result)
-        sep_str = f" / 구분자: {result.metadata.delimiter}" if result.metadata.delimiter else ""
+        sep_str = f" · 구분자: {result.metadata.delimiter}" if result.metadata.delimiter else ""
         coord_str = "좌표 있음" if s.n_coord_pairs > 0 else "좌표 없음"
         self._set_status(
             result, df,
-            f"웨이퍼 {s.n_wafers}장 / Parameter {s.n_parameter}개 / "
+            f"웨이퍼 {s.n_wafers}장 · Parameter {s.n_parameter}개 · "
             f"{coord_str}{sep_str}",
             "color: #2a9d8f;",
             warns,
@@ -224,7 +225,8 @@ class PasteArea(QWidget):
         self._df = df
         self._validation = warnings or []
         self._summary.setText(msg)
-        self._summary.setStyleSheet(style)
+        # font-size 11px 항상 적용 (호출자가 color 만 지정 — 폰트는 일관 유지)
+        self._summary.setStyleSheet(f"{style} font-size: 11px;")
 
         if df is not None and len(df) > 0:
             self._btn_table.setEnabled(True)

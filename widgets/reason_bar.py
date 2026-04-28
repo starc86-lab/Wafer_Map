@@ -11,6 +11,9 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel
 
+# 폰트 크기 — 사용자 정책 2026-04-28: 눈에 덜 띄도록 작게.
+_FONT_PX = 11
+
 
 class ReasonBar(QFrame):
     """한 줄 사유 표시 바."""
@@ -18,14 +21,14 @@ class ReasonBar(QFrame):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("reasonBar")
-        self.setFixedHeight(28)
+        self.setFixedHeight(24)
 
         lay = QHBoxLayout(self)
         lay.setContentsMargins(10, 0, 10, 0)
         lay.setSpacing(0)
 
-        self._label = QLabel("[DUMMY] 사유 표시 채널 — Run 결과가 여기 표시됩니다")
-        self._label.setStyleSheet("color: #666;")
+        self._label = QLabel("")
+        self._label.setStyleSheet(f"color: #111; font-size: {_FONT_PX}px;")
         lay.addWidget(self._label)
         lay.addStretch(1)
 
@@ -37,15 +40,21 @@ class ReasonBar(QFrame):
         )
 
     def set_message(self, text: str, severity: str = "info") -> None:
-        """severity: 'info'(회색) / 'ok'(민트) / 'warn'(주황) / 'error'(빨강)."""
+        """severity: 'info' / 'ok' / 'warn' (모두 검정) / 'error' (빨강).
+
+        warn 도 검정으로 — 강렬한 주황은 눈에 너무 띔. 정말 시급한 차단 사유 (error)
+        만 빨강. ⚠ 마크로 시각적 구분.
+        """
         colors = {
-            "info": "#666",
-            "ok": "#2a9d8f",
-            "warn": "#e76f51",
+            "info": "#111",
+            "ok": "#111",
+            "warn": "#111",
             "error": "#d32f2f",
         }
         self._label.setText(text)
-        self._label.setStyleSheet(f"color: {colors.get(severity, '#666')};")
+        self._label.setStyleSheet(
+            f"color: {colors.get(severity, '#111')}; font-size: {_FONT_PX}px;"
+        )
 
     def set_warnings(self, warnings: list) -> None:
         """ValidationWarning list 받아 가장 높은 severity 색으로 표시.
