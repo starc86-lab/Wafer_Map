@@ -1921,6 +1921,10 @@ class MainWindow(QMainWindow):
 
         **세션 휘발** — settings.json 저장 안 함, set_runtime 으로 런타임 cache 만
         갱신. wafer_cell render 경로는 load_settings() 로 cache 를 읽으므로 반영됨.
+
+        z_range 도 함께 재계산 (사용자 정책 2026-04-30) — RBF 와 RadialInterp 의
+        rendered min/max 가 다를 수 있어 toggle 후 colorbar 가 stale 상태로 남으면
+        Z-Margin 변경 시 처음 _apply 호출에서 큰 jump 가 보이는 버그 fix.
         """
         from core.settings import load_settings as _ls, set_runtime as _sr
         s = _ls()
@@ -1928,6 +1932,9 @@ class MainWindow(QMainWindow):
         _sr(s)
         if not self._result_panel.cells:
             return
+        view_mode = self.cb_view.currentText() or "2D"
+        displays = [c.display for c in self._result_panel.cells]
+        self._apply_z_scale_mode(displays, view_mode)
         self._result_panel.refresh_all()
 
     def _on_delta_interp_toggled(self, checked: bool) -> None:
