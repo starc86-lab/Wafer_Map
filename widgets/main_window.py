@@ -193,8 +193,9 @@ class MainWindow(QMainWindow):
         btn_help = QToolButton()
         btn_help.setText("❓ 도움말")
         btn_help.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
-        btn_help.setStyleSheet("QToolButton { padding: 4px 10px; }")
-        btn_help.setEnabled(False)  # 도움말 작성 완료 후 활성화 예정
+        # 비활성 상태 — 회색 톤다운 (도움말 작성 완료 후 활성화 예정)
+        btn_help.setStyleSheet("QToolButton { padding: 4px 10px; color: #999; }")
+        btn_help.setEnabled(False)
         btn_help.setToolTip("준비 중")
         btn_help.clicked.connect(self._open_help)
         br_lay.addWidget(btn_help)
@@ -1550,7 +1551,15 @@ class MainWindow(QMainWindow):
         """PARA 조합 다이얼로그 — 두 PARA + 두 좌표 페어 선택 후 합성 항목 등록."""
         from widgets.para_combine_dialog import ParaCombineDialog
         a, b = self._result_a, self._result_b
-        dlg = ParaCombineDialog(a, b, parent=self)
+        # 이미 합성에 사용된 PARA 들 추출 → 다이얼로그 콤보에서 제외
+        # (합성 위에 또 합성 막기, 사용자 정책 2026-04-28)
+        excluded: set[str] = set()
+        for i in range(self.cb_value.count()):
+            data = self.cb_value.itemData(i)
+            if isinstance(data, tuple) and data and data[0] == "__combined__":
+                excluded.add(data[1])
+                excluded.add(data[2])
+        dlg = ParaCombineDialog(a, b, excluded_paras=excluded, parent=self)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         result = dlg.result()
@@ -1559,7 +1568,9 @@ class MainWindow(QMainWindow):
         self._combined = result
         self._fill_combined_into_combos()
         # _refresh_controls() 호출 X — 콤보 재생성하면 합성 항목 사라짐.
-        # Run 활성 상태는 paste 시점에 이미 결정되어 변경 불필요.
+
+    # 합성 항목 prefix 아이콘 — Windows 10 호환 link emoji
+    _COMBINED_ICON = "🔗"
 
     def _fill_combined_into_combos(self) -> None:
         """합성 항목을 cb_value / cb_coord 에 추가 + 선택. sentinel itemData 사용.
@@ -1568,7 +1579,10 @@ class MainWindow(QMainWindow):
           cb_value:  ("__combined__", p1, p2)
           cb_coord:  ("__combined__", (x1, y1), (x2, y2))
 
-        라벨에 측정점 개수 [N+M pt] 표시 (단일 콤보와 동일 형식).
+        누적 추가 (사용자 정책 2026-04-28): 새 합성 만들면 기존 합성 콤보에 유지 +
+        새 항목 prepend + 선택. 같은 조합 이미 있으면 선택만 (중복 추가 X).
+
+        라벨에 측정점 개수 [N+M pt] + 🔗 prefix.
         """
         if self._combined is None:
             return
@@ -1588,25 +1602,39 @@ class MainWindow(QMainWindow):
         else:
             n_p1 = n_p2 = n_c1 = n_c2 = 0
 
-        v_label = f"{p1} + {p2}  [{n_p1}+{n_p2} pt]"
+        ic = self._COMBINED_ICON
+        v_label = f"{ic} {p1} + {p2}  [{n_p1}+{n_p2} pt]"
         v_data = ("__combined__", p1, p2)
-        coord_label = f"{x1}/{y1} + {x2}/{y2}  [{n_c1}+{n_c2} pt]"
+        coord_label = f"{ic} {x1}/{y1} + {x2}/{y2}  [{n_c1}+{n_c2} pt]"
         coord_data = ("__combined__", c["coord1"], c["coord2"])
 
         self.cb_value.blockSignals(True)
         self.cb_coord.blockSignals(True)
         try:
-            # 기존 합성 항목 제거 후 새로 추가
-            self._remove_combined_from_combos()
-            self.cb_value.insertItem(0, v_label, v_data)
-            self.cb_value.setCurrentIndex(0)
-            self.cb_coord.insertItem(0, coord_label, coord_data)
-            self.cb_coord.setCurrentIndex(0)
+            # 같은 sentinel 이 이미 있으면 선택만, 없으면 prepend (누적)
+            v_idx = self._find_combo_item(self.cb_value, v_data)
+            if v_idx < 0:
+                self.cb_value.insertItem(0, v_label, v_data)
+                v_idx = 0
+            self.cb_value.setCurrentIndex(v_idx)
+
+            c_idx = self._find_combo_item(self.cb_coord, coord_data)
+            if c_idx < 0:
+                self.cb_coord.insertItem(0, coord_label, coord_data)
+                c_idx = 0
+            self.cb_coord.setCurrentIndex(c_idx)
         finally:
             self.cb_value.blockSignals(False)
             self.cb_coord.blockSignals(False)
         # 콤보 변경 시그널 수동 emit (재시각화 등 후속 처리)
         self.cb_value.currentIndexChanged.emit(self.cb_value.currentIndex())
+
+    @staticmethod
+    def _find_combo_item(combo, target_data) -> int:
+        for i in range(combo.count()):
+            if combo.itemData(i) == target_data:
+                return i
+        return -1
 
     def _remove_combined_from_combos(self) -> None:
         """cb_value / cb_coord 에서 합성 sentinel 항목 제거 (있으면)."""

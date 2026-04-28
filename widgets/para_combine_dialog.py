@@ -73,10 +73,11 @@ class ParaCombineDialog(QDialog):
         self,
         result_a: ParseResult | None,
         result_b: ParseResult | None,
+        excluded_paras: set[str] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("PARA 조합")
+        self.setWindowTitle("Para 조합")
         self.setModal(True)
         self.resize(540, 280)
 
@@ -89,6 +90,10 @@ class ParaCombineDialog(QDialog):
             paras = a_paras
         else:
             paras = b_paras
+
+        # 이미 합성에 사용된 PARA 제외 (사용자 정책 2026-04-28 — 중복 합성 방지)
+        excluded = excluded_paras or set()
+        paras = {k: v for k, v in paras.items() if k not in excluded}
 
         # 좌표 페어 (DELTA 면 교집합 — pair 의 (x,y) 이름 같은 것만)
         a_coord_pairs = _coord_pairs(a_paras) if a_paras else []
