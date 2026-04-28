@@ -732,7 +732,11 @@ class MainWindow(QMainWindow):
 
         `selected=None` 으로 `_fill_value_combo` 내부 `prev` fallback 이 동작 →
         현재 선택된 VALUE 가 새 리스트에 있으면 그대로 유지. 없으면 공백.
+
+        합성 활성 시 콤보 재생성 skip (합성 항목 보존, 사용자 정책 2026-04-28).
         """
+        if self._combined is not None:
+            return
         available_ns, params, data_cols_n = self._build_selection_context()
         if not available_ns:
             return
@@ -947,9 +951,15 @@ class MainWindow(QMainWindow):
                 v_concat = np.concatenate([va[:na], vb[:nb]])
                 n_total = len(x_concat)
                 # WaferRecord 임시 등록 (paste 변경 시 result 새로 만들어지면 자동 사라짐)
-                w.parameters[v_key] = WaferRecord(values=v_concat, n=n_total)
-                w.parameters[x_key] = WaferRecord(values=x_concat, n=n_total)
-                w.parameters[y_key] = WaferRecord(values=y_concat, n=n_total)
+                w.parameters[v_key] = WaferRecord(
+                    values=v_concat, n=n_total, max_data_id=None,
+                )
+                w.parameters[x_key] = WaferRecord(
+                    values=x_concat, n=n_total, max_data_id=None,
+                )
+                w.parameters[y_key] = WaferRecord(
+                    values=y_concat, n=n_total, max_data_id=None,
+                )
                 injected += 1
         if injected == 0:
             return None, None, None
