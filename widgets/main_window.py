@@ -98,10 +98,11 @@ class MainWindow(QMainWindow):
         self._delta_warnings: list = []
         self._main_splitter_restored = False
         self._preset_override: CoordPreset | None = None
-        # PARA 조합 — Apply 시 dict 채워져 cb_value/cb_coord 에 합성 항목 추가.
-        # paste 변경 시 자동 해제 (사용자 정책 2026-04-28).
-        # 형식: {"value": (p1, p2), "coord1": (x1, y1), "coord2": (x2, y2)}
+        # PARA 조합 — Apply 시 dict 채워짐. 마지막 Apply 정보 (호환용 보존).
         self._combined: dict | None = None
+        # 합성 페어 매핑: cb_value sentinel → cb_coord sentinel
+        # 누적 합성 시 PARA 콤보 변경 → 짝 좌표 자동 선택용 (사용자 정책 2026-04-29)
+        self._combined_pairs: dict[tuple, tuple] = {}
 
         self._build_toolbar()
         self._build_central()
@@ -695,10 +696,20 @@ class MainWindow(QMainWindow):
             self._on_visualize()
 
     def _auto_select_combined_coord(self) -> None:
-        """cb_coord 의 합성 sentinel 항목을 찾아 currentIndex 설정 (재시각화 트리거 X)."""
+        """cb_value 의 현재 합성 sentinel 과 페어인 coord sentinel 을 cb_coord 에서 선택.
+
+        `_combined_pairs` mapping (PARA sentinel → coord sentinel) 사용. 누적 합성에서
+        다른 좌표 잘못 선택되는 버그 방지 (사용자 정책 2026-04-29).
+        """
+        v_data = self.cb_value.currentData()
+        if not (isinstance(v_data, tuple) and v_data
+                and v_data[0] == "__combined__"):
+            return
+        target_coord = self._combined_pairs.get(v_data)
+        if target_coord is None:
+            return
         for i in range(self.cb_coord.count()):
-            data = self.cb_coord.itemData(i)
-            if isinstance(data, tuple) and data and data[0] == "__combined__":
+            if self.cb_coord.itemData(i) == target_coord:
                 if self.cb_coord.currentIndex() != i:
                     self.cb_coord.blockSignals(True)
                     self.cb_coord.setCurrentIndex(i)
@@ -1605,6 +1616,9 @@ class MainWindow(QMainWindow):
         coord_label = f"{ic} {x1}/{y1} + {x2}/{y2}  [{n_c1}+{n_c2} pt]"
         coord_data = ("__combined__", c["coord1"], c["coord2"])
 
+        # 페어 매핑 등록 (PARA sentinel ↔ coord sentinel)
+        self._combined_pairs[v_data] = coord_data
+
         self.cb_value.blockSignals(True)
         self.cb_coord.blockSignals(True)
         try:
@@ -1642,14 +1656,15 @@ class MainWindow(QMainWindow):
                     combo.removeItem(i)
 
     def _clear_combined(self) -> None:
-        """합성 상태 해제 — sentinel 제거 + wafer.parameters 의 임시 키 정리.
+        """합성 상태 해제 — sentinel 제거 + 매핑 정리 + wafer.parameters 임시 키 정리.
 
-        Input A/B 어느 쪽 paste 변경 시에도 호출 (사용자 정책 2026-04-28). 임시
-        키 (`T1 + T1_A` 등 `+` 포함) 가 남으면 단일 PARA 처럼 콤보에 잘못 노출됨.
+        Input A/B 어느 쪽 paste 변경 시에도 호출. 임시 키 (`T1 + T1_A` 등 `+` 포함)
+        가 남으면 단일 PARA 처럼 콤보에 잘못 노출됨.
         """
         # sentinel 콤보 제거는 self._combined 무관하게 항상 실행 (잔재 방지)
         self._remove_combined_from_combos()
         self._combined = None
+        self._combined_pairs.clear()
         # wafer.parameters 의 임시 합성 키 정리 — 식별: 이름에 ` + ` 포함
         for r in (self._result_a, self._result_b):
             if r is None:
