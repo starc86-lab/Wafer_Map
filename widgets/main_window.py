@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
@@ -36,6 +37,102 @@ from widgets.paste_area import PasteArea
 from widgets.reason_bar import ReasonBar
 from widgets.result_panel import ResultPanel
 from widgets.wafer_cell import WaferDisplay
+
+
+# ── PARA 합성 모델 ────────────────────────────────────────────
+# Qt itemData sentinel — 단일 PARA(str) 와 구분되는 tuple-tag 형식.
+# 모든 sentinel 생성/검사는 아래 헬퍼 경유 (포맷 산재 방지, 사용자 정책 2026-04-29).
+COMBINED_TAG = "__combined__"
+
+
+def _make_v_sentinel(p1: str, p2: str) -> tuple:
+    return (COMBINED_TAG, p1, p2)
+
+
+def _make_coord_sentinel(c1: tuple[str, str], c2: tuple[str, str]) -> tuple:
+    return (COMBINED_TAG, c1, c2)
+
+
+def _is_combined_data(data) -> bool:
+    return isinstance(data, tuple) and len(data) >= 1 and data[0] == COMBINED_TAG
+
+
+@dataclass
+class CombinedItem:
+    """한 합성 단위 — 두 PARA + 두 좌표 페어 + mode.
+
+    mode (확장 예정):
+      - "concat" (현재) : 두 점 집합을 단순 연결 (다른 좌표 합치는 케이스)
+      - "sum"   (예정)  : 같은 좌표일 때 두 PARA 값 element-wise 합
+
+    합성 키 (`v_key`/`x_key`/`y_key`) 는 wafer.parameters 에 임시 등록될 친화 이름.
+    sentinel 은 콤보 itemData 식별자 — 데이터 내용(친화 이름) 과 분리.
+    """
+    p1: str
+    p2: str
+    coord1: tuple[str, str]
+    coord2: tuple[str, str]
+    mode: str = "concat"
+
+    @property
+    def v_sentinel(self) -> tuple:
+        return _make_v_sentinel(self.p1, self.p2)
+
+    @property
+    def coord_sentinel(self) -> tuple:
+        return _make_coord_sentinel(self.coord1, self.coord2)
+
+    @property
+    def v_key(self) -> str:
+        return f"{self.p1} + {self.p2}"
+
+    @property
+    def x_key(self) -> str:
+        return f"{self.coord1[0]} + {self.coord2[0]}"
+
+    @property
+    def y_key(self) -> str:
+        return f"{self.coord1[1]} + {self.coord2[1]}"
+
+
+@dataclass
+class CombinedState:
+    """합성 항목 누적 상태 — 콤보 sentinel/wafer.parameters 임시 키의 단일 진실원.
+
+    주의: paste 변경 / Run Analysis 와 무관하게 사용자가 "Para 조합" 으로 추가하는
+    동안만 누적. paste 변경 시 main_window 가 `clear()` 호출 → 임시 키 정리도
+    `temp_keys()` 가 반환하는 키 set 기준으로 일괄 처리.
+    """
+    items: list[CombinedItem] = field(default_factory=list)
+
+    def __bool__(self) -> bool:
+        return bool(self.items)
+
+    def __len__(self) -> int:
+        return len(self.items)
+
+    def add(self, item: CombinedItem) -> None:
+        # 같은 sentinel 이미 있으면 무시 (재선택만, 중복 추가 X)
+        for existing in self.items:
+            if existing.v_sentinel == item.v_sentinel:
+                return
+        self.items.append(item)
+
+    def get_by_v_sentinel(self, v_data) -> CombinedItem | None:
+        for item in self.items:
+            if item.v_sentinel == v_data:
+                return item
+        return None
+
+    def temp_keys(self) -> set[str]:
+        """wafer.parameters 에 등록된 모든 임시 키 (정리용)."""
+        keys: set[str] = set()
+        for item in self.items:
+            keys.update({item.v_key, item.x_key, item.y_key})
+        return keys
+
+    def clear(self) -> None:
+        self.items.clear()
 
 
 def _pad_slot(slot: str) -> str:
@@ -98,11 +195,8 @@ class MainWindow(QMainWindow):
         self._delta_warnings: list = []
         self._main_splitter_restored = False
         self._preset_override: CoordPreset | None = None
-        # PARA 조합 — Apply 시 dict 채워짐. 마지막 Apply 정보 (호환용 보존).
-        self._combined: dict | None = None
-        # 합성 페어 매핑: cb_value sentinel → cb_coord sentinel
-        # 누적 합성 시 PARA 콤보 변경 → 짝 좌표 자동 선택용 (사용자 정책 2026-04-29)
-        self._combined_pairs: dict[tuple, tuple] = {}
+        # PARA 합성 누적 상태 — 단일 진실원. sentinel/콤보 라벨/임시 키 모두 여기서.
+        self._combined_state = CombinedState()
 
         self._build_toolbar()
         self._build_central()
@@ -681,7 +775,7 @@ class MainWindow(QMainWindow):
         """
         v_data = self.cb_value.currentData()
         # 합성 sentinel 선택 → 합성 좌표 자동 선택 (사용자 정책 2026-04-28)
-        if isinstance(v_data, tuple) and v_data and v_data[0] == "__combined__":
+        if _is_combined_data(v_data):
             self._auto_select_combined_coord()
             if self._result_panel.cells:
                 self._on_visualize()
@@ -698,16 +792,17 @@ class MainWindow(QMainWindow):
     def _auto_select_combined_coord(self) -> None:
         """cb_value 의 현재 합성 sentinel 과 페어인 coord sentinel 을 cb_coord 에서 선택.
 
-        `_combined_pairs` mapping (PARA sentinel → coord sentinel) 사용. 누적 합성에서
-        다른 좌표 잘못 선택되는 버그 방지 (사용자 정책 2026-04-29).
+        `_combined_state` 에서 v_sentinel → CombinedItem 조회 후 item.coord_sentinel
+        을 콤보에서 찾아 선택. 누적 합성에서 다른 좌표 잘못 선택되는 버그 방지
+        (사용자 정책 2026-04-29).
         """
         v_data = self.cb_value.currentData()
-        if not (isinstance(v_data, tuple) and v_data
-                and v_data[0] == "__combined__"):
+        if not _is_combined_data(v_data):
             return
-        target_coord = self._combined_pairs.get(v_data)
-        if target_coord is None:
+        item = self._combined_state.get_by_v_sentinel(v_data)
+        if item is None:
             return
+        target_coord = item.coord_sentinel
         for i in range(self.cb_coord.count()):
             if self.cb_coord.itemData(i) == target_coord:
                 if self.cb_coord.currentIndex() != i:
@@ -770,7 +865,7 @@ class MainWindow(QMainWindow):
 
         합성 활성 시 콤보 재생성 skip (합성 항목 보존, 사용자 정책 2026-04-28).
         """
-        if self._combined is not None:
+        if self._combined_state:
             return
         available_ns, params, data_cols_n = self._build_selection_context()
         if not available_ns:
@@ -901,16 +996,14 @@ class MainWindow(QMainWindow):
             self._show_blocking_reason("no_input", "error", "입력 없음")
             return
 
-        # PARA 조합 모드 — sentinel 감지 시 임시 PARA 등록 후 기존 흐름 재사용
+        # PARA 조합 모드 — sentinel 감지 시 state 에서 item 조회 → 임시 PARA 등록
         v_data = self.cb_value.currentData()
         coord_data = self.cb_coord.currentData()
-        is_combined = (
-            isinstance(v_data, tuple) and v_data and v_data[0] == "__combined__"
-            and isinstance(coord_data, tuple) and coord_data
-            and coord_data[0] == "__combined__"
-        )
-        if is_combined:
-            v, x, y = self._inject_combined_temp_paras(a, b, v_data, coord_data)
+        item = None
+        if _is_combined_data(v_data) and _is_combined_data(coord_data):
+            item = self._combined_state.get_by_v_sentinel(v_data)
+        if item is not None:
+            v, x, y = self._inject_combined_temp_paras(a, b, item)
             if v is None:
                 self._show_blocking_reason(
                     "combined_no_data", "error", "조합 데이터 없음",
@@ -938,7 +1031,7 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, lambda: self._warn_n_mismatch_once(v, x, y))
 
     def _inject_combined_temp_paras(
-        self, a, b, v_data: tuple, coord_data: tuple,
+        self, a, b, item: CombinedItem,
     ) -> tuple[str | None, str | None, str | None]:
         """두 PARA + 두 좌표 페어를 wafer.parameters 에 합성 임시 키로 등록.
 
@@ -952,11 +1045,9 @@ class MainWindow(QMainWindow):
         from main import WaferRecord  # lazy
         from core.coords import normalize_to_mm
 
-        _, p1, p2 = v_data
-        _, (x1, y1), (x2, y2) = coord_data
-        v_key = f"{p1} + {p2}"
-        x_key = f"{x1} + {x2}"
-        y_key = f"{y1} + {y2}"
+        p1, p2 = item.p1, item.p2
+        (x1, y1), (x2, y2) = item.coord1, item.coord2
+        v_key, x_key, y_key = item.v_key, item.x_key, item.y_key
 
         injected = 0
         for result in (a, b):
@@ -1573,65 +1664,55 @@ class MainWindow(QMainWindow):
         result = dlg.result()
         if result is None:
             return
-        self._combined = result
-        self._fill_combined_into_combos()
+        item = CombinedItem(
+            p1=result["value"][0],
+            p2=result["value"][1],
+            coord1=result["coord1"],
+            coord2=result["coord2"],
+        )
+        self._combined_state.add(item)
+        self._fill_combined_item_into_combos(item)
         # _refresh_controls() 호출 X — 콤보 재생성하면 합성 항목 사라짐.
 
     # 합성 항목 prefix 아이콘 — Windows 10 호환 link emoji
     _COMBINED_ICON = "🔗"
 
-    def _fill_combined_into_combos(self) -> None:
-        """합성 항목을 cb_value / cb_coord 에 추가 + 선택. sentinel itemData 사용.
+    def _fill_combined_item_into_combos(self, item: CombinedItem) -> None:
+        """합성 항목 한 개를 cb_value / cb_coord 에 추가 + 선택.
 
-        sentinel:
-          cb_value:  ("__combined__", p1, p2)
-          cb_coord:  ("__combined__", (x1, y1), (x2, y2))
-
-        누적 추가 (사용자 정책 2026-04-28): 새 합성 만들면 기존 합성 콤보에 유지 +
-        새 항목 prepend + 선택. 같은 조합 이미 있으면 선택만 (중복 추가 X).
-
+        같은 sentinel 이 이미 있으면 선택만 (중복 추가 X), 없으면 prepend (누적).
         라벨에 측정점 개수 [N+M pt] + 🔗 prefix.
         """
-        if self._combined is None:
-            return
-        c = self._combined
-        p1, p2 = c["value"]
-        x1, y1 = c["coord1"]
-        x2, y2 = c["coord2"]
-
         # 측정점 개수 추출 — 첫 wafer 기준 (단일 콤보와 동일 정책)
         result = self._result_a or self._result_b
         if result and result.wafers:
             first = next(iter(result.wafers.values()))
-            n_p1 = first.parameters[p1].n if p1 in first.parameters else 0
-            n_p2 = first.parameters[p2].n if p2 in first.parameters else 0
-            n_c1 = first.parameters[x1].n if x1 in first.parameters else 0
-            n_c2 = first.parameters[x2].n if x2 in first.parameters else 0
+            n_p1 = first.parameters[item.p1].n if item.p1 in first.parameters else 0
+            n_p2 = first.parameters[item.p2].n if item.p2 in first.parameters else 0
+            n_c1 = first.parameters[item.coord1[0]].n if item.coord1[0] in first.parameters else 0
+            n_c2 = first.parameters[item.coord2[0]].n if item.coord2[0] in first.parameters else 0
         else:
             n_p1 = n_p2 = n_c1 = n_c2 = 0
 
         ic = self._COMBINED_ICON
-        v_label = f"{ic} {p1} + {p2}  [{n_p1}+{n_p2} pt]"
-        v_data = ("__combined__", p1, p2)
-        coord_label = f"{ic} {x1}/{y1} + {x2}/{y2}  [{n_c1}+{n_c2} pt]"
-        coord_data = ("__combined__", c["coord1"], c["coord2"])
-
-        # 페어 매핑 등록 (PARA sentinel ↔ coord sentinel)
-        self._combined_pairs[v_data] = coord_data
+        v_label = f"{ic} {item.p1} + {item.p2}  [{n_p1}+{n_p2} pt]"
+        coord_label = (
+            f"{ic} {item.coord1[0]}/{item.coord1[1]} + "
+            f"{item.coord2[0]}/{item.coord2[1]}  [{n_c1}+{n_c2} pt]"
+        )
 
         self.cb_value.blockSignals(True)
         self.cb_coord.blockSignals(True)
         try:
-            # 같은 sentinel 이 이미 있으면 선택만, 없으면 prepend (누적)
-            v_idx = self._find_combo_item(self.cb_value, v_data)
+            v_idx = self._find_combo_item(self.cb_value, item.v_sentinel)
             if v_idx < 0:
-                self.cb_value.insertItem(0, v_label, v_data)
+                self.cb_value.insertItem(0, v_label, item.v_sentinel)
                 v_idx = 0
             self.cb_value.setCurrentIndex(v_idx)
 
-            c_idx = self._find_combo_item(self.cb_coord, coord_data)
+            c_idx = self._find_combo_item(self.cb_coord, item.coord_sentinel)
             if c_idx < 0:
-                self.cb_coord.insertItem(0, coord_label, coord_data)
+                self.cb_coord.insertItem(0, coord_label, item.coord_sentinel)
                 c_idx = 0
             self.cb_coord.setCurrentIndex(c_idx)
         finally:
@@ -1651,27 +1732,27 @@ class MainWindow(QMainWindow):
         """cb_value / cb_coord 에서 합성 sentinel 항목 제거 (있으면)."""
         for combo in (self.cb_value, self.cb_coord):
             for i in range(combo.count() - 1, -1, -1):
-                data = combo.itemData(i)
-                if isinstance(data, tuple) and data and data[0] == "__combined__":
+                if _is_combined_data(combo.itemData(i)):
                     combo.removeItem(i)
 
     def _clear_combined(self) -> None:
-        """합성 상태 해제 — sentinel 제거 + 매핑 정리 + wafer.parameters 임시 키 정리.
+        """합성 상태 해제 — sentinel 제거 + state 비우기 + wafer.parameters 임시 키 정리.
 
-        Input A/B 어느 쪽 paste 변경 시에도 호출. 임시 키 (`T1 + T1_A` 등 `+` 포함)
-        가 남으면 단일 PARA 처럼 콤보에 잘못 노출됨.
+        Input A/B 어느 쪽 paste 변경 시에도 호출. state.temp_keys() 가 등록한 친화
+        이름 (예: `T1 + T1_A`) 만 정확히 정리 — 사용자 PARA 에 우연히 ` + ` 포함되는
+        경우에도 안전.
         """
-        # sentinel 콤보 제거는 self._combined 무관하게 항상 실행 (잔재 방지)
+        # sentinel 콤보 제거는 state 비우기 전에 실행 (잔재 방지)
         self._remove_combined_from_combos()
-        self._combined = None
-        self._combined_pairs.clear()
-        # wafer.parameters 의 임시 합성 키 정리 — 식별: 이름에 ` + ` 포함
+        # wafer.parameters 임시 키는 state 비우기 전에 수집해서 정리
+        temp_keys = self._combined_state.temp_keys()
+        self._combined_state.clear()
         for r in (self._result_a, self._result_b):
             if r is None:
                 continue
             for w in r.wafers.values():
                 for k in list(w.parameters):
-                    if " + " in k:
+                    if k in temp_keys:
                         del w.parameters[k]
 
     def _open_help(self) -> None:

@@ -15,6 +15,8 @@ debug/
 
 # stylesheet 가 동적으로 만드는 체크박스 SVG (테마 accent 색별)
 assets/check_*.svg
+# stylesheet 가 동적으로 만드는 스크롤바 화살표 SVG (테마 text 색별)
+assets/arrow_*.svg
 
 # 로그·캐시 (아직 폴더 없음, 추후 대비)
 logs/
