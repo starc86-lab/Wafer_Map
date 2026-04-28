@@ -1617,11 +1617,22 @@ class MainWindow(QMainWindow):
                     combo.removeItem(i)
 
     def _clear_combined(self) -> None:
-        """합성 상태 해제 + 콤보에서 항목 제거. paste 변경 시 호출."""
-        if self._combined is None:
-            return
-        self._combined = None
+        """합성 상태 해제 — sentinel 제거 + wafer.parameters 의 임시 키 정리.
+
+        Input A/B 어느 쪽 paste 변경 시에도 호출 (사용자 정책 2026-04-28). 임시
+        키 (`T1 + T1_A` 등 `+` 포함) 가 남으면 단일 PARA 처럼 콤보에 잘못 노출됨.
+        """
+        # sentinel 콤보 제거는 self._combined 무관하게 항상 실행 (잔재 방지)
         self._remove_combined_from_combos()
+        self._combined = None
+        # wafer.parameters 의 임시 합성 키 정리 — 식별: 이름에 ` + ` 포함
+        for r in (self._result_a, self._result_b):
+            if r is None:
+                continue
+            for w in r.wafers.values():
+                for k in list(w.parameters):
+                    if " + " in k:
+                        del w.parameters[k]
 
     def _open_help(self) -> None:
         """통합 도움말 HTML 을 기본 브라우저로 오픈."""
