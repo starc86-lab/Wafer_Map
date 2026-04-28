@@ -5,15 +5,14 @@
 호출처가 적절한 채널 (paste 영역, ReasonBar 등) 에 표시한다. 본 모듈은 데이터를
 수정하지 않음.
 
-검사 대상 4가지 케이스 중 본 모듈이 다루는 2가지:
+검사 대상 4가지 케이스 중 본 모듈이 다루는 1가지 (warn):
 - 케이스 2 (헤더 행 2개+): main.py 의 `_strip_extra_header_rows` 가 자동 처리.
-  실수 반복이면 케이스 4 (repeat_measurement) 로 인지, 의도 통합이면 그래프로
-  자연스럽게 보임. 별도 알림 불필요 — 메시지 X.
+  메시지 X.
 - 케이스 3: wafer 별 PARA set 다름 → 직접 분석 (severity=warn, Run 활성).
-  사내 실제 데이터에 흔한 케이스 (일부 wafer 만 추가 측정). VALUE 콤보 union
-  + `_visualize_single` 이 PARA 없는 wafer 는 NaN cell + (no data) 타이틀로 처리.
-- 케이스 4: (WAFERID, PARAMETER) 재등장 → `metadata.repeat_measurement_groups > 0`
-  (severity=info — 재측정/반복 측정 정상 데이터, suffix 로 분리되어 시각화)
+  사내 실제 데이터에 흔한 케이스. VALUE 콤보 union + `_visualize_single` 이
+  PARA 없는 wafer 는 NaN cell + (no data) 타이틀로 처리.
+- 케이스 4: (WAFERID, PARAMETER) 재등장 → cell 타이틀의 __rep suffix 로 인지.
+  메시지 X.
 
 케이스 1 (필수 컬럼 누락) 은 `main.parse_wafer_csv` 가 `MissingColumnsError` 로
 raise — 호출처 (paste_area) 가 catch 후 자체 메시지 표시. 본 모듈 영역 외.
@@ -79,13 +78,7 @@ def validate(result: ParseResult) -> list[ValidationWarning]:
                      "없는 wafer 는 NaN cell 로 표시"),
         ))
 
-    # 케이스 4 — (WAFERID, PARAMETER) 재등장 → __repN suffix 로 분리됨 (정상 데이터)
-    rep = result.metadata.repeat_measurement_groups
-    if rep > 0:
-        warnings.append(ValidationWarning(
-            code="repeat_measurement",
-            severity="info",
-            message=f"반복 측정 {rep}건 발견 — 별도 wafer 로 분리 (__rep1, __rep2 ...)",
-        ))
+    # 케이스 4 (반복 측정) 메시지 제거 — cell 타이틀의 __rep1/__rep2 suffix 가
+    # 시각적 인지 충분. 별도 알림 불필요.
 
     return warnings

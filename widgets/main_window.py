@@ -423,20 +423,38 @@ class MainWindow(QMainWindow):
         self._reason_bar.set_warnings(extra)
         self._result_panel.clear()
 
-    def _update_delta_validation(self) -> None:
-        """양쪽 ParseResult 가 모두 있으면 DELTA 검증 + cache + ReasonBar 표시.
+    def _prefixed(self, prefix: str, warnings: list) -> list:
+        """ValidationWarning 리스트에 메시지 prefix 추가 (`A: ...` / `B: ...`)."""
+        from core.input_validation import ValidationWarning
+        return [
+            ValidationWarning(
+                code=w.code, severity=w.severity,
+                message=f"{prefix}: {w.message}",
+            )
+            for w in warnings
+        ]
 
-        한쪽만 있거나 빈 입력이면 cache 비우고 ReasonBar 도 빈 메시지.
-        cache (`self._delta_warnings`) 는 `_refresh_controls` 가 Run 활성화
-        결정에 사용. 결과적으로 paste 변경마다 한 번 계산 + 양쪽 재사용.
+    def _update_delta_validation(self) -> None:
+        """모든 검증 결과 (A 단일 + B 단일 + DELTA) 를 한 번 모아 ReasonBar 표시.
+
+        paste 라벨은 카운트만 — warning 은 모두 ReasonBar 단일 채널 (사용자 정책
+        2026-04-28). cache (`self._delta_warnings`) 는 `_refresh_controls` 가
+        Run 활성화 결정에 사용 + `_show_blocking_reason` 이 Run 결과와 합쳐 표시.
         """
         from core.delta_validation import validate_delta  # lazy
+        from core.input_validation import validate as validate_single  # lazy
+
         a, b = self._result_a, self._result_b
+        all_warnings: list = []
+        if a:
+            all_warnings.extend(self._prefixed("A", validate_single(a)))
+        if b:
+            all_warnings.extend(self._prefixed("B", validate_single(b)))
         if a and b:
-            self._delta_warnings = validate_delta(a, b)
-        else:
-            self._delta_warnings = []
-        self._reason_bar.set_warnings(self._delta_warnings)
+            all_warnings.extend(validate_delta(a, b))
+
+        self._delta_warnings = all_warnings
+        self._reason_bar.set_warnings(all_warnings)
 
     def _refresh_controls(self) -> None:
         """입력 결과를 바탕으로 콤보 리스트·기본값 갱신.

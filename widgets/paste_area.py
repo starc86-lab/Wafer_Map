@@ -28,26 +28,6 @@ HEADER_BUTTON_WIDTH = 88
 HEADER_BUTTON_SPACING = 6
 
 
-# 검증 경고 severity 별 색 — error > warn > ok > info 우선순위.
-# `ok` 는 fallback 등 성공 알림 (민트). ReasonBar 와 동일 팔레트.
-_SEVERITY_COLORS = {
-    "error": "#d32f2f",
-    "warn":  "#e76f51",
-    "ok":    "#2a9d8f",
-    "info":  "#666",
-}
-_SEVERITY_RANK = {"info": 0, "ok": 1, "warn": 2, "error": 3}
-
-
-def _max_severity(warnings: list) -> str:
-    """경고 리스트 중 가장 높은 severity 반환."""
-    return max(
-        (w.severity for w in warnings),
-        key=lambda s: _SEVERITY_RANK.get(s, 0),
-        default="info",
-    )
-
-
 class PasteArea(QWidget):
     """Ctrl+V 페이스트 + 텍스트/표 뷰 토글."""
 
@@ -133,15 +113,10 @@ class PasteArea(QWidget):
 
         lay.addWidget(self._stacked, stretch=1)
 
-        # ── 요약 라벨 (1줄: 카운트, 2줄: 검증 경고) ──
+        # ── 요약 라벨 — 카운트 / 실패 사유 한 줄. warning 은 ReasonBar 로 통합 ──
         self._summary = QLabel("— 입력 대기 —")
         self._summary.setStyleSheet("color: gray;")
         lay.addWidget(self._summary)
-
-        self._warnings = QLabel("")
-        self._warnings.setStyleSheet("color: #e76f51;")
-        self._warnings.hide()
-        lay.addWidget(self._warnings)
 
     # ── 외부 API ───────────────────────────────────────
     @property
@@ -213,14 +188,24 @@ class PasteArea(QWidget):
             self._set_status(None, None, f"⚠ 파싱 실패: {e}", "color: #d32f2f;")
             return
 
-        s = summarize(result)
+        # 빈 결과 (wafer 0) — 파싱 성공했지만 데이터 행이 모두 무효
+        if not result.wafers:
+            self._set_status(
+                None, df,
+                "⚠ 데이터 없음 — 헤더만 있거나 데이터 행이 모두 무효",
+                "color: #d32f2f;",
+            )
+            return
+
+        # 검증 결과는 paste_area 가 보관만 (UI 표시는 ReasonBar — main_window 가 처리)
         warns = validate(result)
-        sep_label = result.metadata.delimiter
-        sep_str = f" / 구분자: {sep_label}" if sep_label else ""
+        s = summarize(result)
+        sep_str = f" / 구분자: {result.metadata.delimiter}" if result.metadata.delimiter else ""
+        coord_str = "좌표 있음" if s.n_coord_pairs > 0 else "좌표 없음"
         self._set_status(
             result, df,
-            f"웨이퍼 {s.n_wafers}장, Parameter {s.n_parameter}개, "
-            f"좌표 {s.n_coord_pairs}개{sep_str}",
+            f"웨이퍼 {s.n_wafers}장 / Parameter {s.n_parameter}개 / "
+            f"{coord_str}{sep_str}",
             "color: #2a9d8f;",
             warns,
         )
@@ -233,25 +218,13 @@ class PasteArea(QWidget):
         style: str,
         warnings: list | None = None,
     ) -> None:
+        # paste 라벨 = 카운트 / 실패 사유 한 줄. warning 은 ReasonBar 로 통합 (UI 표시 X).
+        # `_validation` 은 main_window 가 ReasonBar 빌드 시 가져다 씀.
         self._result = result
         self._df = df
         self._validation = warnings or []
         self._summary.setText(msg)
         self._summary.setStyleSheet(style)
-
-        # 둘째 라벨 — 검증 경고. 빈/실패는 None 또는 빈 리스트 → hide.
-        # ok severity 는 정상 동작 알림이라 ⚠ 안 붙임 (ReasonBar 와 동일 규약).
-        if warnings:
-            text = ", ".join(
-                w.message if w.severity == "ok" else f"⚠ {w.message}"
-                for w in warnings
-            )
-            severity = _max_severity(warnings)
-            self._warnings.setText(text)
-            self._warnings.setStyleSheet(f"color: {_SEVERITY_COLORS[severity]};")
-            self._warnings.show()
-        else:
-            self._warnings.hide()
 
         if df is not None and len(df) > 0:
             self._btn_table.setEnabled(True)
