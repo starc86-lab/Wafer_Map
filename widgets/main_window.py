@@ -674,9 +674,17 @@ class MainWindow(QMainWindow):
         매칭 우선순위 (프리셋 아닐 때만):
           1순위: pair x 의 suffix == VALUE suffix AND pair n == VALUE n
           2순위: pair n == VALUE n (콤보 등장 순서 첫)
-        매칭 안 되면 좌표 유지.
+        합성 sentinel 선택 시: cb_coord 의 합성 항목 자동 선택.
         그래프가 이미 그려진 상태면 재-Run.
         """
+        v_data = self.cb_value.currentData()
+        # 합성 sentinel 선택 → 합성 좌표 자동 선택 (사용자 정책 2026-04-28)
+        if isinstance(v_data, tuple) and v_data and v_data[0] == "__combined__":
+            self._auto_select_combined_coord()
+            if self._result_panel.cells:
+                self._on_visualize()
+            return
+
         new_v = self._current_value()
         if not new_v:
             return
@@ -684,6 +692,17 @@ class MainWindow(QMainWindow):
             self._auto_match_coord_by_value(new_v)
         if self._result_panel.cells:
             self._on_visualize()
+
+    def _auto_select_combined_coord(self) -> None:
+        """cb_coord 의 합성 sentinel 항목을 찾아 currentIndex 설정 (재시각화 트리거 X)."""
+        for i in range(self.cb_coord.count()):
+            data = self.cb_coord.itemData(i)
+            if isinstance(data, tuple) and data and data[0] == "__combined__":
+                if self.cb_coord.currentIndex() != i:
+                    self.cb_coord.blockSignals(True)
+                    self.cb_coord.setCurrentIndex(i)
+                    self.cb_coord.blockSignals(False)
+                return
 
     @staticmethod
     def _name_suffix(name: str) -> str:
