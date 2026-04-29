@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass, field
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
@@ -28,6 +27,9 @@ from core.auto_select import (
     select_value, select_value_by_variability, select_xy_pairs,
     select_y_with_suffix,
 )
+from core.combine import (
+    CombinedItem, CombinedState, is_combined_data, wrap_if_composite,
+)
 from core.coord_library import CoordLibrary, CoordPreset
 from core.coords import normalize_to_mm
 from core.settings import load_settings
@@ -37,112 +39,6 @@ from widgets.paste_area import PasteArea
 from widgets.reason_bar import ReasonBar
 from widgets.result_panel import ResultPanel
 from widgets.wafer_cell import WaferDisplay
-
-
-# ── PARA 합성 모델 ────────────────────────────────────────────
-# Qt itemData sentinel — 단일 PARA(str) 와 구분되는 tuple-tag 형식.
-# 모든 sentinel 생성/검사는 아래 헬퍼 경유 (포맷 산재 방지, 사용자 정책 2026-04-29).
-COMBINED_TAG = "__combined__"
-
-
-def _is_combined_data(data) -> bool:
-    return isinstance(data, tuple) and len(data) >= 1 and data[0] == COMBINED_TAG
-
-
-def _wrap_if_composite(name: str) -> str:
-    """operand 가 합성 친화 키 (` + ` 또는 ` ∪ ` 포함) 면 괄호로 감싸 우선순위 명시.
-
-    예: 'T1' → 'T1', 'T1 + T2' → '(T1 + T2)', '(T1 ∪ T2) + T3' → '((T1 ∪ T2) + T3)'.
-    임의 깊이 합성에서 sum/concat 혼합 시 모호성 제거 (사용자 정책 2026-04-29).
-    """
-    if " + " in name or " ∪ " in name:
-        return f"({name})"
-    return name
-
-
-@dataclass
-class CombinedItem:
-    """한 합성 단위 — N-ary operands + per-operand coord + mode.
-
-    mode:
-      - "concat" : 두 (이상) 점 집합을 단순 연결 (다른 좌표 합치는 케이스)
-      - "sum"    : 모든 operand 좌표 동일 — 값 element-wise 합. coords 모두 같음.
-
-    invariant: len(operands) == len(coords) >= 2. mode=="sum" 이면 coords 전부 동일.
-    operand 는 plain PARA 이름 ("T1") 또는 다른 합성의 친화 키 ("sum(T1+T2)") —
-    recursive 단계에서 자동 활용. 친화 키 (`v_key`/`x_key`/`y_key`) 는
-    wafer.parameters 에 임시 등록될 사용자 친화 이름.
-    """
-    operands: list[str]
-    coords: list[tuple[str, str]]
-    mode: str = "concat"
-
-    @property
-    def v_sentinel(self) -> tuple:
-        return (COMBINED_TAG, "v", self.mode, tuple(self.operands))
-
-    @property
-    def coord_sentinel(self) -> tuple:
-        return (COMBINED_TAG, "c", self.mode, tuple(self.coords))
-
-    @property
-    def v_key(self) -> str:
-        # sum: ` + ` (element-wise 덧셈) / concat: ` ∪ ` (합집합)
-        # 합성 operand 자동 괄호 — 임의 깊이 sum/concat 혼합 시 우선순위 명시
-        sep = " + " if self.mode == "sum" else " ∪ "
-        return sep.join(_wrap_if_composite(op) for op in self.operands)
-
-    @property
-    def x_key(self) -> str:
-        if self.mode == "sum":
-            return self.coords[0][0]
-        return " ∪ ".join(_wrap_if_composite(c[0]) for c in self.coords)
-
-    @property
-    def y_key(self) -> str:
-        if self.mode == "sum":
-            return self.coords[0][1]
-        return " ∪ ".join(_wrap_if_composite(c[1]) for c in self.coords)
-
-
-@dataclass
-class CombinedState:
-    """합성 항목 누적 상태 — 콤보 sentinel/wafer.parameters 임시 키의 단일 진실원.
-
-    주의: paste 변경 / Run Analysis 와 무관하게 사용자가 "Para 조합" 으로 추가하는
-    동안만 누적. paste 변경 시 main_window 가 `clear()` 호출 → 임시 키 정리도
-    `temp_keys()` 가 반환하는 키 set 기준으로 일괄 처리.
-    """
-    items: list[CombinedItem] = field(default_factory=list)
-
-    def __bool__(self) -> bool:
-        return bool(self.items)
-
-    def __len__(self) -> int:
-        return len(self.items)
-
-    def add(self, item: CombinedItem) -> None:
-        # 같은 sentinel 이미 있으면 무시 (재선택만, 중복 추가 X)
-        for existing in self.items:
-            if existing.v_sentinel == item.v_sentinel:
-                return
-        self.items.append(item)
-
-    def get_by_v_sentinel(self, v_data) -> CombinedItem | None:
-        for item in self.items:
-            if item.v_sentinel == v_data:
-                return item
-        return None
-
-    def temp_keys(self) -> set[str]:
-        """wafer.parameters 에 등록된 모든 임시 키 (정리용)."""
-        keys: set[str] = set()
-        for item in self.items:
-            keys.update({item.v_key, item.x_key, item.y_key})
-        return keys
-
-    def clear(self) -> None:
-        self.items.clear()
 
 
 def _pad_slot(slot: str) -> str:
@@ -796,7 +692,7 @@ class MainWindow(QMainWindow):
         """
         v_data = self.cb_value.currentData()
         # 합성 sentinel 선택 → 합성 좌표 자동 선택 (사용자 정책 2026-04-28)
-        if _is_combined_data(v_data):
+        if is_combined_data(v_data):
             self._auto_select_combined_coord()
             if self._result_panel.cells:
                 self._on_visualize()
@@ -818,7 +714,7 @@ class MainWindow(QMainWindow):
         (사용자 정책 2026-04-29).
         """
         v_data = self.cb_value.currentData()
-        if not _is_combined_data(v_data):
+        if not is_combined_data(v_data):
             return
         item = self._combined_state.get_by_v_sentinel(v_data)
         if item is None:
@@ -1022,7 +918,7 @@ class MainWindow(QMainWindow):
         v_data = self.cb_value.currentData()
         coord_data = self.cb_coord.currentData()
         item = None
-        if _is_combined_data(v_data) and _is_combined_data(coord_data):
+        if is_combined_data(v_data) and is_combined_data(coord_data):
             item = self._combined_state.get_by_v_sentinel(v_data)
         if item is not None:
             v, x, y = item.v_key, item.x_key, item.y_key
@@ -1818,7 +1714,7 @@ class MainWindow(QMainWindow):
         """cb_value / cb_coord 에서 합성 sentinel 항목 제거 (있으면)."""
         for combo in (self.cb_value, self.cb_coord):
             for i in range(combo.count() - 1, -1, -1):
-                if _is_combined_data(combo.itemData(i)):
+                if is_combined_data(combo.itemData(i)):
                     combo.removeItem(i)
 
     def _clear_combined(self) -> None:
