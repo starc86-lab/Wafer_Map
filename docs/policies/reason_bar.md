@@ -41,9 +41,11 @@
 
 ### Paste 시점 검증 — `core/input_validation` (단일 입력)
 
-| code | severity | 메시지 | 비고 |
+| code | severity | 메시지 (예) | 비고 |
 |---|---|---|---|
-| (현재 simplified — 메시지 출력 거의 없음) | — | — | 0.3.0 에서 `extra_header` / `repeat_measurement` / `para_set_mismatch` warn 메시지 제거. 인터페이스 유지 |
+| `single_recipe_mismatch` | error | `RECIPE 다름 — LX001.03: RECIPE_B vs 가족: RECIPE_A` | 가족 RECIPE 단일성 위반 (사용자 정책 2026-04-30) |
+| `family_coord_missing` | info | `LX002.03 좌표 누락: X_A/Y_A` | 일부 wafer 좌표 페어 누락 (paste 잘림). 가족 좌표 차용으로 silent 진행하지만 사용자 인지 |
+| `family_coord_short` | info | `LX003.03 좌표 Point 부족: X (12pt, 1점 부족)` | 좌표 N 가족 max 보다 적음. 가족 max N 채택 |
 
 ### Paste 시점 검증 — `core/delta_validation` (DELTA 입력)
 
@@ -52,8 +54,8 @@
 | `delta_no_intersect` | error | `WAFERID 교집합 없음` | A·B `WAFERID` 교집합 0 |
 | `delta_repeats_in_input` | warn | `A에 웨이퍼 중복 N건, 최신 측정 데이터 사용` | A 또는 B 에 `__rep` 분리 wafer 존재 |
 | `delta_coord_unresolved` | error | `A 좌표 없음` / `B 좌표 없음` / `A, B 좌표 없음` | 좌표 fallback 실패 (자세한 매트릭스는 [coords.md](coords.md) 참조) |
-| `delta_a_partial_coord` | warn | `A 일부 wafer 좌표 누락 (N/M)` | A 일부 wafer 만 좌표 PARA 누락 (`_resolve_delta_coords` 의 silent 옆집/라이브러리 fallback 인지 surface) |
-| `delta_b_partial_coord` | warn | `B 일부 wafer 좌표 누락 (N/M)` | B 대칭 |
+| ~~`delta_a_partial_coord`~~ | ~~warn~~ | — | **2026-04-30 폐지** — 가족 정책으로 자동 fallback. `family_coord_missing` (info) 가 단일 입력 검증에서 처리 |
+| ~~`delta_b_partial_coord`~~ | ~~warn~~ | — | 동상 |
 | `delta_no_common_value_para` | warn | `공통 PARA 없음` | A∩B VALUE PARA = ∅ (union 으로 콤보 노출되지만 알림) |
 | `delta_recipe_mismatch` | warn | `RECIPE 다름` | A·B RECIPE 비호환 (PRE/POST 룰 적용 후) |
 
@@ -61,7 +63,7 @@
 
 | code | severity | 메시지 (예) | 분기 |
 |---|---|---|---|
-| `single_skipped_wafers` | warn | `좌표 해결 실패 wafer N개` | 일부 wafer 의 좌표 해결 실패 (4단계 fallback 모두 실패) |
+| `single_skipped_wafers` | warn | `좌표 해결 실패: LX001.03, LX001.07` | 가족 정책 fallback 후에도 좌표 해결 실패한 wafer (라이브러리 매칭 X 등). LOT.SLOT 라벨 포함 (사용자 정책 2026-04-30) |
 | `single_no_coord_all` | error | `좌표 없음` | 모든 wafer 좌표 해결 실패 → 시각화 불가 |
 | `n_mismatch` | warn | `측정점 개수 불일치` | VALUE / X / Y 의 n 이 모두 같지 않음 |
 
@@ -101,4 +103,17 @@
 
 ---
 
-**마지막 업데이트**: 2026-04-30 (정책 카탈로그 분리)
+## 글로벌 정책 — 사용자 알림 LOT.SLOT 명시
+
+wafer 단위 이슈 메시지는 모두 `{lot_id}.{pad2(slot_id)}{rep_suffix}` 라벨 포함 (사용자 정책 2026-04-30).
+
+| 이슈 단위 | LOT.SLOT 라벨 |
+|---|---|
+| wafer 단위 (좌표 누락 / N 부족 / RECIPE 다름) | ✓ 포함 |
+| 가족 단위 (전체 좌표 없음 등) | — |
+| 이웃 단위 (DELTA RECIPE 다름, WAFERID 교집합 0) | — |
+| 콤보 선택 결과 (n_mismatch) | — |
+
+---
+
+**마지막 업데이트**: 2026-04-30 (가족 좌표 정책 도입 — message catalog 갱신)
