@@ -4,6 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 현재 버전: **0.4.0** (PARA 조합 sum/concat recursive + CombinedState 단일 진실원 + UI 마이너, 2026-04-29). 버전 이력은 [CHANGELOG.md](CHANGELOG.md) 참고, 사용자 가이드는 [USER_GUIDE.md](USER_GUIDE.md).
 
+## 정책 카탈로그 (필수 동반 갱신)
+
+3대 정책은 별도 md 파일로 관리 — 관련 코드 변경 시 **반드시** 동반 갱신:
+
+- [docs/policies/input_parsing.md](docs/policies/input_parsing.md) — 입력 / 파싱 정책 (헤더 매칭·DATA 수집·메타 컬럼·반복 측정 분리·자동 선택·단위 환산)
+- [docs/policies/coords.md](docs/policies/coords.md) — 좌표 결정 + 라이브러리 (single 4단계 fallback / DELTA 매트릭스 / 자동 저장·조회·정리)
+- [docs/policies/reason_bar.md](docs/policies/reason_bar.md) — 메시지·검증·표시 (severity 4단계 / baseline 보존 / 메시지 카탈로그)
+
 ## 개발자 정보
 - 한국인, 코딩 중급 수준
 - 직접 코딩하지 않고 Claude에 코드 수정 권한 위임 — 제안·논의·리뷰 중심 협업
