@@ -63,6 +63,9 @@ def _rep_suffix(wafer_id: str) -> str:
 
 
 PRESET_BUTTON_DEFAULT_TEXT = "좌표 불러오기"
+# preset_override 적용 시 표시 — 좌표명 full 표시는 버튼 폭 동적 변동 유발해 단순화
+# (사용자 정책 2026-04-30).
+PRESET_BUTTON_ACTIVE_TEXT = "Preset 적용"
 
 
 class MainWindow(QMainWindow):
@@ -675,7 +678,7 @@ class MainWindow(QMainWindow):
                 )
                 if matched is not None:
                     self._preset_override = matched
-                    self.btn_load_preset.setText(f"프리셋: {matched.display_name}")
+                    self.btn_load_preset.setText(PRESET_BUTTON_ACTIVE_TEXT)
                     self._refilter_value_combo()
                     return
 
@@ -824,7 +827,7 @@ class MainWindow(QMainWindow):
             return
         library.touch(preset)
         self._preset_override = preset
-        self.btn_load_preset.setText(f"프리셋: {preset.display_name}")
+        self.btn_load_preset.setText(PRESET_BUTTON_ACTIVE_TEXT)
         self._apply_preset_indicator()
 
     def _reset_preset_override(self) -> None:
@@ -863,7 +866,7 @@ class MainWindow(QMainWindow):
         if hits:
             preset = hits[0]
             self._preset_override = preset
-            self.btn_load_preset.setText(f"프리셋: {preset.display_name}")
+            self.btn_load_preset.setText(PRESET_BUTTON_ACTIVE_TEXT)
 
     # preset 소스 마킹 role — UserRole 은 (x, y) tuple 로 이미 사용 중.
     # UserRole+1 을 별도 role 로 써서 "preset" 여부 플래그만 저장.
@@ -1155,11 +1158,6 @@ class MainWindow(QMainWindow):
             x_mm, y_mm = x_mm[:n], y_mm[:n]
             val_n = val[:n] if val is not None else np.full(n, np.nan, dtype=float)
 
-            # 좌표 저장은 VALUE 가 있고 wafer 자체 좌표일 때만 (가족 차용 / preset /
-            # 라이브러리 경유 좌표는 round-trip 저장 안 함).
-            if has_value and not (from_preset or from_lib or from_family):
-                self._save_used_pair_to_library(library, w, v, x, y)
-
             rep = _rep_suffix(w.wafer_id)
             title = f"{w.lot_id}.{_pad_slot(w.slot_id)}{rep} – {v}"
             if not has_value:
@@ -1171,6 +1169,15 @@ class MainWindow(QMainWindow):
                 is_radial=bool(is_collinear(x_mm, y_mm)),
             ))
 
+        # 가족 단위 라이브러리 저장 — wafer 자체 좌표 (preset/library/family 차용 X)
+        # 인 케이스에만 의미. 단순화: 가족 내 v/x/y 보유 + recipe 보유한 첫 wafer
+        # 의 좌표 1번만 저장. 같은 4-tuple key 면 internal dedup (사용자 정책 2026-04-30).
+        coord_valid_for_save = (
+            coord_valid and self._preset_override is None
+            and family_pair is not None
+        )
+        if coord_valid_for_save:
+            self._save_family_coords_to_library(library, result, v, x, y)
         self._enforce_library_limits(library)
 
         # 모든 웨이퍼 좌표 해결 실패 → 결과 영역 비우고 ReasonBar 에 사유 표시
@@ -1205,15 +1212,12 @@ class MainWindow(QMainWindow):
         # DELTA 모드 자동 저장 — A/B 각 웨이퍼에 실제 사용된 (x, y) pair 하나씩 저장
         coord_valid = bool(v and x and y and v != x and v != y and x != y)
         library = CoordLibrary()
-        if coord_valid:
-            for result in (a, b):
-                for w in result.wafers.values():
-                    # wafer 자체에 X/Y 가 있는 경우만 저장 — 자동 fallback (옆집/
-                    # 라이브러리) 좌표 round-trip 방지 (single 동작과 일치, 사용자
-                    # 정책 2026-04-30). 이전엔 _save_used_pair_to_library 의 내부
-                    # 가드만 의존했으나 명시적 분기로 의도 명확.
-                    if x in w.parameters and y in w.parameters:
-                        self._save_used_pair_to_library(library, w, v, x, y)
+        # 라이브러리 저장 가족 단위 — A 가족 + B 가족 각자 1번씩 (가족 좌표 정책,
+        # 사용자 정책 2026-04-30). preset_override 적용 시엔 저장 X (이미 라이브러리
+        # 에 있는 좌표라 round-trip 의미 없음).
+        if coord_valid and self._preset_override is None:
+            self._save_family_coords_to_library(library, a, v, x, y)
+            self._save_family_coords_to_library(library, b, v, x, y)
             self._enforce_library_limits(library)
 
         # 좌표 결정 (사용자 정책 2026-04-27, A 기준):
@@ -1482,6 +1486,25 @@ class MainWindow(QMainWindow):
         x_mm, _ = normalize_to_mm(xs[:wn])
         y_mm, _ = normalize_to_mm(ys[:wn])
         return (x_mm, y_mm)
+
+    def _save_family_coords_to_library(
+        self, library: CoordLibrary, result: ParseResult,
+        v_name: str, x_name: str, y_name: str,
+    ) -> None:
+        """가족 단위 1회 저장 — 가족 내 v/x/y 모두 보유 + recipe 보유한 첫 wafer 의
+        좌표를 라이브러리에 저장 (사용자 정책 2026-04-30, 가족 좌표 정책).
+
+        가족이 같은 RECIPE 의 같은 좌표 PARA 이름 보유 시 좌표값 동일 보장 →
+        per-wafer 저장 시도 폐지, 가족 단위 1번만.
+        """
+        if result is None or not result.wafers:
+            return
+        for w in result.wafers.values():
+            if (v_name in w.parameters
+                    and x_name in w.parameters and y_name in w.parameters
+                    and w.recipe):
+                self._save_used_pair_to_library(library, w, v_name, x_name, y_name)
+                return  # 가족 단위 1번만
 
     def _save_used_pair_to_library(
         self, library: CoordLibrary, wafer, v_name: str, x_name: str, y_name: str,

@@ -72,7 +72,10 @@ class ReasonBar(QFrame):
             return
 
         def _fmt(w) -> str:
-            return w.message if w.severity == "ok" else f"⚠ {w.message}"
+            # ok / info: 정상 또는 정보 톤 — ⚠ prefix 안 붙임. warn / error 만 ⚠.
+            if w.severity in ("ok", "info"):
+                return w.message
+            return f"⚠ {w.message}"
 
         text = ", ".join(_fmt(w) for w in warnings)
         rank = {"info": 0, "ok": 1, "warn": 2, "error": 3}

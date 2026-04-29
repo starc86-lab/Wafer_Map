@@ -44,7 +44,7 @@
     "after_paste_run_enabled": true
   },
   "s_family_partial_coord": {
-    "reason_bar_text": "⚠ A: LX002.03 좌표 누락: X_A/Y_A",
+    "reason_bar_text": "A: LX002.03 좌표 누락: X_A/Y_A",
     "reason_bar_severity": "info",
     "n_cells": 3,
     "cells": [
@@ -89,12 +89,12 @@
         "message": "A: LX002.03 좌표 누락: X_A/Y_A"
       }
     ],
-    "after_paste_reason_bar": "⚠ A: LX002.03 좌표 누락: X_A/Y_A",
+    "after_paste_reason_bar": "A: LX002.03 좌표 누락: X_A/Y_A",
     "after_paste_severity": "info",
     "after_paste_run_enabled": true
   },
   "s_family_short_n": {
-    "reason_bar_text": "⚠ A: LX003.03 좌표 Point 부족: X (12pt, 1점 부족)",
+    "reason_bar_text": "A: LX003.03 좌표 Point 부족: X (12pt, 1점 부족)",
     "reason_bar_severity": "info",
     "n_cells": 3,
     "cells": [
@@ -139,7 +139,7 @@
         "message": "A: LX003.03 좌표 Point 부족: X (12pt, 1점 부족)"
       }
     ],
-    "after_paste_reason_bar": "⚠ A: LX003.03 좌표 Point 부족: X (12pt, 1점 부족)",
+    "after_paste_reason_bar": "A: LX003.03 좌표 Point 부족: X (12pt, 1점 부족)",
     "after_paste_severity": "info",
     "after_paste_run_enabled": true
   },
@@ -285,7 +285,7 @@
     "after_paste_run_enabled": true
   },
   "d_partial": {
-    "reason_bar_text": "⚠ A: LX11A.03 좌표 누락: X/Y",
+    "reason_bar_text": "A: LX11A.03 좌표 누락: X/Y",
     "reason_bar_severity": "info",
     "n_cells": 3,
     "cells": [
@@ -330,7 +330,7 @@
         "message": "A: LX11A.03 좌표 누락: X/Y"
       }
     ],
-    "after_paste_reason_bar": "⚠ A: LX11A.03 좌표 누락: X/Y",
+    "after_paste_reason_bar": "A: LX11A.03 좌표 누락: X/Y",
     "after_paste_severity": "info",
     "after_paste_run_enabled": true
   },
