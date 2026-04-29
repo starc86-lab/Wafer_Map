@@ -22,6 +22,9 @@ assets/arrow_*.svg
 logs/
 cache/
 
+# family_coord 정책 회귀 검증 — current 결과는 매 실행마다 갱신 (transient)
+tests/current/
+
 # PyInstaller 빌드 산출물 (배포판은 GitHub Release로만 공유)
 build/
 dist/
