@@ -1034,7 +1034,8 @@ class MainWindow(QMainWindow):
         """현재 입력에서 VALUE/X/Y n 이 모두 같은지 검사. 다르면 ReasonBar 에 warn.
 
         시각화는 성공한 케이스라 결과 영역 그대로 두고, ReasonBar 에 사후 알림만
-        추가. silent 분기 일관화 정책 — 다이얼로그 사용 안 함.
+        추가. paste-time baseline 위에 합쳐 표시 — 단독 set_message 로 baseline
+        덮지 않음 (사용자 정책 2026-04-30).
         """
         available_ns = self._build_selection_context()[0]
         v_n = available_ns.get(v)
@@ -1044,8 +1045,14 @@ class MainWindow(QMainWindow):
             return
         if v_n == x_n == y_n:
             return
-        # n 불일치는 시각화 결과 신뢰성에 직결되는 정보라 우선순위 높음 (단일 메시지로 덮음).
-        self._reason_bar.set_message("⚠ 측정점 개수 불일치", severity="warn")
+        from core.input_validation import ValidationWarning
+        extra = list(self._delta_warnings) + [
+            ValidationWarning(
+                code="n_mismatch", severity="warn",
+                message="측정점 개수 불일치",
+            )
+        ]
+        self._reason_bar.set_warnings(extra)
 
 
     def _visualize_single(
@@ -1145,15 +1152,19 @@ class MainWindow(QMainWindow):
 
         self._apply_z_scale_mode(displays, view_mode)
         self._result_panel.set_displays(displays, v, view_mode=view_mode)
-        # ReasonBar — 라이브러리 자동 fallback 은 의도된 동작이라 알림 X.
-        # 일부 wafer 좌표 해결 실패만 warn (cell 수가 줄어든 사유).
+        # ReasonBar — paste-time baseline (`_delta_warnings`) 은 _on_visualize
+        # 시작 시 이미 복원됨. 여기선 일부 wafer 좌표 해결 실패만 추가 warn
+        # (cell 수가 줄어든 사유). baseline 덮어쓰지 않고 합쳐서 표시.
         if skipped_labels:
-            self._reason_bar.set_message(
-                f"⚠ 좌표 해결 실패 wafer {len(skipped_labels)}개",
-                severity="warn",
-            )
-        else:
-            self._reason_bar.set_message("", severity="info")
+            from core.input_validation import ValidationWarning
+            extra = list(self._delta_warnings) + [
+                ValidationWarning(
+                    code="single_skipped_wafers", severity="warn",
+                    message=f"좌표 해결 실패 wafer {len(skipped_labels)}개",
+                )
+            ]
+            self._reason_bar.set_warnings(extra)
+        # else: baseline 그대로 유지 (_on_visualize 에서 set 됨)
         self._connect_cell_er_signals()
 
     def _visualize_delta(
@@ -1437,9 +1448,12 @@ class MainWindow(QMainWindow):
         """
         if not wafer.recipe:
             return
-        # PARA 조합 합성 키 (`X + X_A` 형식) 는 라이브러리 저장 의미 X — skip
-        if " + " in x_name or " + " in y_name or " + " in v_name:
-            return
+        # PARA 조합 합성 키 (sum: `X + Y`, concat: `X ∪ X_A`) 는 라이브러리 저장
+        # 의미 X — skip. v0.4.0 의 ` ∪ ` 표기 도입으로 concat 도 필터 (사용자 정책
+        # 2026-04-30, 회귀 fix).
+        for n in (x_name, y_name, v_name):
+            if " + " in n or " ∪ " in n:
+                return
         if x_name not in wafer.parameters or y_name not in wafer.parameters:
             return
         if v_name not in wafer.parameters:
