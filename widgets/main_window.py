@@ -522,7 +522,11 @@ class MainWindow(QMainWindow):
         self.btn_visualize.setEnabled(
             any_input and bool(available_ns) and all_valid and not delta_blocking
         )
-        self.btn_load_preset.setEnabled(any_input)
+        # 프리셋 수동 불러오기 — single 모드 전용. DELTA 모드는 자동 fallback
+        # 매트릭스 (`_resolve_delta_coords`: 옆집 빌리기 + RECIPE 라이브러리) 가
+        # 좌표 결정 담당 → 수동 override 불필요 (사용자 정책 2026-04-30).
+        is_delta = bool(self._result_a and self._result_b)
+        self.btn_load_preset.setEnabled(any_input and not is_delta)
         # PARA 조합 — 입력 + Run 활성 시점 (paste valid + delta 검증 통과) 에 활성
         self.btn_para_combine.setEnabled(
             any_input and bool(available_ns) and all_valid and not delta_blocking
