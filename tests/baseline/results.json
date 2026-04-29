@@ -132,48 +132,23 @@
     "after_paste_run_enabled": true
   },
   "s_family_multi_recipe": {
-    "reason_bar_text": "✓",
-    "reason_bar_severity": "ok",
-    "n_cells": 3,
-    "cells": [
-      {
-        "title": "LX004.01 – T1",
-        "n_points": 13,
-        "x_first": 0.0,
-        "y_first": 0.0,
-        "values_min": 656.02,
-        "values_max": 667.97,
-        "is_radial": false,
-        "is_delta": false
-      },
-      {
-        "title": "LX004.02 – T1",
-        "n_points": 13,
-        "x_first": 0.0,
-        "y_first": 0.0,
-        "values_min": 655.82,
-        "values_max": 670.25,
-        "is_radial": false,
-        "is_delta": false
-      },
-      {
-        "title": "LX004.03 – T1",
-        "n_points": 13,
-        "x_first": 0.0,
-        "y_first": 0.0,
-        "values_min": 655.99,
-        "values_max": 674.69,
-        "is_radial": false,
-        "is_delta": false
-      }
-    ],
-    "btn_run_enabled": true,
+    "reason_bar_text": "⚠ A: RECIPE 다름 — LX004.03: RECIPE_B vs 가족: RECIPE_A",
+    "reason_bar_severity": "error",
+    "n_cells": 0,
+    "cells": [],
+    "btn_run_enabled": false,
     "value_combo": "T1 [13 pt]",
     "coord_combo": "X / Y [13 pt]",
-    "delta_warnings": [],
-    "after_paste_reason_bar": "✓",
-    "after_paste_severity": "ok",
-    "after_paste_run_enabled": true
+    "delta_warnings": [
+      {
+        "code": "single_recipe_mismatch",
+        "severity": "error",
+        "message": "A: RECIPE 다름 — LX004.03: RECIPE_B vs 가족: RECIPE_A"
+      }
+    ],
+    "after_paste_reason_bar": "⚠ A: RECIPE 다름 — LX004.03: RECIPE_B vs 가족: RECIPE_A",
+    "after_paste_severity": "error",
+    "after_paste_run_enabled": false
   },
   "s_family_multi_coord_set": {
     "reason_bar_text": "✓",

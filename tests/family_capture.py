@@ -55,11 +55,18 @@ def make_main_window():
 
 
 def reset(mw):
-    """모든 입력 / 콤보 / preset / 합성 상태 초기화."""
+    """모든 입력 / 콤보 / preset / 합성 상태 + result_panel cell 초기화."""
     mw.paste_a._editor.clear()
     mw.paste_b._editor.clear()
+    # paste_area._on_text_changed 가 빈 텍스트 시 _result 를 None 으로 안 만들어서
+    # 명시적으로 강제 초기화 (이전 sample 잔재 방지)
+    mw.paste_a._result = None
+    mw.paste_b._result = None
+    mw._result_a = None
+    mw._result_b = None
     mw._reset_preset_override()
     mw._clear_combined()
+    mw._result_panel.clear()
     mw._update_delta_validation()
     mw._refresh_controls()
 

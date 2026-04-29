@@ -66,4 +66,9 @@ def validate(result: ParseResult) -> list[ValidationWarning]:
     # 케이스 4 (반복 측정) 메시지 제거 — cell 타이틀의 __rep1/__rep2 suffix 가
     # 시각적 인지 충분. 별도 알림 불필요.
 
+    # 가족 공통 좌표 정책 (Phase 2~) — 가족 내 RECIPE 단일성 검증.
+    # 다르면 single_recipe_mismatch (error, Run 차단). 사용자 정책 2026-04-30.
+    from core.family_coord import validate_family_recipe  # lazy
+    warnings.extend(validate_family_recipe(result))
+
     return warnings
