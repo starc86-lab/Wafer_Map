@@ -1063,6 +1063,7 @@ class MainWindow(QMainWindow):
         self, result: ParseResult, v: str, x: str, y: str,
     ) -> None:
         from core.interp import is_collinear  # lazy: scipy.interpolate 무거움
+        from core.family_coord import compute_family_coords, get_family_coord
         library = CoordLibrary()
         displays: list[WaferDisplay] = []
         # ReasonBar 표시용 — cell 타이틀과 동일한 `LotID.SlotNo{rep}` 포맷
@@ -1073,6 +1074,13 @@ class MainWindow(QMainWindow):
 
         override = self._preset_override
 
+        # 가족 공통 좌표 정책 (Phase 3, 사용자 정책 2026-04-30):
+        #   가족이 보유한 좌표 페어 list 를 paste 의 family_coord 모듈에서 결정.
+        #   각 wafer 의 좌표는 자기 좌표 (priority 2) → 가족 좌표 (priority 3) →
+        #   라이브러리 (priority 4) 순으로 fallback. 가족 좌표 차용은 silent.
+        family_coords = compute_family_coords(result) if coord_valid else []
+        family_pair = get_family_coord(family_coords, x, y) if coord_valid else None
+
         for w in result.wafers.values():
             # VALUE PARAMETER 가 이 wafer 에 없으면 **NaN 으로 표시** (skip 하지 않음).
             # 일부 wafer 만 특정 PARA 가 누락된 경우에도 cell 자체는 표시.
@@ -1080,14 +1088,18 @@ class MainWindow(QMainWindow):
             val = (np.asarray(w.parameters[v].values, dtype=float)
                    if has_value else None)
 
-            # 우선순위: (1) 사용자가 선택한 프리셋 override
-            #          (2) 사용자 콤보 X/Y 선택 (coord_valid 한 경우)
-            #          (3) RECIPE 기반 라이브러리 자동 조회
+            # 우선순위: (1) 사용자 명시 preset_override
+            #          (2) wafer 자체 X/Y (N == 가족 max 일 때)
+            #          (3) 가족 좌표 차용 (paste 잘림 등)
+            #          (4) RECIPE 기반 라이브러리 (가족 전체 누락 시)
+            #          (5) 모두 실패 → skip + warn
             x_mm: np.ndarray | None = None
             y_mm: np.ndarray | None = None
             from_lib = False
             from_preset = False
+            from_family = False
 
+            # priority 1
             if override is not None:
                 matched = library.find_match_by_names(override.recipe, x, y)
                 if matched is not None:
@@ -1095,12 +1107,27 @@ class MainWindow(QMainWindow):
                     y_mm = np.asarray(matched.y_mm, dtype=float)
                     library.touch(matched, save=False)
                     from_preset = True
-            if x_mm is None and coord_valid and x in w.parameters and y in w.parameters:
-                xr, _ = normalize_to_mm(w.parameters[x].values)
-                yr, _ = normalize_to_mm(w.parameters[y].values)
-                if len(xr) > 0 and len(yr) > 0:
+
+            # priority 2 — wafer 자체 X/Y. 단 N 이 가족 max 보다 작으면 가족 좌표
+            # 차용 우선 (paste 잘림 시 짧은 좌표 사용 회피).
+            if (x_mm is None and coord_valid
+                    and x in w.parameters and y in w.parameters):
+                xr_raw = np.asarray(w.parameters[x].values, dtype=float)
+                yr_raw = np.asarray(w.parameters[y].values, dtype=float)
+                wn = min(len(xr_raw), len(yr_raw))
+                family_n = family_pair.n if family_pair is not None else wn
+                if wn >= family_n and wn > 0:
+                    xr, _ = normalize_to_mm(xr_raw)
+                    yr, _ = normalize_to_mm(yr_raw)
                     x_mm, y_mm = xr, yr
 
+            # priority 3 — 가족 좌표 차용 (가족 페어 결정됨)
+            if x_mm is None and family_pair is not None:
+                x_mm = family_pair.x_mm
+                y_mm = family_pair.y_mm
+                from_family = True
+
+            # priority 4 — 라이브러리 (가족 전체 페어 누락 시만 — family_pair=None)
             if x_mm is None and w.recipe:
                 # val 없으면 n_points 제한 없이 library 조회 (fallback)
                 n_points_arg = int(len(val)) if val is not None else None
@@ -1130,8 +1157,9 @@ class MainWindow(QMainWindow):
             x_mm, y_mm = x_mm[:n], y_mm[:n]
             val_n = val[:n] if val is not None else np.full(n, np.nan, dtype=float)
 
-            # 좌표 저장은 VALUE 가 있고 실제 사용자 조합일 때만
-            if has_value and not (from_preset or from_lib):
+            # 좌표 저장은 VALUE 가 있고 wafer 자체 좌표일 때만 (가족 차용 / preset /
+            # 라이브러리 경유 좌표는 round-trip 저장 안 함).
+            if has_value and not (from_preset or from_lib or from_family):
                 self._save_used_pair_to_library(library, w, v, x, y)
 
             rep = _rep_suffix(w.wafer_id)

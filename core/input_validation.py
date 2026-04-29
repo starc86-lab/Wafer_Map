@@ -68,7 +68,15 @@ def validate(result: ParseResult) -> list[ValidationWarning]:
 
     # 가족 공통 좌표 정책 (Phase 2~) — 가족 내 RECIPE 단일성 검증.
     # 다르면 single_recipe_mismatch (error, Run 차단). 사용자 정책 2026-04-30.
-    from core.family_coord import validate_family_recipe  # lazy
-    warnings.extend(validate_family_recipe(result))
+    from core.family_coord import (
+        validate_family_recipe, compute_family_coords, validate_family_partial,
+    )  # lazy
+    recipe_warnings = validate_family_recipe(result)
+    warnings.extend(recipe_warnings)
+
+    # RECIPE 단일성 위반 시 가족 좌표 결정 무의미 (가족 자체 구성 의심) — 부분 검증 skip.
+    if not recipe_warnings:
+        family_coords = compute_family_coords(result)
+        warnings.extend(validate_family_partial(result, family_coords))
 
     return warnings
