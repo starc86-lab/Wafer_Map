@@ -384,12 +384,7 @@ class _ColorBar(QWidget):
         self._has_data = True
         # 텍스트 최대 폭 실측 후 widget 폭 동적 조정 — 자릿수 많아지면 왼쪽으로
         # 확장. parent (chart_box) 기준 오른쪽 정렬은 _reposition 이 처리.
-        import math as _math
-        tick_step = (self._vmax - self._vmin) / (self._N_TICKS - 1)
-        if tick_step > 0:
-            decimals = max(0, -int(_math.floor(_math.log10(tick_step))))
-        else:
-            decimals = 2
+        decimals = _dynamic_decimals(self._vmin, self._vmax, self._N_TICKS)
         fmt = f"{{:.{decimals}f}}"
         font = QFont("Arial")
         font.setPixelSize(12)
@@ -452,10 +447,9 @@ class _ColorBar(QWidget):
             p.drawRect(bar_rect)
             # tick 라벨 (5개, top=max) — bar 좌측에 우측 정렬
             # tick 간격(range / (N-1))에 맞춰 decimals 동적 결정 —
-            # 예: range 0.02 → tick_step 0.005 → 3 decimals, range 20 → 5 → 0
-            import math
-            tick_step = (self._vmax - self._vmin) / (self._N_TICKS - 1)
-            decimals = max(0, -int(math.floor(math.log10(tick_step))))
+            # 예: range 0.02 → tick_step 0.005 → 3 decimals, range 20 → 5 → 0.
+            # 절대 cap 4 (`_dynamic_decimals`) — 무한정 길어지는 출력 방지.
+            decimals = _dynamic_decimals(self._vmin, self._vmax, self._N_TICKS)
             fmt = f"{{:.{decimals}f}}"
             # 폰트 12px 하드코딩 — font_scale 무관 (컬러바 폭 고정이라 큰 폰트 시 숫자 잘림 방지)
             font = QFont("Arial")
@@ -514,6 +508,26 @@ def _fmt(v, decimals: int) -> str:
     if v is None or (isinstance(v, float) and np.isnan(v)):
         return "—"
     return f"{v:.{decimals}f}"
+
+
+def _dynamic_decimals(vmin: float, vmax: float, n_ticks: int = 5) -> int:
+    """tick 간격 기반 소수점 자릿수 — 범위에 맞춰 ticks 가 distinct 하도록.
+
+    `tick_step = (vmax-vmin)/(n_ticks-1)` 의 log10 으로 자릿수 결정. 큰 범위 →
+    0 자리, 좁은 범위 → 더 많이. GOF / K / N / 1.xx 같은 작은 스케일도 자동
+    적정 자리수.
+
+    절대 cap 4 — 매우 narrow range (range < 4e-4) 에서 ticks 가 같아 보이는
+    한이 있어도 "무한정 길어지는" 출력 방지 (사용자 정책 2026-04-30).
+    """
+    import math as _math
+    if vmax <= vmin:
+        return 0
+    tick_step = (vmax - vmin) / max(n_ticks - 1, 1)
+    if tick_step <= 0:
+        return 2
+    needed = max(0, -int(_math.floor(_math.log10(tick_step))))
+    return min(needed, 4)
 
 
 class _SummaryTableDelegate(QStyledItemDelegate):
@@ -1578,14 +1592,11 @@ class WaferCell(QFrame):
 
         # Y 축 주눈금 — min / midpoint / max 3개 고정. 개별/공통 모드 모두 동일 로직
         # (y_min, y_max 가 이미 모드에 맞게 계산됨).
-        # 소수점 자릿수는 colorbar 와 동일 기준: tick_step=(vmax-vmin)/4 의 log10.
-        import math
+        # 소수점 자릿수는 colorbar 와 동일 기준 (`_dynamic_decimals`): 5 ticks 기준
+        # tick_step 의 log10 + 절대 cap 4. (1D 축은 3 ticks 표시지만 colorbar 와
+        # 자릿수 일관 유지하기 위해 colorbar 의 z_range 와 5 ticks 가정으로 계산.)
         cbar_range = self._display.z_range if self._display.z_range is not None else (y_min, y_max)
-        cbar_step = (cbar_range[1] - cbar_range[0]) / 4.0
-        if cbar_step > 0:
-            decimals = max(0, -int(math.floor(math.log10(cbar_step))))
-        else:
-            decimals = 2
+        decimals = _dynamic_decimals(cbar_range[0], cbar_range[1], 5)
         fmt = f"{{:.{decimals}f}}"
         mid = (y_min + y_max) / 2.0
         y_ticks_maj = [
