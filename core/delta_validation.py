@@ -56,6 +56,22 @@ def _has_coord_paras(result: ParseResult) -> bool:
     return bool(x_ord)
 
 
+def _wafer_has_xy(wafer) -> bool:
+    """단일 wafer 에 X/Y 페어가 페어로 있는지 — `select_xy_pairs` 동일 룰 사용.
+
+    paste 시점 부분 누락 검출용 — 사용자가 선택한 정확한 X/Y 이름을 모르므로
+    generic 'X/Y 페어 PARA 가 wafer 자체에 있는지' 만 판정.
+    """
+    ns: dict[str, int] = {n: rec.n for n, rec in wafer.parameters.items()}
+    if not ns:
+        return False
+    auto = load_settings().get("auto_select", {})
+    xpat = auto.get("x_patterns", ["X", "X*"])
+    ypat = auto.get("y_patterns", ["Y", "Y*"])
+    _, _, x_ord, _ = select_xy_pairs(ns, xpat, ypat)
+    return bool(x_ord)
+
+
 def _first_recipe(result: ParseResult) -> str:
     """ParseResult 의 첫 wafer 의 recipe — 라이브러리 조회용 대표값."""
     for w in result.wafers.values():
@@ -152,6 +168,25 @@ def validate_delta(
                     code="delta_coord_unresolved", severity="error",
                     message="A, B 좌표 없음",
                 ))
+
+    # delta_partial_coord — A 또는 B 의 일부 wafer 만 좌표 PARA 누락 (사용자 정책
+    # 2026-04-30). _resolve_delta_coords 가 all-or-nothing per side 로 동작 →
+    # 부분 누락 시 silently 다른 fallback 매트릭스 branch 따라가서 사용자 데이터
+    # 의도와 다를 수 있음 (자기 좌표 있는 wafer 까지 옆집 좌표로 덮임).
+    if common:
+        total = len(common)
+        a_miss = [wid for wid in common if not _wafer_has_xy(a.wafers[wid])]
+        b_miss = [wid for wid in common if not _wafer_has_xy(b.wafers[wid])]
+        if 0 < len(a_miss) < total:
+            warnings.append(ValidationWarning(
+                code="delta_a_partial_coord", severity="warn",
+                message=f"A 일부 wafer 좌표 누락 ({len(a_miss)}/{total})",
+            ))
+        if 0 < len(b_miss) < total:
+            warnings.append(ValidationWarning(
+                code="delta_b_partial_coord", severity="warn",
+                message=f"B 일부 wafer 좌표 누락 ({len(b_miss)}/{total})",
+            ))
 
     # delta_no_common_value_para — A∩B VALUE PARA = ∅
     # 좌표 PARA (X/Y) 는 제외하고 비교. 한쪽만 가진 PARA 도 union 으로 콤보에
