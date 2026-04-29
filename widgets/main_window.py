@@ -913,6 +913,12 @@ class MainWindow(QMainWindow):
             self._show_blocking_reason("no_input", "error", "입력 없음")
             return
 
+        # ReasonBar baseline 복원 — 이전 Run 의 set_message (예: "측정점 개수 불일치")
+        # stale 잔재 제거. 이후 _visualize_single/_delta 또는 _warn_n_mismatch_once
+        # 가 필요 시 덮어씀 (사용자 정책 2026-04-30: DELTA 모드에서 콤보 수정 후
+        # n 불일치 경고 안 사라지던 버그 fix).
+        self._reason_bar.set_warnings(self._delta_warnings)
+
         # PARA 조합 모드 — sentinel 감지 시 state 에서 item 조회. 친화 키는 Apply
         # 시점에 wafer.parameters 에 등록되어 있음 (재 inject 불필요).
         v_data = self.cb_value.currentData()
