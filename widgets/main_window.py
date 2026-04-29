@@ -1182,8 +1182,18 @@ class MainWindow(QMainWindow):
         if coord_valid:
             for result in (a, b):
                 for w in result.wafers.values():
-                    self._save_used_pair_to_library(library, w, v, x, y)
+                    # wafer 자체에 X/Y 가 있는 경우만 저장 — 자동 fallback (옆집/
+                    # 라이브러리) 좌표 round-trip 방지 (single 동작과 일치, 사용자
+                    # 정책 2026-04-30). 이전엔 _save_used_pair_to_library 의 내부
+                    # 가드만 의존했으나 명시적 분기로 의도 명확.
+                    if x in w.parameters and y in w.parameters:
+                        self._save_used_pair_to_library(library, w, v, x, y)
             self._enforce_library_limits(library)
+
+        # 부분 좌표 누락 탐지 — _resolve_delta_coords 는 all-or-nothing per side
+        # 로 동작 → 일부 wafer 만 X/Y 누락 시 silently 다른 fallback branch 따라감.
+        # 사용자에게 알리기 위해 별도 warning 수집 (사용자 정책 2026-04-30).
+        partial_warns = self._detect_partial_coord_absence(a, b, x, y) if coord_valid else []
 
         # 좌표 결정 (사용자 정책 2026-04-27, A 기준):
         #   A 전체 좌표 있음 → A 좌표 사용 (wafer 별)
@@ -1248,8 +1258,12 @@ class MainWindow(QMainWindow):
         view_mode = self.cb_view.currentText() or "2D"
         self._apply_z_scale_mode(displays, view_mode)
         self._result_panel.set_displays(displays, v, view_mode=view_mode)
-        # ReasonBar 는 paste 시점 delta_validation 결과 (`_delta_warnings`) 그대로 유지.
-        # RECIPE 불일치는 별도 메시지로 덧붙이지 않음 (paste 시점 메시지 보존 우선).
+        # ReasonBar — baseline (`_delta_warnings`) 은 _on_visualize 시작 시 복원됨.
+        # 여기선 부분 좌표 누락 warn 만 추가 (있으면). RECIPE mismatch 등 baseline
+        # 메시지는 보존.
+        if partial_warns:
+            extra = list(self._delta_warnings) + partial_warns
+            self._reason_bar.set_warnings(extra)
         self._connect_cell_er_signals()
 
     def _connect_cell_er_signals(self) -> None:
@@ -1339,6 +1353,41 @@ class MainWindow(QMainWindow):
             return ""
         first = next(iter(result.wafers.values()))
         return first.recipe or ""
+
+    def _detect_partial_coord_absence(
+        self, a: ParseResult, b: ParseResult, x_name: str, y_name: str,
+    ) -> list:
+        """A or B 의 일부 wafer 만 X/Y 좌표 누락된 케이스 탐지.
+
+        `_resolve_delta_coords` 는 all-or-nothing per side 로 동작 (`a_has =
+        all(...)`) — 일부만 누락 시 silently 다른 fallback branch 로 처리되어
+        사용자에게 surface 안 됨. 여기서 partial 케이스를 별도 detect 해 reason
+        bar 에 warn 으로 표시 (사용자 정책 2026-04-30).
+        """
+        from core.input_validation import ValidationWarning
+
+        common = sorted(set(a.wafers) & set(b.wafers))
+        if not common:
+            return []
+        total = len(common)
+
+        def _has_xy(w) -> bool:
+            return x_name in w.parameters and y_name in w.parameters
+
+        a_miss = [wid for wid in common if not _has_xy(a.wafers[wid])]
+        b_miss = [wid for wid in common if not _has_xy(b.wafers[wid])]
+        warns: list = []
+        if 0 < len(a_miss) < total:
+            warns.append(ValidationWarning(
+                code="delta_a_partial_coord", severity="warn",
+                message=f"A 일부 wafer 좌표 누락 ({len(a_miss)}/{total})",
+            ))
+        if 0 < len(b_miss) < total:
+            warns.append(ValidationWarning(
+                code="delta_b_partial_coord", severity="warn",
+                message=f"B 일부 wafer 좌표 누락 ({len(b_miss)}/{total})",
+            ))
+        return warns
 
     def _resolve_delta_coords(
         self,
