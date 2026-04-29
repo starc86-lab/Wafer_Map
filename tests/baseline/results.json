@@ -285,8 +285,8 @@
     "after_paste_run_enabled": true
   },
   "d_partial": {
-    "reason_bar_text": "⚠ A: LX11A.03 좌표 누락: X/Y, ⚠ A 일부 wafer 좌표 누락 (1/3)",
-    "reason_bar_severity": "warn",
+    "reason_bar_text": "⚠ A: LX11A.03 좌표 누락: X/Y",
+    "reason_bar_severity": "info",
     "n_cells": 3,
     "cells": [
       {
@@ -328,15 +328,10 @@
         "code": "family_coord_missing",
         "severity": "info",
         "message": "A: LX11A.03 좌표 누락: X/Y"
-      },
-      {
-        "code": "delta_a_partial_coord",
-        "severity": "warn",
-        "message": "A 일부 wafer 좌표 누락 (1/3)"
       }
     ],
-    "after_paste_reason_bar": "⚠ A: LX11A.03 좌표 누락: X/Y, ⚠ A 일부 wafer 좌표 누락 (1/3)",
-    "after_paste_severity": "warn",
+    "after_paste_reason_bar": "⚠ A: LX11A.03 좌표 누락: X/Y",
+    "after_paste_severity": "info",
     "after_paste_run_enabled": true
   },
   "d_recipe_diff": {

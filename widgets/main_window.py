@@ -522,11 +522,9 @@ class MainWindow(QMainWindow):
         self.btn_visualize.setEnabled(
             any_input and bool(available_ns) and all_valid and not delta_blocking
         )
-        # 프리셋 수동 불러오기 — single 모드 전용. DELTA 모드는 자동 fallback
-        # 매트릭스 (`_resolve_delta_coords`: 옆집 빌리기 + RECIPE 라이브러리) 가
-        # 좌표 결정 담당 → 수동 override 불필요 (사용자 정책 2026-04-30).
-        is_delta = bool(self._result_a and self._result_b)
-        self.btn_load_preset.setEnabled(any_input and not is_delta)
+        # 프리셋 수동 불러오기 — single + DELTA 모두 활성 (사용자 정책 2026-04-30,
+        # 가족 좌표 정책 도입 후 DELTA 도 양 가족 공통 적용 가능).
+        self.btn_load_preset.setEnabled(any_input)
         # PARA 조합 — 입력 + Run 활성 시점 (paste valid + delta 검증 통과) 에 활성
         self.btn_para_combine.setEnabled(
             any_input and bool(available_ns) and all_valid and not delta_blocking
@@ -1383,38 +1381,47 @@ class MainWindow(QMainWindow):
         library: CoordLibrary,
     ) -> dict[str, tuple[tuple[np.ndarray, np.ndarray],
                           tuple[np.ndarray, np.ndarray]]] | None:
-        """DELTA 모드 wafer 별 좌표 결정 (사용자 정책 2026-04-27, Step 2).
+        """DELTA 모드 wafer 별 좌표 결정 (가족 좌표 정책, 사용자 정책 2026-04-30).
 
-        매트릭스 — "옆집 빌리기 (RECIPE 호환 시) + 도서관 fallback":
-
-        | A 좌표 | B 좌표 | RECIPE 호환 | 처리                                          |
-        |--------|--------|-------------|-----------------------------------------------|
-        | 있음   | 있음   | (any)       | A·B 각자 (compute_delta 합집합 매칭)          |
-        | 있음   | 없음   | 호환        | B 가 A 좌표 빌림 (양쪽 동일)                  |
-        | 있음   | 없음   | 호환 X      | B 라이브러리 → 매칭 ✓ 합집합 / 매칭 X 비활성  |
-        | 없음   | 있음   | 호환        | A 가 B 좌표 빌림                              |
-        | 없음   | 있음   | 호환 X      | A 라이브러리 → 매칭 ✓ 합집합 / 매칭 X 비활성  |
-        | 없음   | 없음   | 호환        | A 라이브러리 양쪽 → 없으면 B 라이브러리 양쪽  |
-        | 없음   | 없음   | 호환 X      | 양쪽 모두 라이브러리 필요. 한쪽 X → 비활성    |
-
-        RECIPE 호환 = `core.delta_validation._recipes_compatible` (정확 일치 +
-        _PRE/_POST suffix 제외 후 베이스 같음, 양방향).
+        흐름:
+          1. 양 가족 좌표 (`compute_family_coords` 의 (x_name, y_name) 페어) 결정.
+          2. 가족 페어 없음 (전체 좌표 누락) → 옆집 borrow (RECIPE 호환 시) →
+             라이브러리 lookup → 모두 fail 시 None.
+          3. per-wafer:
+             - wafer 자체 X/Y 보유 + N >= 가족 max → 자기 좌표
+             - 그 외 (paste 잘림 등) → 가족 좌표 차용 (silent)
 
         Returns:
             {wafer_id: ((xa, ya), (xb, yb))}, 또는 None (좌표 결정 실패 → Run 비활성).
         """
         from core.coords import normalize_to_mm  # lazy
-        from core.delta_validation import _recipes_compatible  # lazy
+        from core.family_coord import compute_family_coords, get_family_coord
+        from core.recipe_util import recipes_compatible
+
         common = sorted(set(a.wafers) & set(b.wafers))
         if not common:
             return {}
 
-        def _wafer_coord(w):
-            if x_name in w.parameters and y_name in w.parameters:
-                xa, _ = normalize_to_mm(w.parameters[x_name].values)
-                ya, _ = normalize_to_mm(w.parameters[y_name].values)
-                return xa, ya
-            return None
+        # preset_override 우선 처리 — 양 가족 모두 동일 좌표 적용 (사용자 정책 2026-04-30)
+        if self._preset_override is not None:
+            matched = library.find_match_by_names(
+                self._preset_override.recipe, x_name, y_name,
+            )
+            if matched is not None:
+                xy = (np.asarray(matched.x_mm, dtype=float),
+                      np.asarray(matched.y_mm, dtype=float))
+                library.touch(matched, save=False)
+                return {wid: (xy, xy) for wid in common}
+
+        # 1. 양 가족 좌표 (paste 시점 결정 가능 — 매번 재계산해도 cheap)
+        fam_a = compute_family_coords(a)
+        fam_b = compute_family_coords(b)
+        fc_a = get_family_coord(fam_a, x_name, y_name)
+        fc_b = get_family_coord(fam_b, x_name, y_name)
+
+        recipe_a = self._dominant_recipe(a)
+        recipe_b = self._dominant_recipe(b)
+        can_borrow = recipes_compatible(recipe_a, recipe_b)
 
         def _lib_coord(recipe):
             if not recipe:
@@ -1425,53 +1432,56 @@ class MainWindow(QMainWindow):
             return (np.asarray(hits[0].x_mm, dtype=float),
                     np.asarray(hits[0].y_mm, dtype=float))
 
-        a_coords = {wid: _wafer_coord(a.wafers[wid]) for wid in common}
-        b_coords = {wid: _wafer_coord(b.wafers[wid]) for wid in common}
-        a_has = all(c is not None for c in a_coords.values())
-        b_has = all(c is not None for c in b_coords.values())
+        # 2. 가족 좌표 fallback chain — 옆집 borrow → 라이브러리.
+        a_family = (fc_a.x_mm, fc_a.y_mm) if fc_a is not None else None
+        b_family = (fc_b.x_mm, fc_b.y_mm) if fc_b is not None else None
 
-        recipe_a = self._dominant_recipe(a)
-        recipe_b = self._dominant_recipe(b)
-        can_borrow = _recipes_compatible(recipe_a, recipe_b)
+        if a_family is None:
+            if can_borrow and b_family is not None:
+                a_family = b_family
+            else:
+                a_family = _lib_coord(recipe_a)
 
-        # 케이스 1: 양쪽 좌표 있음 → 각자 (합집합 매칭)
-        if a_has and b_has:
-            return {wid: (a_coords[wid], b_coords[wid]) for wid in common}
+        if b_family is None:
+            if can_borrow and fc_a is not None:
+                b_family = (fc_a.x_mm, fc_a.y_mm)
+            else:
+                b_family = _lib_coord(recipe_b)
 
-        # 케이스 2: A 만 좌표 있음
-        if a_has:
-            if can_borrow:
-                # B 가 A 좌표 빌림 (옆집)
-                return {wid: (a_coords[wid], a_coords[wid]) for wid in common}
-            # 호환 X → B 라이브러리 탐색
-            lib_b = _lib_coord(recipe_b)
-            if lib_b is None:
-                return None
-            return {wid: (a_coords[wid], lib_b) for wid in common}
-
-        # 케이스 3: B 만 좌표 있음 (대칭)
-        if b_has:
-            if can_borrow:
-                return {wid: (b_coords[wid], b_coords[wid]) for wid in common}
-            lib_a = _lib_coord(recipe_a)
-            if lib_a is None:
-                return None
-            return {wid: (lib_a, b_coords[wid]) for wid in common}
-
-        # 케이스 4: 양쪽 모두 누락 — 라이브러리 fallback
-        lib_a = _lib_coord(recipe_a)
-        lib_b = _lib_coord(recipe_b)
-        if can_borrow:
-            # 호환 → 한쪽 라이브러리만 있어도 양쪽에 사용 (A 우선)
-            if lib_a is not None:
-                return {wid: (lib_a, lib_a) for wid in common}
-            if lib_b is not None:
-                return {wid: (lib_b, lib_b) for wid in common}
+        if a_family is None or b_family is None:
             return None
-        # 호환 X → 양쪽 모두 라이브러리 필요
-        if lib_a is not None and lib_b is not None:
-            return {wid: (lib_a, lib_b) for wid in common}
-        return None
+
+        # 3. per-wafer — 자기 좌표 우선, 가족 좌표 fallback
+        coords: dict = {}
+        for wid in common:
+            a_xy = self._wafer_own_coord(a.wafers[wid], x_name, y_name, fc_a)
+            b_xy = self._wafer_own_coord(b.wafers[wid], x_name, y_name, fc_b)
+            coords[wid] = (
+                a_xy if a_xy is not None else a_family,
+                b_xy if b_xy is not None else b_family,
+            )
+        return coords
+
+    def _wafer_own_coord(
+        self, wafer, x_name: str, y_name: str, family_pair,
+    ):
+        """wafer 자체 X/Y 좌표 — N >= 가족 max 일 때만 (paste 잘림 회피).
+
+        Returns: (x_mm, y_mm) tuple 또는 None.
+        """
+        if x_name not in wafer.parameters or y_name not in wafer.parameters:
+            return None
+        xs = np.asarray(wafer.parameters[x_name].values, dtype=float)
+        ys = np.asarray(wafer.parameters[y_name].values, dtype=float)
+        wn = min(len(xs), len(ys))
+        if wn == 0:
+            return None
+        family_n = family_pair.n if family_pair is not None else wn
+        if wn < family_n:
+            return None
+        x_mm, _ = normalize_to_mm(xs[:wn])
+        y_mm, _ = normalize_to_mm(ys[:wn])
+        return (x_mm, y_mm)
 
     def _save_used_pair_to_library(
         self, library: CoordLibrary, wafer, v_name: str, x_name: str, y_name: str,
