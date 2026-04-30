@@ -222,11 +222,19 @@ class PresetEditDialog(QDialog):
 
         # cell 편집 시 맵 즉시 refresh
         self._table.itemChanged.connect(self._on_item_changed)
+        # RECIPE editingFinished — 사용자 입력 commit 시점에 history push
+        self._recipe.editingFinished.connect(self._push_state)
 
         lay.addWidget(self._plot, 2, 0)
         lay.addWidget(self._table, 2, 1)
 
-        # ── row 3: 빈 (좌) | Save/Cancel (우) ─────────
+        # ── row 3: Undo (좌) | Save/Cancel (우) ─────────
+        # Undo: 무제한 stack — 매 변경마다 snapshot push, pop 으로 단계별 복원.
+        # 초기 상태에 도달하면 자동 disabled (사용자 정책 2026-04-30).
+        self.btn_undo = QPushButton("Undo")
+        self.btn_undo.setShortcut("Ctrl+Z")
+        self.btn_undo.clicked.connect(self._on_undo)
+
         btn_row = QHBoxLayout()
         btn_row.addStretch(1)
         btns = QDialogButtonBox(
@@ -239,7 +247,13 @@ class PresetEditDialog(QDialog):
         btns.rejected.connect(self.reject)
         btn_row.addWidget(btns)
 
-        lay.addWidget(QWidget(), 3, 0)
+        undo_row = QHBoxLayout()
+        undo_row.addWidget(self.btn_undo)
+        undo_row.addStretch(1)
+        undo_w = QWidget()
+        undo_w.setLayout(undo_row)
+        lay.addWidget(undo_w, 3, 0)
+
         btn_w = QWidget()
         btn_w.setLayout(btn_row)
         lay.addWidget(btn_w, 3, 1)
@@ -252,6 +266,11 @@ class PresetEditDialog(QDialog):
         lay.setColumnStretch(1, 0)
 
         self._result_recipe: str | None = None
+
+        # Undo history — 초기 상태 push. 매 cell/recipe 변경 시 push, Undo 시 pop.
+        # stack 크기 제한 없음 (좌표 데이터 작아 메모리 부담 X).
+        self._history: list[tuple[str, np.ndarray, np.ndarray]] = []
+        self._push_state()
         self.adjustSize()
 
     # ── slots ──────────────────────────────────
@@ -260,7 +279,7 @@ class PresetEditDialog(QDialog):
             it.setVisible(bool(checked))
 
     def _on_item_changed(self, item: QTableWidgetItem) -> None:
-        """X/Y cell 편집 → 내부 array 갱신 + 산점도/번호 텍스트 위치 갱신."""
+        """X/Y cell 편집 → 내부 array 갱신 + 산점도/번호 텍스트 위치 갱신 + history push."""
         col = item.column()
         if col not in (1, 2):
             return
@@ -268,7 +287,7 @@ class PresetEditDialog(QDialog):
         try:
             val = float(item.text())
         except ValueError:
-            # 잘못된 입력 — 원래 값으로 되돌림
+            # 잘못된 입력 — 원래 값으로 되돌림. push 안 함.
             self._table.blockSignals(True)
             try:
                 old = self._x[row] if col == 1 else self._y[row]
@@ -284,6 +303,57 @@ class PresetEditDialog(QDialog):
         self._scatter.setData(self._x, self._y)
         if 0 <= row < len(self._num_items):
             self._num_items[row].setPos(float(self._x[row]), float(self._y[row]))
+        self._push_state()
+
+    def _push_state(self) -> None:
+        """현재 (recipe, x, y) snapshot 을 history 에 push. 직전과 동일하면 skip."""
+        cur = (
+            self._recipe.text().strip(),
+            self._x.copy(),
+            self._y.copy(),
+        )
+        if self._history:
+            last = self._history[-1]
+            if (last[0] == cur[0]
+                    and np.array_equal(last[1], cur[1])
+                    and np.array_equal(last[2], cur[2])):
+                return
+        self._history.append(cur)
+        self._update_undo_button()
+
+    def _update_undo_button(self) -> None:
+        """초기 상태만 남으면 (len==1) Undo 비활성."""
+        self.btn_undo.setEnabled(len(self._history) > 1)
+
+    def _on_undo(self) -> None:
+        """history pop → stack[-1] 상태로 UI 복원. signal block 으로 push 재트리거 차단."""
+        if len(self._history) <= 1:
+            return
+        self._history.pop()
+        recipe, x, y = self._history[-1]
+        self._x = x.copy()
+        self._y = y.copy()
+        # UI 복원 — itemChanged / editingFinished 차단해서 push 재발 방지
+        self._table.blockSignals(True)
+        self._recipe.blockSignals(True)
+        try:
+            self._recipe.setText(recipe)
+            for i in range(len(self._x)):
+                xi = self._table.item(i, 1)
+                yi = self._table.item(i, 2)
+                if xi is not None:
+                    xi.setText(f"{float(self._x[i]):.3f}")
+                if yi is not None:
+                    yi.setText(f"{float(self._y[i]):.3f}")
+        finally:
+            self._table.blockSignals(False)
+            self._recipe.blockSignals(False)
+        # 맵 갱신
+        self._scatter.setData(self._x, self._y)
+        for i, txt in enumerate(self._num_items):
+            if i < len(self._x):
+                txt.setPos(float(self._x[i]), float(self._y[i]))
+        self._update_undo_button()
 
     def _on_ok(self) -> None:
         recipe = self._recipe.text().strip()
