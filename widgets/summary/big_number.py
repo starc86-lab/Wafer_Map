@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget,
 )
 
-from widgets.summary.base import SummaryWidget, format_metrics
+from widgets.summary.base import SummaryWidget, font_px, format_metrics
 
 
 def _spaced(s: str) -> str:
@@ -35,6 +35,10 @@ class SummaryBigNumber(SummaryWidget):
 
         self._labels: list[QLabel] = []
         self._values: list[QLabel] = []
+        # 사용자 정책 2026-04-30 — 라벨 진하게 (#6c757d), 값 큰 폰트 (value_xl).
+        # font_px 로 font_scale 자동 반영.
+        lbl_px = font_px("label_xs")
+        val_px = font_px("value_xl")
         for i, h in enumerate(self.HEADERS):
             col = QVBoxLayout()
             col.setContentsMargins(0, 1, 0, 1)
@@ -42,25 +46,31 @@ class SummaryBigNumber(SummaryWidget):
             lbl = QLabel(_spaced(h))
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl.setStyleSheet(
-                "QLabel { color: #adb5bd; font-size: 8px; font-weight: bold;"
-                " background-color: transparent; }"
+                f"QLabel {{ color: #6c757d; font-size: {lbl_px}px;"
+                " font-weight: bold; background-color: transparent; }}"
             )
             val = QLabel("—")
             val.setAlignment(Qt.AlignmentFlag.AlignCenter)
             val.setStyleSheet(
-                "QLabel { color: #111111; font-size: 16px; font-weight: bold;"
-                " background-color: transparent; }"
+                f"QLabel {{ color: #111111; font-size: {val_px}px;"
+                " font-weight: bold; background-color: transparent; }}"
             )
             col.addWidget(lbl)
             col.addWidget(val)
             outer.addLayout(col, stretch=1)
             self._labels.append(lbl)
             self._values.append(val)
-            # 세퍼레이터 (마지막 컬럼 제외)
+            # 세퍼레이터 — Plain shadow 로 single line (VLine 의 default Sunken
+            # 은 이중선 효과 발생, 사용자 정책 2026-04-30 fix).
             if i < len(self.HEADERS) - 1:
                 sep = QFrame()
                 sep.setFrameShape(QFrame.Shape.VLine)
-                sep.setStyleSheet("QFrame { color: #f1f3f5; }")
+                sep.setFrameShadow(QFrame.Shadow.Plain)
+                sep.setLineWidth(1)
+                sep.setStyleSheet(
+                    "QFrame { color: #dee2e6; background-color: #dee2e6; }"
+                )
+                sep.setFixedWidth(1)
                 outer.addWidget(sep)
 
     def update_metrics(self, metrics, decimals, percent_suffix=True):
