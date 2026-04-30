@@ -27,6 +27,32 @@ STYLE_DISPLAY_NAMES: dict[str, str] = {
 }
 
 
+def font_px(role: str) -> int:
+    """role 기반 폰트 크기 (px). 현재 font_scale 자동 반영.
+
+    base = FONT_SIZES['body'] (settings_dialog.apply_global_style 가 font_scale
+    적용해 영구 갱신). 모든 style 이 hardcode 대신 이 함수 호출 → 한 곳에서
+    일괄 조정 + font_scale 연동 (사용자 정책 2026-04-30).
+
+    role 카탈로그:
+      label_xs : 매우 작은 라벨 (대시보드 톤)
+      label    : 보통 라벨
+      value    : 표준 값 (ppt_basic / 일반)
+      value_lg : 강조 값
+      value_xl : 매우 큰 강조 값 (Big Number 류)
+    """
+    from core.themes import FONT_SIZES
+    base = int(FONT_SIZES.get("body", 14))
+    table = {
+        "label_xs": max(7, base - 6),
+        "label":    max(8, base - 4),
+        "value":    base,
+        "value_lg": base + 2,
+        "value_xl": base + 4,
+    }
+    return table.get(role, base)
+
+
 def fmt_value(v, decimals: int) -> str:
     """metric 값 포맷 — NaN/None → '—'."""
     if v is None or (isinstance(v, float) and np.isnan(v)):
