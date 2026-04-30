@@ -511,23 +511,32 @@ def _fmt(v, decimals: int) -> str:
 
 
 def _dynamic_decimals(vmin: float, vmax: float, n_ticks: int = 5) -> int:
-    """tick 간격 기반 소수점 자릿수 — 범위에 맞춰 ticks 가 distinct 하도록.
+    """tick 간격 기반 + Z-margin 미세변경 가시성 보장 자릿수 (cap 3).
 
-    `tick_step = (vmax-vmin)/(n_ticks-1)` 의 log10 으로 자릿수 결정. 큰 범위 →
-    0 자리, 좁은 범위 → 더 많이. GOF / K / N / 1.xx 같은 작은 스케일도 자동
-    적정 자리수.
+    두 항의 max:
+      - needed: tick distinct 보장 — `-log10(tick_step)`
+      - sensitivity: Z-margin 1% 변화가 LSD 에 보이도록 — `2 - log10(range)`
 
-    절대 cap 4 — 매우 narrow range (range < 4e-4) 에서 ticks 가 같아 보이는
-    한이 있어도 "무한정 길어지는" 출력 방지 (사용자 정책 2026-04-30).
+    cap 3 (사용자 정책 2026-04-30 갱신, 이전 4 → 3 으로 강화).
+
+    예시:
+      - thickness 663~700 (range 37) → 1 자리
+      - 작은 스케일 range 7 → 2 자리 (Z-margin 변화 보임)
+      - GOF 0.99~0.995 → 3 자리 (cap)
+      - DELTA -2~2 → 2 자리
     """
     import math as _math
     if vmax <= vmin:
         return 0
     tick_step = (vmax - vmin) / max(n_ticks - 1, 1)
-    if tick_step <= 0:
+    range_val = vmax - vmin
+    if tick_step <= 0 or range_val <= 0:
         return 2
     needed = max(0, -int(_math.floor(_math.log10(tick_step))))
-    return min(needed, 4)
+    # Z-margin 1% range 변화가 LSD 에 visible 하도록.
+    # decimals >= -log10(0.01 * range) = 2 - log10(range)
+    sensitivity = max(0, int(_math.ceil(2.0 - _math.log10(range_val))))
+    return min(max(needed, sensitivity), 3)
 
 
 class _SummaryTableDelegate(QStyledItemDelegate):
