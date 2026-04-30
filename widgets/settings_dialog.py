@@ -1178,12 +1178,24 @@ class SettingsDialog(QDialog):
 
     # ── 즉시 반영 핸들러 ────────────────────────
     def _apply_ui_runtime(self) -> None:
-        """UI 설정 변경 → 런타임 캐시 + 앱 스타일시트 재빌드."""
+        """UI 설정 변경 → 런타임 캐시 + 앱 스타일시트 재빌드.
+
+        font_scale 변경 시 — _summary 위젯의 inline stylesheet (font-size 등)
+        은 init 시점 hardcode 라 자동 갱신 안 됨. 현재 style 으로 swap 강제
+        해서 새 FONT_SIZES 반영 (사용자 정책 2026-04-30).
+        """
         merged = self._collect()
         settings_io.set_runtime(merged)
         app = QApplication.instance()
         if app is not None:
             apply_global_style(app, merged)
+        # _summary 재생성 → 새 font_scale 반영
+        main = self._main_window or self.parent()
+        if main is not None:
+            rp = getattr(main, "_result_panel", None)
+            if rp is not None and hasattr(rp, "set_table_style"):
+                cur_style = merged.get("table", {}).get("style", "ppt_basic")
+                rp.set_table_style(cur_style)
 
     def _apply_graph_runtime(self) -> None:
         """Graph(2D/3D) 설정 변경 → 런타임 캐시 + MainWindow 재렌더 (cell 재생성 없이).
