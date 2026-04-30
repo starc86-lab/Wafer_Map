@@ -373,6 +373,7 @@ DEFAULT_SETTINGS = {
     "table": {
         "decimals": 3,             # 소수점 자릿수
         "nu_percent_suffix": True, # True: "1.69%"  False: "0.0169"
+        "style": "ppt_basic",      # 표 디자인 카탈로그 키 (사용자 정책 2026-04-30)
     },
 
     # 파싱 컬럼 alias 확장 (main.DEFAULT_COLUMN_ALIASES와 merge)

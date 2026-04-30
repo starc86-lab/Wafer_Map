@@ -181,10 +181,22 @@ class UiSettingsCard(QGroupBox):
         self.chk_save_window = _fix_width(QCheckBox())
         self.chk_save_window.setChecked(bool(settings.get("window_save_enabled", True)))
 
-        # 좌측 [테마, 윈도우 크기 저장], 우측 [글꼴, 글자 크기]
+        # Summary 표 스타일 — 카탈로그 lazy enumerate. STYLES dict 등록된 항목만
+        # 노출 (phase 별 점진 추가, 사용자 정책 2026-04-30).
+        from widgets.summary import available_styles
+        self.cb_table_style = _limit_width(QComboBox())
+        for key, display in available_styles():
+            self.cb_table_style.addItem(display, key)
+        cur_style = settings.get("table", {}).get("style", "ppt_basic")
+        idx = self.cb_table_style.findData(cur_style)
+        if idx >= 0:
+            self.cb_table_style.setCurrentIndex(idx)
+
+        # 좌측 [테마, 윈도우 크기 저장, 표 스타일], 우측 [글꼴, 글자 크기]
         _populate_two_columns(self, [
             ("테마", self.cb_theme),
             ("윈도우 크기 저장", self.chk_save_window),
+            ("표 스타일", self.cb_table_style),
             ("글꼴", self.cb_font),
             ("글자 크기", self.cb_scale),
         ])
@@ -194,6 +206,7 @@ class UiSettingsCard(QGroupBox):
         self.cb_font.currentIndexChanged.connect(self.changed)
         self.cb_scale.currentIndexChanged.connect(self.changed)
         self.chk_save_window.toggled.connect(self.changed)
+        self.cb_table_style.currentIndexChanged.connect(self.changed)
 
     def gather(self) -> dict[str, Any]:
         return {
@@ -201,6 +214,7 @@ class UiSettingsCard(QGroupBox):
             "font": self.cb_font.currentData(),
             "font_scale": float(self.cb_scale.currentData()),
             "window_save_enabled": self.chk_save_window.isChecked(),
+            "table": {"style": self.cb_table_style.currentData()},
         }
 
     def reload(self, settings: dict[str, Any]) -> None:

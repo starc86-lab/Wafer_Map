@@ -20,9 +20,8 @@ from PySide6.QtOpenGL import (
     QOpenGLFramebufferObject, QOpenGLFramebufferObjectFormat,
 )
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QCheckBox, QFrame, QHBoxLayout, QHeaderView,
-    QLabel, QLineEdit, QMenu, QStackedLayout, QStyledItemDelegate, QTableWidget,
-    QTableWidgetItem, QVBoxLayout, QWidget,
+    QApplication, QCheckBox, QFrame, QHBoxLayout,
+    QLabel, QLineEdit, QMenu, QStackedLayout, QVBoxLayout, QWidget,
 )
 
 from OpenGL import GL as _GL
@@ -504,12 +503,6 @@ class WaferDisplay:
     er_time_sec: float | None = None                    # ER/RR 변환용 time (초). None/0 = 변환 안 함
 
 
-def _fmt(v, decimals: int) -> str:
-    if v is None or (isinstance(v, float) and np.isnan(v)):
-        return "—"
-    return f"{v:.{decimals}f}"
-
-
 def _dynamic_decimals(vmin: float, vmax: float, n_ticks: int = 5) -> int:
     """tick 간격 + range bucket 기반 자릿수 (cap 3).
 
@@ -544,39 +537,6 @@ def _dynamic_decimals(vmin: float, vmax: float, n_ticks: int = 5) -> int:
     else:
         bucket = 0
     return min(max(needed, bucket), 3)
-
-
-class _SummaryTableDelegate(QStyledItemDelegate):
-    """Summary 표 cell painting 전담 — QSS stylesheet 이 `QTableWidgetItem.setBackground()` 를
-    override 하는 Qt 버그 우회. row 별 bg (헤더 회색 / 값 흰색) + 1px 테두리 + 텍스트 전부
-    직접 그림.
-
-    QSS `::item { ... }` 규칙을 줄이고 delegate 가 모든 cell 시각 담당.
-    """
-    BG_HEADER = QColor("#f7f7f7")
-    BG_VALUE = QColor("#ffffff")
-    BORDER = QColor("#888888")
-    TEXT = QColor("#111111")
-
-    def paint(self, painter, option, index) -> None:
-        # 배경 — row 0 = header (회색), row 1 = value (흰색)
-        bg = self.BG_HEADER if index.row() == 0 else self.BG_VALUE
-        painter.fillRect(option.rect, bg)
-
-        # 텍스트 — 가운데 정렬
-        text = index.data(Qt.ItemDataRole.DisplayRole)
-        if text is not None:
-            font = index.data(Qt.ItemDataRole.FontRole)
-            if font is not None:
-                painter.setFont(font)
-            painter.setPen(self.TEXT)
-            painter.drawText(option.rect, Qt.AlignmentFlag.AlignCenter, str(text))
-
-        # 테두리 (1px #888) — 각 셀 right + bottom (마지막 col/row 가 외곽 경계 담당)
-        painter.setPen(QPen(self.BORDER, 1))
-        r = option.rect
-        painter.drawLine(r.right(), r.top(), r.right(), r.bottom())
-        painter.drawLine(r.left(), r.bottom(), r.right(), r.bottom())
 
 
 class WaferCell(QFrame):
@@ -837,38 +797,23 @@ class WaferCell(QFrame):
         self._radial_graph.setVisible(False)
         lay.addWidget(self._radial_graph)
 
-        self._table = QTableWidget(2, 3)
-        self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self._table.horizontalHeader().hide()
-        self._table.verticalHeader().hide()
-        self._table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.Stretch,
-        )
-        # 스크롤바 항상 OFF — 높이는 populate 후 content 기반으로 동적 계산
-        self._table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        # 테마 영향 차단 — 흰색 배경 + #111 텍스트, #888888 테두리 (1D 그래프와 통일)
-        # 원인: Qt QTableView (showGrid=True) 가 last column right / last row bottom
-        # 에 암묵적 gridline 1px 을 그리고, CSS widget border 1px 과 겹쳐 총 2px.
-        # 실측 `border_strat_1.png` 로 픽셀 확인 (right=2, 나머지=1).
-        # 해결: 내부 gridline 전부 끄고 (setShowGrid False) **item border** 로 각
-        # 셀 right/bottom 에 1px 그림. widget 은 top/left 만 담당 → 중복 제거,
-        # 4 변 모두 정확히 1px (strat_6 구조).
-        self._table.setFrameShape(QFrame.Shape.NoFrame)
-        self._table.setShowGrid(False)
-        # QSS 는 widget 외곽 border (top/left) 만. cell painting 은 delegate 가 담당
-        # (QSS 의 ::item 규칙이 프로그래매틱 setBackground 를 override 하는 문제 회피).
-        self._table.setStyleSheet(
-            "QTableWidget { background-color: white;"
-            " border-top: 1px solid #888888; border-left: 1px solid #888888;"
-            " border-right: none; border-bottom: none; }"
-        )
-        self._table.setItemDelegate(_SummaryTableDelegate(self._table))
+        # Summary 위젯 — Settings 의 table.style 에 따라 dispatch (기본
+        # ppt_basic = 기존 QTableWidget). 사용자 정책 2026-04-30, table style
+        # 카탈로그 인프라 도입.
+        from widgets.summary import build_summary
+        _table_style = settings_io.load_settings().get("table", {}).get("style", "ppt_basic")
+        self._summary = build_summary(_table_style, parent=self)
+        # 기존 코드 호환 — _table 별칭 (Copy Graph .grab(), context menu 등 유지).
+        # ppt_basic 의 _table 속성 우선, 없으면 _summary 자체.
+        self._table = getattr(self._summary, "_table", self._summary)
+        # 우클릭 메뉴 — style 의 context_menu_target 우선, 없으면 _summary 자체
+        ctx_target = (self._summary.context_menu_target()
+                      if hasattr(self._summary, "context_menu_target")
+                      else self._summary)
+        ctx_target.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        ctx_target.customContextMenuRequested.connect(self._show_table_menu)
         # Table — 폭은 _apply_chart_size 에서 cell 기준으로 설정, layout 에서 가운데 정렬
-        lay.addWidget(self._table, alignment=Qt.AlignmentFlag.AlignHCenter)
-
-        self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self._table.customContextMenuRequested.connect(self._show_table_menu)
+        lay.addWidget(self._summary, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         self._x_in = np.array([])
         self._y_in = np.array([])
@@ -966,15 +911,16 @@ class WaferCell(QFrame):
             self._radial_graph.setFixedWidth(w + bar_w)
             self._radial_graph.setFixedHeight(radial_h_px)
         radial_h = radial_h_px if show_radial else 0
-        # Table 폭 — cell 컨텐츠 폭에서 좌우 8px 씩 축소, layout 에서 가운데 정렬
-        self._table.setFixedWidth(w + bar_w - 16)
+        # Summary 위젯 폭 — cell 컨텐츠 폭에서 좌우 8px 씩 축소, layout 에서 가운데 정렬.
+        # 모든 style 이 동일 폭 수용 (사용자 정책 2026-04-30, 크기 align 보장).
+        self._summary.set_target_width(w + bar_w - 16)
         # _capture_container (QFrame, border) 만 고정 크기 — 그래프 영역 보존.
         # cell outer (self) 는 layout 이 자동 합산 (_capture_container + er_row).
         # 이전에 self.setFixedSize 로 total_h 를 계산했는데 inner layout 의 spacing 수
         # (radial 숨김 여부 등) 가 동적이라 계산이 어긋나 chart 가 잘리는 버그.
         # title_h + padding_top 은 위 title_stack 과 일관. title 위 6px 여백 포함.
         title_h = self._title.sizeHint().height()
-        table_h = self._table.height()
+        table_h = self._summary.height()
         cap_w = w + bar_w + 6 * 2              # inner margin 6+6
         cap_h = padding_top + title_h + h + radial_h + table_h + 6 * 2 + 4 * 2
         self._capture_container.setFixedSize(cap_w, cap_h)
@@ -1678,44 +1624,19 @@ class WaferCell(QFrame):
         self._colorbar.update_bar(cmap, vmin, vmax)
 
     def _update_table(self, v: np.ndarray, settings: dict) -> None:
-        # 소수점은 chart_common.decimals (사용자 요청: 공통 항목). 없으면 기존 table.decimals fallback.
+        """Summary 위젯에 metrics 위임 (사용자 정책 2026-04-30, table style 추상화).
+
+        모든 style 이 동일 입력 (metrics dict, decimals, percent_suffix) 받음.
+        update 후 cell 전체 크기 재계산 (style 따라 높이 약간 다를 수 있어 대응).
+        """
         common = settings.get("chart_common", {})
         tbl_cfg = settings.get("table", {})
         decimals = int(common.get("decimals", tbl_cfg.get("decimals", 2)))
         percent_suffix = bool(tbl_cfg.get("nu_percent_suffix", True))
         m = summary_metrics(v)
-
-        nu = m["nu_pct"]
-        if np.isnan(nu):
-            nu_s = "—"
-        elif percent_suffix:
-            nu_s = f"{nu:.{decimals}f}%"
-        else:
-            nu_s = f"{nu / 100.0:.{decimals + 2}f}"
-
-        # 3 cols × 2 rows — row 0: header, row 1: values
-        headers = ["Mean", "Range", "Non Unif."]
-        values = [
-            _fmt(m['avg'], decimals),
-            _fmt(m['range'], decimals),
-            nu_s,
-        ]
-        for c, lbl in enumerate(headers):
-            self._set_cell(0, c, lbl)
-        for c, val in enumerate(values):
-            self._set_cell(1, c, val)
-        # content 기반 높이 자동 계산 — 스크롤바 안 뜨게
-        self._table.resizeRowsToContents()
-        total_h = sum(self._table.rowHeight(r) for r in range(self._table.rowCount()))
-        frame = 2 * self._table.frameWidth()
-        self._table.setFixedHeight(total_h + frame)
-        # 테이블 높이가 바뀌었으니 cell 전체 크기도 재계산 (chart_area는 그대로, 전체 높이만)
-        self._apply_chart_size(settings.get("chart_common", {}))
-
-    def _set_cell(self, row: int, col: int, text: str) -> None:
-        item = QTableWidgetItem(text)
-        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._table.setItem(row, col, item)
+        self._summary.update_metrics(m, decimals, percent_suffix)
+        # 테이블 높이가 바뀌었으니 cell 전체 크기 재계산 (chart_area 는 그대로, 전체 높이만)
+        self._apply_chart_size(common)
 
     # ── 우클릭 메뉴 ────────────────────────────────
     def _show_plot_menu(self, pos: QPoint) -> None:
