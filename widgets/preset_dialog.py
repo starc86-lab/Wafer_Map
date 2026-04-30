@@ -1,10 +1,12 @@
 """
-좌표 프리셋 불러오기 다이얼로그.
+좌표 추가 다이얼로그 — 라이브러리에서 좌표 페어 1개+ 선택 후 가족 좌표 list 에
+추가 (사용자 정책 2026-04-30, preset_override 강제 1순위 폐지).
 
 - 필터: 현재 VALUE PARAMETER의 DATA 개수(`n_points`)가 일치하는 프리셋만
 - 개별 레코드 행 표시 (레시피 그룹 병합 없음)
 - 정렬: RECIPE 유사도 → `last_used` 최근순
-- 더블클릭 / Apply → accept
+- ExtendedSelection — 여러 행 동시 선택 후 Add
+- 더블클릭 / Add → accept (선택된 행들 모두 반환)
 """
 from __future__ import annotations
 
@@ -30,7 +32,7 @@ class PresetSelectDialog(QDialog):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("저장된 좌표 불러오기")
+        self.setWindowTitle("좌표 추가")
         self.resize(720, 500)
 
         # n_points 필터
@@ -58,7 +60,8 @@ class PresetSelectDialog(QDialog):
         )
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self._table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        # ExtendedSelection — Ctrl/Shift 로 다중 행 선택 후 Add (사용자 정책 2026-04-30)
+        self._table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self._table.setAlternatingRowColors(True)
         self._table.verticalHeader().hide()
         hdr = self._table.horizontalHeader()
@@ -101,7 +104,7 @@ class PresetSelectDialog(QDialog):
             QDialogButtonBox.StandardButton.Ok
             | QDialogButtonBox.StandardButton.Cancel,
         )
-        btns.button(QDialogButtonBox.StandardButton.Ok).setText("적용")
+        btns.button(QDialogButtonBox.StandardButton.Ok).setText("추가")
         btns.button(QDialogButtonBox.StandardButton.Cancel).setText("취소")
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
@@ -132,10 +135,11 @@ class PresetSelectDialog(QDialog):
         menu.exec(self._table.viewport().mapToGlobal(pos))
 
     def _on_preview_clicked(self) -> None:
-        """선택된 프리셋의 좌표를 별도 다이얼로그에 표시."""
-        p = self.selected_preset()
-        if p is None:
+        """선택된 첫 프리셋의 좌표를 별도 다이얼로그에 표시 (다중 선택이어도 1개 미리보기)."""
+        presets = self.selected_presets()
+        if not presets:
             return
+        p = presets[0]
         from widgets.coord_preview_dialog import CoordPreviewDialog
         dlg = CoordPreviewDialog(
             p.x_mm, p.y_mm,
@@ -144,8 +148,13 @@ class PresetSelectDialog(QDialog):
         )
         dlg.exec()
 
+    def selected_presets(self) -> list[CoordPreset]:
+        """선택된 모든 행의 preset (행 순서대로). 빈 리스트 = 선택 없음."""
+        rows = sorted({i.row() for i in self._table.selectedIndexes()})
+        return [self._presets[r] for r in rows
+                if 0 <= r < len(self._presets)]
+
     def selected_preset(self) -> CoordPreset | None:
-        row = self._table.currentRow()
-        if row < 0 or row >= len(self._presets):
-            return None
-        return self._presets[row]
+        """첫 선택 preset (호환성 유지 — F3 에서 호출자가 selected_presets 로 전환)."""
+        ps = self.selected_presets()
+        return ps[0] if ps else None
