@@ -563,11 +563,10 @@ class MainWindow(QMainWindow):
             self.chk_delta_interp.setChecked(False)
 
         # 자동 프리셋 감지 — 입력에 X/Y 없고 RECIPE 로 라이브러리 매칭 되면 자동 적용.
-        # 사용자 explicit override 가 없을 때만.
+        # 가족 자체 페어 비어있고 사용자 명시 추가도 없으면 자동 RECIPE 매칭 시도
+        # (가족 list 에 silent 추가, 사용자 정책 2026-04-30 — F6).
         if not self._added_presets and any_input:
             self._try_auto_preset(value_sel, x_sel, y_sel, available_ns)
-        # 프리셋 active 상태면 콤보 상단에 X_Preset / Y_Preset 합성 아이템 삽입
-        self._apply_preset_indicator()
 
     def _build_selection_context(self) -> tuple[dict[str, int], dict, int]:
         """현재 양측 결과로부터 (available_ns, first_wafer_parameters, data_cols_n).
@@ -701,27 +700,14 @@ class MainWindow(QMainWindow):
         return ""
 
     def _on_coord_changed(self, idx: int) -> None:
-        """좌표 pair 변경 — preset 소스면 override 유지·재매핑, 아니면 해제. VALUE 재필터."""
+        """좌표 pair 변경 — VALUE 재필터.
+
+        F6~ : preset_override 강제 1순위 폐지로 sentinel role 분기 폐지. 라이브러리
+        source 페어도 가족 list 의 일반 entry 라 별도 처리 불필요. 사용자가 콤보에서
+        선택한 페어가 그대로 적용 (사용자 정책 2026-04-30).
+        """
         if idx < 0:
             return
-        is_preset = self.cb_coord.itemData(idx, self._ROLE_PRESET) == "preset"
-
-        if is_preset and bool(self._added_presets):
-            xy = self.cb_coord.itemData(idx)
-            if isinstance(xy, tuple) and len(xy) == 2:
-                xn, yn = xy
-                library = CoordLibrary()
-                matched = library.find_match_by_names(
-                    self._first_preset().recipe, xn, yn,
-                )
-                if matched is not None:
-                    self._added_presets = [matched]
-                    self.btn_load_preset.setText(PRESET_BUTTON_ACTIVE_TEXT)
-                    self._refilter_value_combo()
-                    return
-
-        # 비-preset 경로 — override 해제 + VALUE 재필터
-        self._clear_added_presets()
         self._refilter_value_combo()
 
     def _on_value_changed(self, idx: int) -> None:
@@ -744,8 +730,7 @@ class MainWindow(QMainWindow):
         new_v = self._current_value()
         if not new_v:
             return
-        if not self._added_presets:
-            self._auto_match_coord_by_value(new_v)
+        self._auto_match_coord_by_value(new_v)
         if self._result_panel.cells:
             self._on_visualize()
 
@@ -881,12 +866,12 @@ class MainWindow(QMainWindow):
         return self._added_presets[0] if self._added_presets else None
 
     def _clear_added_presets(self) -> None:
-        """추가된 라이브러리 좌표 모두 clear + 버튼 텍스트 / indicator 리셋."""
+        """추가된 라이브러리 좌표 모두 clear + 버튼 텍스트 리셋. paste 변경 시
+        호출 (사용자 정책 2026-04-30: paste reset)."""
         if not self._added_presets:
             return
         self._added_presets.clear()
         self.btn_load_preset.setText(PRESET_BUTTON_DEFAULT_TEXT)
-        self._apply_preset_indicator()
 
     def _try_auto_preset(self, value_sel, x_sel, y_sel, available_ns):
         """입력에 X/Y 좌표 PARAMETER 가 없으면 RECIPE 로 라이브러리 자동 매칭.
@@ -918,17 +903,6 @@ class MainWindow(QMainWindow):
             preset = hits[0]
             self._added_presets = [preset]
             self.btn_load_preset.setText(PRESET_BUTTON_ACTIVE_TEXT)
-
-    def _apply_preset_indicator(self):
-        """과거 preset_override 콤보 sentinel 마킹 — F4 에서 폐지.
-
-        가족 좌표 list 에 _added_presets 가 통합되어 콤보에 자연 노출되므로 별도
-        sentinel 처리 불필요. 호출처는 _refresh_controls 호출로 대체 (사용자 정책
-        2026-04-30). 기존 호출자가 남아있으면 _refresh_controls 위임.
-        """
-        # F4 에선 콤보 재빌드만 (가족 list 통합으로 added_presets 자연 노출)
-        # 기존 호출처가 남아있으면 _refresh_controls 가 처리
-        return
 
     def _on_visualize(self) -> None:
         # signature skip 정책 폐기 (2026-04-27) — 같은 입력 재클릭 시에도 매번
@@ -972,8 +946,9 @@ class MainWindow(QMainWindow):
         elif a or b:
             self._visualize_single(a or b, v, x, y)
 
-        if not self._added_presets:
-            QTimer.singleShot(0, lambda: self._warn_n_mismatch_once(v, x, y))
+        # n_mismatch 검사 — preset_override 강제 1순위 폐지 후 가족 list 의 일반
+        # entry 라 정상 검증 (사용자 정책 2026-04-30, F6).
+        QTimer.singleShot(0, lambda: self._warn_n_mismatch_once(v, x, y))
 
     def _inject_combined_temp_paras(
         self, a, b, item: CombinedItem,
@@ -1094,13 +1069,17 @@ class MainWindow(QMainWindow):
         coord_valid = bool(v and x and y and v != x and v != y and x != y)
         view_mode = self.cb_view.currentText() or "2D"
 
-        override = self._first_preset()
-
-        # 가족 공통 좌표 정책 (Phase 3, 사용자 정책 2026-04-30):
-        #   가족이 보유한 좌표 페어 list 를 paste 의 family_coord 모듈에서 결정.
-        #   각 wafer 의 좌표는 자기 좌표 (priority 2) → 가족 좌표 (priority 3) →
-        #   라이브러리 (priority 4) 순으로 fallback. 가족 좌표 차용은 silent.
-        family_coords = compute_family_coords(result) if coord_valid else []
+        # 가족 공통 좌표 정책 (F4~ 통합, 사용자 정책 2026-04-30):
+        #   compute_family_coords 가 가족 자체 페어 + _added_presets (사용자 명시
+        #   추가 / 자동 RECIPE 매칭) 통합한 list 반환. 각 wafer 의 좌표는
+        #     priority 1: wafer 자체 X/Y (N == 가족 max 일 때)
+        #     priority 2: 가족 좌표 (자체 또는 라이브러리 source)
+        #     priority 3: 가족 페어 누락 시 RECIPE 라이브러리 lookup
+        #   이전 preset_override 강제 1순위 폐지 (F6).
+        family_coords = (
+            compute_family_coords(result, added_presets=self._added_presets)
+            if coord_valid else []
+        )
         family_pair = get_family_coord(family_coords, x, y) if coord_valid else None
 
         for w in result.wafers.values():
@@ -1110,29 +1089,14 @@ class MainWindow(QMainWindow):
             val = (np.asarray(w.parameters[v].values, dtype=float)
                    if has_value else None)
 
-            # 우선순위: (1) 사용자 명시 preset_override
-            #          (2) wafer 자체 X/Y (N == 가족 max 일 때)
-            #          (3) 가족 좌표 차용 (paste 잘림 등)
-            #          (4) RECIPE 기반 라이브러리 (가족 전체 누락 시)
-            #          (5) 모두 실패 → skip + warn
             x_mm: np.ndarray | None = None
             y_mm: np.ndarray | None = None
             from_lib = False
-            from_preset = False
             from_family = False
 
-            # priority 1
-            if override is not None:
-                matched = library.find_match_by_names(override.recipe, x, y)
-                if matched is not None:
-                    x_mm = np.asarray(matched.x_mm, dtype=float)
-                    y_mm = np.asarray(matched.y_mm, dtype=float)
-                    library.touch(matched, save=False)
-                    from_preset = True
-
-            # priority 2 — wafer 자체 X/Y. 단 N 이 가족 max 보다 작으면 가족 좌표
+            # priority 1 — wafer 자체 X/Y. 단 N 이 가족 max 보다 작으면 가족 좌표
             # 차용 우선 (paste 잘림 시 짧은 좌표 사용 회피).
-            if (x_mm is None and coord_valid
+            if (coord_valid
                     and x in w.parameters and y in w.parameters):
                 xr_raw = np.asarray(w.parameters[x].values, dtype=float)
                 yr_raw = np.asarray(w.parameters[y].values, dtype=float)
@@ -1143,13 +1107,15 @@ class MainWindow(QMainWindow):
                     yr, _ = normalize_to_mm(yr_raw)
                     x_mm, y_mm = xr, yr
 
-            # priority 3 — 가족 좌표 차용 (가족 페어 결정됨)
+            # priority 2 — 가족 좌표 차용 (가족 페어 결정됨, source 무관)
             if x_mm is None and family_pair is not None:
                 x_mm = family_pair.x_mm
                 y_mm = family_pair.y_mm
                 from_family = True
 
-            # priority 4 — 라이브러리 (가족 전체 페어 누락 시만 — family_pair=None)
+            # priority 3 — 라이브러리 RECIPE 자동 (가족 페어 누락 시만 — family_pair=None)
+            # 정상 흐름은 _try_auto_preset 가 paste 시점에 _added_presets 추가하지만
+            # 그것도 fail 한 edge 케이스 대비 방어 fallback (사용자 정책 2026-04-30).
             if x_mm is None and w.recipe:
                 # val 없으면 n_points 제한 없이 library 조회 (fallback)
                 n_points_arg = int(len(val)) if val is not None else None
@@ -1190,12 +1156,12 @@ class MainWindow(QMainWindow):
                 is_radial=bool(is_collinear(x_mm, y_mm)),
             ))
 
-        # 가족 단위 라이브러리 저장 — wafer 자체 좌표 (preset/library/family 차용 X)
-        # 인 케이스에만 의미. 단순화: 가족 내 v/x/y 보유 + recipe 보유한 첫 wafer
-        # 의 좌표 1번만 저장. 같은 4-tuple key 면 internal dedup (사용자 정책 2026-04-30).
+        # 가족 단위 라이브러리 저장 — 가족 자체 좌표만 저장 (라이브러리 source
+        # round-trip 회피, 사용자 정책 2026-04-30). family_pair.source == 'family'
+        # 가 가족 자체 검증.
         coord_valid_for_save = (
-            coord_valid and not self._added_presets
-            and family_pair is not None
+            coord_valid and family_pair is not None
+            and family_pair.source == "family"
         )
         if coord_valid_for_save:
             self._save_family_coords_to_library(library, result, v, x, y)
@@ -1233,10 +1199,10 @@ class MainWindow(QMainWindow):
         # DELTA 모드 자동 저장 — A/B 각 웨이퍼에 실제 사용된 (x, y) pair 하나씩 저장
         coord_valid = bool(v and x and y and v != x and v != y and x != y)
         library = CoordLibrary()
-        # 라이브러리 저장 가족 단위 — A 가족 + B 가족 각자 1번씩 (가족 좌표 정책,
-        # 사용자 정책 2026-04-30). preset_override 적용 시엔 저장 X (이미 라이브러리
-        # 에 있는 좌표라 round-trip 의미 없음).
-        if coord_valid and not self._added_presets:
+        # 라이브러리 저장 가족 단위 — A 가족 + B 가족 각자 1번씩.
+        # _save_family_coords_to_library 내부에서 wafer 자체 X/Y 보유 검사 →
+        # 라이브러리 source 좌표는 자동 round-trip 회피 (사용자 정책 2026-04-30).
+        if coord_valid:
             self._save_family_coords_to_library(library, a, v, x, y)
             self._save_family_coords_to_library(library, b, v, x, y)
             self._enforce_library_limits(library)
@@ -1427,20 +1393,11 @@ class MainWindow(QMainWindow):
         if not common:
             return {}
 
-        # preset_override 우선 처리 — 양 가족 모두 동일 좌표 적용 (사용자 정책 2026-04-30)
-        if bool(self._added_presets):
-            matched = library.find_match_by_names(
-                self._first_preset().recipe, x_name, y_name,
-            )
-            if matched is not None:
-                xy = (np.asarray(matched.x_mm, dtype=float),
-                      np.asarray(matched.y_mm, dtype=float))
-                library.touch(matched, save=False)
-                return {wid: (xy, xy) for wid in common}
-
-        # 1. 양 가족 좌표 (paste 시점 결정 가능 — 매번 재계산해도 cheap)
-        fam_a = compute_family_coords(a)
-        fam_b = compute_family_coords(b)
+        # 1. 양 가족 좌표 — _added_presets 통합 (사용자 명시 추가 / 자동 매칭).
+        # 가족 자체 + 라이브러리 source 모두 동일 자격 (preset_override 강제 1순위
+        # 폐지, 사용자 정책 2026-04-30).
+        fam_a = compute_family_coords(a, added_presets=self._added_presets)
+        fam_b = compute_family_coords(b, added_presets=self._added_presets)
         fc_a = get_family_coord(fam_a, x_name, y_name)
         fc_b = get_family_coord(fam_b, x_name, y_name)
 
