@@ -41,18 +41,15 @@ class SummaryBigNumber(SummaryWidget):
         for i, h in enumerate(self.HEADERS):
             col = QVBoxLayout()
             col.setContentsMargins(0, 0, 0, 0)
-            col.setSpacing(0)
-            lbl = QLabel(h.upper())
+            col.setSpacing(3)  # 라벨/값 사이 살짝 띄움 (사용자 정책 2026-04-30)
+            # 라벨 — uppercase + thin space (U+2009, ≈ 일반 space 의 절반)
+            # 글자 사이 끼움. PercentageSpacing 보다 호환성 확실 (사용자 정책 2026-04-30).
+            lbl = QLabel(" ".join(h.upper()))
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl.setStyleSheet(
                 f"QLabel {{ color: #6c757d; font-size: {lbl_px}px;"
                 " font-weight: bold; background-color: transparent; }}"
             )
-            # letter-spacing — uppercase 라벨 글자 간격 (이전 " ".join 의 절반).
-            # PercentageSpacing 150 = default 100 의 +50%. font_scale 자동 비례.
-            _lf = lbl.font()
-            _lf.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 150)
-            lbl.setFont(_lf)
             val = QLabel("—")
             val.setAlignment(Qt.AlignmentFlag.AlignCenter)
             val.setStyleSheet(
