@@ -523,6 +523,7 @@ class MainWindow(QMainWindow):
         # 좌표 콤보: pair 단위 — "x / y" 표시, itemData = (x, y) 튜플.
         # 가족 자체 페어 + 사용자 명시 추가 라이브러리 entries (사용자 정책 2026-04-30).
         # 같은 (x, y) 페어 중복은 가족 자체 우선 (콤보 순서 = 자동매칭 우선순위).
+        family_pairs = set(zip(x_ordered, y_ordered))
         pairs = list(zip(x_ordered, y_ordered))
         seen = set(pairs)
         for p in self._added_presets:
@@ -530,7 +531,11 @@ class MainWindow(QMainWindow):
             if pair not in seen:
                 pairs.append(pair)
                 seen.add(pair)
-        self._fill_coord_combo(pairs, (x_sel, y_sel) if x_sel and y_sel else None)
+        self._fill_coord_combo(
+            pairs,
+            (x_sel, y_sel) if x_sel and y_sel else None,
+            family_pairs=family_pairs,
+        )
 
         any_input = bool(self._result_a or self._result_b)
         # Run 분기 — 단일 입력 검증 (case 1/2/3) + DELTA 검증 (no_intersect 등)
@@ -605,26 +610,35 @@ class MainWindow(QMainWindow):
         self,
         pairs: list[tuple[str, str]],
         selected: tuple[str, str] | None,
+        family_pairs: set[tuple[str, str]] | None = None,
     ) -> None:
         """cb_coord 를 (x, y) pair 리스트로 채움.
 
-        각 아이템 표시: "x / y   [N pt]", UserRole: (x, y) 튜플.
-        N 은 x 의 좌표 개수 (같은 pair 의 x/y 는 n 동일 전제). 라이브러리에서
-        추가된 페어는 가족 wafer.parameters 에 없을 수 있어 _added_presets 에서
-        n_points fallback 조회 (사용자 정책 2026-04-30).
+        각 아이템 표시: "x / y   [N pt]" (가족 자체) 또는 "{id}. x / y   [N pt]"
+        (라이브러리 source). UserRole: (x, y) 튜플.
+
+        라이브러리에서 추가된 페어 (가족에 없음) 는 _added_presets 의 id prefix 표기.
+        가족 자체와 같은 페어는 가족 우선 (prefix X) — 사용자 정책 2026-04-30.
         """
         prev = self._current_xy()
         available_ns = self._build_selection_context()[0]
-        added_n_by_pair = {
-            (p.x_name, p.y_name): p.n_points for p in self._added_presets
+        added_by_pair = {
+            (p.x_name, p.y_name): p for p in self._added_presets
         }
+        family_pairs = family_pairs or set()
         self.cb_coord.blockSignals(True)
         self.cb_coord.clear()
         for x, y in pairs:
             n = available_ns.get(x)
-            if n is None:
-                n = added_n_by_pair.get((x, y))
-            label = f"{x} / {y} [{n} pt]" if n is not None else f"{x} / {y}"
+            ap = added_by_pair.get((x, y))
+            if n is None and ap is not None:
+                n = ap.n_points
+            # 가족 자체에 없는 페어 + 라이브러리 source 면 id prefix
+            prefix = ""
+            if (x, y) not in family_pairs and ap is not None and ap.id:
+                prefix = f"{ap.id}. "
+            label = (f"{prefix}{x} / {y} [{n} pt]" if n is not None
+                     else f"{prefix}{x} / {y}")
             self.cb_coord.addItem(label, (x, y))
         target = selected if selected else prev
         if target:
