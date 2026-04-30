@@ -938,13 +938,29 @@ class WaferCell(QFrame):
         # (radial 숨김 여부 등) 가 동적이라 계산이 어긋나 chart 가 잘리는 버그.
         # title_h + padding_top 은 위 title_stack 과 일관. title 위 6px 여백 포함.
         title_h = self._title.sizeHint().height()
-        # Summary 영역 — ppt_basic 자연 height (34px) 표준. 모든 style 이 34 안에
-        # fit 책임. cell 전체 크기 phase 1 이전과 동일 보장 (사용자 정책 2026-04-30).
-        # 단 no_table style (is_chart_overlay_only) 은 0 — 표 영역 사라지고 cell
-        # 세로 길이가 표 사라진 만큼 감소.
+        # Summary 영역 — ppt_basic 자연 height 를 표준으로 통일. 단 const 가
+        # 아니라 현재 font_scale / 폰트 반영하기 위해 ppt_basic 임시 인스턴스
+        # 측정 → 캐시. font_scale 바뀌면 자동 재측정.
+        # 사용자 정책 2026-04-30 — phase 1 이전과 동일한 자연 height 보장
+        # (사용자 환경 font 영향 시 표 잘림 회귀 fix).
+        # no_table style (is_chart_overlay_only) 만 0 — 표 영역 제거.
         is_overlay_only = bool(getattr(self._summary, "is_chart_overlay_only",
                                          lambda: False)())
-        SUMMARY_RESERVED_H = 0 if is_overlay_only else 34
+        if is_overlay_only:
+            SUMMARY_RESERVED_H = 0
+        else:
+            from core.themes import FONT_SIZES as _FS
+            fs_key = (_FS.get("body", 14), _FS.get("caption", 12))
+            if getattr(self, "_reserved_h_key", None) != fs_key:
+                from widgets.summary.ppt_basic import SummaryPPTBasic
+                _tmp = SummaryPPTBasic()
+                _tmp.update_metrics(
+                    {"avg": 0.0, "range": 0.0, "nu_pct": 0.0}, 2, True,
+                )
+                self._reserved_h_cache = _tmp.height() or 34
+                self._reserved_h_key = fs_key
+                _tmp.deleteLater()
+            SUMMARY_RESERVED_H = self._reserved_h_cache
         if self._summary.height() != SUMMARY_RESERVED_H:
             self._summary.setFixedHeight(SUMMARY_RESERVED_H)
         # no_table 이면 summary 위젯 hidden, chart overlay 라벨 visible

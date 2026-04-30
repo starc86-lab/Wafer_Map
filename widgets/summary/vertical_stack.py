@@ -64,13 +64,11 @@ class SummaryVerticalStack(SummaryWidget):
         self._table.setShowGrid(False)
         self._table.setStyleSheet(
             "QTableWidget { background-color: white;"
-            " border: 1px solid #888888;"
-            " font-size: 9px; }"
+            " border: 1px solid #888888; }"
         )
         self._table.setItemDelegate(_VerticalDelegate(self._table))
-        # 각 행 11px — 3행 × 11 + frame 2 = 35 (ppt_basic 34 와 거의 동일,
-        # SUMMARY_RESERVED_H 안에 fit). 사용자 정책 2026-04-30, cell 크기 align.
-        self._table.verticalHeader().setDefaultSectionSize(11)
+        # 행 높이는 wafer_cell._apply_chart_size 가 setFixedHeight 으로 강제하면
+        # _table 도 그 안에 fit. cell 의 SUMMARY_RESERVED_H (font 반영) 따라감.
         layout.addWidget(self._table)
 
         # 라벨 1회 set
@@ -87,10 +85,9 @@ class SummaryVerticalStack(SummaryWidget):
                 self._table.setItem(r, 1, QTableWidgetItem(val))
             else:
                 it.setText(val)
-        # 11px × 3 + frame 2 = 35 (SUMMARY_RESERVED_H 34 와 거의 동일)
-        h = 11 * 3 + 2
-        self._table.setFixedHeight(h)
-        self.setFixedHeight(h)
+        # 자연 row height (font 반영) 으로 행간 자동. cell 이 setFixedHeight 으로
+        # 강제하면 그 안에 fit (resizeRowsToContents 호출).
+        self._table.resizeRowsToContents()
 
     def set_target_width(self, w: int) -> None:
         self.setFixedWidth(w)
