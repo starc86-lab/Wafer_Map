@@ -3,8 +3,8 @@
 추가 (사용자 정책 2026-04-30, preset_override 강제 1순위 폐지).
 
 - 필터: 현재 VALUE PARAMETER의 DATA 개수(`n_points`)가 일치하는 프리셋만
-- 개별 레코드 행 표시 (레시피 그룹 병합 없음)
-- 정렬: RECIPE 유사도 → `last_used` 최근순
+- 개별 레코드 행 표시 (레시피 그룹 병합 없음). 첫 컬럼 # = id (영구 고유 번호)
+- 정렬: 완전일치 최우선 → 토큰 매칭 수 내림차순 → `last_used` 최신순 (tiebreak)
 - ExtendedSelection — 여러 행 동시 선택 후 Add
 - 더블클릭 / Add → accept (선택된 행들 모두 반환)
 """
@@ -54,9 +54,9 @@ class PresetSelectDialog(QDialog):
         info.setStyleSheet("color: #495057; padding: 4px 0;")
         lay.addWidget(info)
 
-        self._table = QTableWidget(len(filtered), 5)
+        self._table = QTableWidget(len(filtered), 6)
         self._table.setHorizontalHeaderLabels(
-            ["RECIPE", "X / Y", "유사도", "Point", "마지막 사용"],
+            ["#", "RECIPE", "X / Y", "유사도", "Point", "마지막 사용"],
         )
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -77,15 +77,19 @@ class PresetSelectDialog(QDialog):
         for i, p in enumerate(filtered):
             sim = recipe_similarity(p.recipe, current_recipe)
             sim_text = self._format_similarity(sim, p.recipe, current_recipe)
+            # # (id) — 영구 고유 번호. 콤보 라벨 prefix 와 동일 (사용자 정책 2026-04-30).
+            id_item = QTableWidgetItem(str(p.id) if p.id else "")
+            id_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._table.setItem(i, 0, id_item)
             for col, text in enumerate([
                 p.recipe,
                 f"{p.x_name} / {p.y_name}",
                 sim_text,
                 str(p.n_points),
                 format_dt_display(p.last_used),
-            ]):
+            ], start=1):
                 item = QTableWidgetItem(text)
-                if col in (2, 3):
+                if col in (3, 4):
                     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self._table.setItem(i, col, item)
 

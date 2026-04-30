@@ -62,10 +62,9 @@ def _rep_suffix(wafer_id: str) -> str:
     return f" ({tail})"
 
 
-PRESET_BUTTON_DEFAULT_TEXT = "좌표 불러오기"
-# preset_override 적용 시 표시 — 좌표명 full 표시는 버튼 폭 동적 변동 유발해 단순화
-# (사용자 정책 2026-04-30).
-PRESET_BUTTON_ACTIVE_TEXT = "Preset 적용"
+PRESET_BUTTON_TEXT = "좌표 추가"
+# 버튼 텍스트 고정 (사용자 정책 2026-04-30) — 추가하면 콤보에 entry 가 늘어나는
+# 것 자체가 시각적 피드백. 활성/비활성 텍스트 분기 폐지.
 
 
 class MainWindow(QMainWindow):
@@ -303,7 +302,7 @@ class MainWindow(QMainWindow):
         self.cb_value.setFixedWidth(combo_w)
         self.cb_coord.setFixedWidth(combo_w)
 
-        self.btn_load_preset = QPushButton(PRESET_BUTTON_DEFAULT_TEXT)
+        self.btn_load_preset = QPushButton(PRESET_BUTTON_TEXT)
         self.btn_load_preset.setEnabled(False)
         self.btn_load_preset.clicked.connect(self._open_preset_dialog)
 
@@ -880,7 +879,6 @@ class MainWindow(QMainWindow):
                 self._added_presets.append(p)
                 existing_ids.add(p.id)
         library.save()
-        self.btn_load_preset.setText(PRESET_BUTTON_ACTIVE_TEXT)
         # 콤보 재빌드 → 추가된 페어들 노출
         self._refresh_controls()
 
@@ -889,12 +887,11 @@ class MainWindow(QMainWindow):
         return self._added_presets[0] if self._added_presets else None
 
     def _clear_added_presets(self) -> None:
-        """추가된 라이브러리 좌표 모두 clear + 버튼 텍스트 리셋. paste 변경 시
-        호출 (사용자 정책 2026-04-30: paste reset)."""
+        """추가된 라이브러리 좌표 모두 clear. paste 변경 시 호출 (사용자 정책
+        2026-04-30: paste reset). 버튼 텍스트는 고정이라 변경 안 함."""
         if not self._added_presets:
             return
         self._added_presets.clear()
-        self.btn_load_preset.setText(PRESET_BUTTON_DEFAULT_TEXT)
 
     def _try_auto_preset(self, value_sel, x_sel, y_sel, available_ns):
         """입력에 X/Y 좌표 PARAMETER 가 없으면 RECIPE 로 라이브러리 자동 매칭.
@@ -925,7 +922,6 @@ class MainWindow(QMainWindow):
         if hits:
             preset = hits[0]
             self._added_presets = [preset]
-            self.btn_load_preset.setText(PRESET_BUTTON_ACTIVE_TEXT)
 
     def _on_visualize(self) -> None:
         # signature skip 정책 폐기 (2026-04-27) — 같은 입력 재클릭 시에도 매번

@@ -900,6 +900,9 @@ class CoordLibraryTab(QWidget):
         finally:
             self._table.setUpdatesEnabled(True)
             self._table.setSortingEnabled(True)
+        # 기본 정렬: id (column 0) 오름차순. setSortingEnabled(True) 가 이전
+        # sort indicator state 를 끌어와 내림차순으로 보이는 회귀 fix.
+        self._table.sortItems(0, Qt.SortOrder.AscendingOrder)
         # content 기준 natural 폭 계산 + 여유분 분배
         self._table.resizeColumnsToContents()
         self._natural_widths = [
