@@ -1,0 +1,73 @@
+"""
+Color Footer style — 값+라벨 위, 하단 색 띠 metric 별 다른 색 (옵션 I).
+"""
+from __future__ import annotations
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget,
+)
+
+from widgets.summary.base import SummaryWidget, format_metrics
+
+
+_FOOTER_COLORS = ("#264653", "#2a9d8f", "#e76f51")
+
+
+class SummaryColorFooter(SummaryWidget):
+    HEADERS = ("Mean", "Range", "Non Unif.")
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setStyleSheet(
+            "SummaryColorFooter { background-color: white;"
+            " border: 1px solid #dee2e6; }"
+        )
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        self._values: list[QLabel] = []
+        for i, h in enumerate(self.HEADERS):
+            col_w = QWidget()
+            col = QVBoxLayout(col_w)
+            col.setContentsMargins(0, 1, 0, 0)
+            col.setSpacing(0)
+            val = QLabel("—")
+            val.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            val.setStyleSheet(
+                "QLabel { color: #111; font-size: 14px; font-weight: bold;"
+                " background: transparent; }"
+            )
+            lbl = QLabel(h)
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl.setStyleSheet(
+                "QLabel { color: #666; font-size: 8px; background: transparent; }"
+            )
+            footer = QFrame()
+            footer.setFixedHeight(3)
+            footer.setStyleSheet(
+                f"QFrame {{ background-color: {_FOOTER_COLORS[i]}; border: none; }}"
+            )
+            col.addWidget(val)
+            col.addWidget(lbl)
+            col.addWidget(footer)
+            outer.addWidget(col_w, stretch=1)
+            self._values.append(val)
+            # 세퍼레이터 (마지막 제외)
+            if i < len(self.HEADERS) - 1:
+                sep = QFrame()
+                sep.setFrameShape(QFrame.Shape.VLine)
+                sep.setStyleSheet("QFrame { color: #dee2e6; }")
+                outer.addWidget(sep)
+
+    def update_metrics(self, metrics, decimals, percent_suffix=True):
+        avg_s, range_s, nu_s = format_metrics(metrics, decimals, percent_suffix)
+        for i, val in enumerate((avg_s, range_s, nu_s)):
+            self._values[i].setText(val)
+
+    def set_target_width(self, w: int) -> None:
+        self.setFixedWidth(w)
+
+    def get_natural_height(self) -> int:
+        return 34
