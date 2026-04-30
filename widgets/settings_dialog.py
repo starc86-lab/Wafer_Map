@@ -832,18 +832,23 @@ class CoordLibraryTab(QWidget):
         btn_row = QHBoxLayout()
         self.btn_add = QPushButton("수동 추가")
         self.btn_recipe = QPushButton("RECIPE 변경")
+        self.btn_preview = QPushButton("미리보기")
         self.btn_delete = QPushButton("삭제")
         self.btn_delete.setProperty("class", "danger")
-        for b in (self.btn_add, self.btn_recipe, self.btn_delete):
+        for b in (self.btn_add, self.btn_recipe, self.btn_preview, self.btn_delete):
             btn_row.addWidget(b)
         btn_row.addStretch(1)
         lay.addLayout(btn_row)
 
         self.btn_add.clicked.connect(self._on_add)
         self.btn_recipe.clicked.connect(self._on_recipe)
+        self.btn_preview.clicked.connect(self._on_preview)
         self.btn_delete.clicked.connect(self._on_delete)
-        # 행 더블클릭 → 좌표 프리뷰 다이얼로그 (맵 + 좌표 표)
+        # 행 더블클릭 → RECIPE 변경 (사용자 정책 2026-04-30)
         self._table.doubleClicked.connect(self._on_row_dbl_click)
+        # 우클릭 → 컨텍스트 메뉴 (좌표 미리보기)
+        self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._table.customContextMenuRequested.connect(self._on_table_context_menu)
 
         limits_box = QGroupBox("자동 정리")
         limits_form = QFormLayout(limits_box)
@@ -937,14 +942,39 @@ class CoordLibraryTab(QWidget):
         return out
 
     def _on_row_dbl_click(self, index) -> None:
-        """행 더블클릭 → 좌표 프리뷰 (웨이퍼 맵 + 좌표 표) 다이얼로그."""
+        """행 더블클릭 → RECIPE 변경 (사용자 정책 2026-04-30).
+
+        미리보기는 우클릭 메뉴 또는 '미리보기' 버튼으로.
+        """
         row = index.row() if index is not None else -1
         if row < 0:
             return
-        it = self._table.item(row, 0)
-        p = it.data(Qt.ItemDataRole.UserRole) if it is not None else None
-        if not isinstance(p, CoordPreset):
+        # 단일 선택 보장 — 더블클릭한 행만 선택
+        self._table.selectRow(row)
+        self._on_recipe()
+
+    def _on_table_context_menu(self, pos) -> None:
+        """우클릭 → 컨텍스트 메뉴 (좌표 미리보기)."""
+        from PySide6.QtGui import QAction
+        from PySide6.QtWidgets import QMenu
+        idx = self._table.indexAt(pos)
+        if idx.row() < 0:
             return
+        # 우클릭 시 해당 행 자동 선택 (기존 다중 선택 유지)
+        if not self._table.item(idx.row(), 0).isSelected():
+            self._table.selectRow(idx.row())
+        menu = QMenu(self._table)
+        act_preview = QAction("좌표 미리보기", menu)
+        act_preview.triggered.connect(self._on_preview)
+        menu.addAction(act_preview)
+        menu.exec(self._table.viewport().mapToGlobal(pos))
+
+    def _on_preview(self) -> None:
+        """선택된 첫 행의 좌표를 별도 다이얼로그에 표시."""
+        presets = self._selected_presets()
+        if not presets:
+            return
+        p = presets[0]
         from widgets.coord_preview_dialog import CoordPreviewDialog
         dlg = CoordPreviewDialog(
             p.x_mm, p.y_mm,

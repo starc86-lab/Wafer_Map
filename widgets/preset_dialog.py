@@ -9,9 +9,11 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
-    QAbstractItemView, QDialog, QDialogButtonBox, QHeaderView, QLabel,
-    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QAbstractItemView, QDialog, QDialogButtonBox, QHBoxLayout, QHeaderView,
+    QLabel, QMenu, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout,
+    QWidget,
 )
 
 from core.coord_library import CoordLibrary, CoordPreset, format_dt_display, recipe_similarity
@@ -62,9 +64,12 @@ class PresetSelectDialog(QDialog):
         hdr = self._table.horizontalHeader()
         hdr.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         hdr.setStretchLastSection(True)
-        # 행 더블클릭 → 좌표 프리뷰 다이얼로그 (맵 + 좌표 표).
-        # 프리셋 적용(accept) 은 OK 버튼으로만 — 더블클릭은 "내용 보기" 용.
-        self._table.doubleClicked.connect(self._on_row_dbl_click)
+        # 행 더블클릭 → 적용 (accept). 미리보기는 우클릭 메뉴 또는 좌측 하단
+        # '좌표 미리보기' 버튼 (사용자 정책 2026-04-30).
+        self._table.doubleClicked.connect(self.accept)
+        # 우클릭 → 컨텍스트 메뉴 (좌표 미리보기)
+        self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._table.customContextMenuRequested.connect(self._on_table_context_menu)
 
         for i, p in enumerate(filtered):
             sim = recipe_similarity(p.recipe, current_recipe)
@@ -86,6 +91,12 @@ class PresetSelectDialog(QDialog):
 
         lay.addWidget(self._table, stretch=1)
 
+        # 좌측: 좌표 미리보기 버튼 / 우측: Apply / Cancel
+        btn_row = QHBoxLayout()
+        self.btn_preview = QPushButton("좌표 미리보기")
+        self.btn_preview.clicked.connect(self._on_preview_clicked)
+        btn_row.addWidget(self.btn_preview)
+        btn_row.addStretch(1)
         btns = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
             | QDialogButtonBox.StandardButton.Cancel,
@@ -94,7 +105,8 @@ class PresetSelectDialog(QDialog):
         btns.button(QDialogButtonBox.StandardButton.Cancel).setText("취소")
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
-        lay.addWidget(btns)
+        btn_row.addWidget(btns)
+        lay.addLayout(btn_row)
 
     @staticmethod
     def _format_similarity(sim: int, preset_recipe: str, current: str) -> str:
@@ -106,12 +118,24 @@ class PresetSelectDialog(QDialog):
             return f"토큰 {sim}개"
         return "—"
 
-    def _on_row_dbl_click(self, index) -> None:
-        """행 더블클릭 → 좌표 프리뷰. 프리셋 적용은 OK 버튼으로만."""
-        row = index.row() if index is not None else -1
-        if row < 0 or row >= len(self._presets):
+    def _on_table_context_menu(self, pos) -> None:
+        """우클릭 → 컨텍스트 메뉴 (좌표 미리보기)."""
+        idx = self._table.indexAt(pos)
+        if idx.row() < 0:
             return
-        p = self._presets[row]
+        # 우클릭 시 해당 행 자동 선택
+        self._table.selectRow(idx.row())
+        menu = QMenu(self._table)
+        act_preview = QAction("좌표 미리보기", menu)
+        act_preview.triggered.connect(self._on_preview_clicked)
+        menu.addAction(act_preview)
+        menu.exec(self._table.viewport().mapToGlobal(pos))
+
+    def _on_preview_clicked(self) -> None:
+        """선택된 프리셋의 좌표를 별도 다이얼로그에 표시."""
+        p = self.selected_preset()
+        if p is None:
+            return
         from widgets.coord_preview_dialog import CoordPreviewDialog
         dlg = CoordPreviewDialog(
             p.x_mm, p.y_mm,
