@@ -17,7 +17,7 @@ from PySide6.QtCore import QEvent, QObject, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog,
     QDialogButtonBox, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout,
-    QHeaderView, QInputDialog, QLabel, QMessageBox, QPushButton, QScrollArea,
+    QHeaderView, QLabel, QMessageBox, QPushButton, QScrollArea,
     QSpinBox, QTabWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -831,20 +831,20 @@ class CoordLibraryTab(QWidget):
 
         btn_row = QHBoxLayout()
         self.btn_add = QPushButton("수동 추가")
-        self.btn_recipe = QPushButton("RECIPE 변경")
+        self.btn_edit = QPushButton("좌표 수정")
         self.btn_preview = QPushButton("미리보기")
         self.btn_delete = QPushButton("삭제")
         self.btn_delete.setProperty("class", "danger")
-        for b in (self.btn_add, self.btn_recipe, self.btn_preview, self.btn_delete):
+        for b in (self.btn_add, self.btn_edit, self.btn_preview, self.btn_delete):
             btn_row.addWidget(b)
         btn_row.addStretch(1)
         lay.addLayout(btn_row)
 
         self.btn_add.clicked.connect(self._on_add)
-        self.btn_recipe.clicked.connect(self._on_recipe)
+        self.btn_edit.clicked.connect(self._on_edit)
         self.btn_preview.clicked.connect(self._on_preview)
         self.btn_delete.clicked.connect(self._on_delete)
-        # 행 더블클릭 → RECIPE 변경 (사용자 정책 2026-04-30)
+        # 행 더블클릭 → 좌표 수정 (RECIPE + 좌표값 통합 편집, 사용자 정책 2026-04-30)
         self._table.doubleClicked.connect(self._on_row_dbl_click)
         # 우클릭 → 컨텍스트 메뉴 (좌표 미리보기)
         self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -953,7 +953,7 @@ class CoordLibraryTab(QWidget):
         return out
 
     def _on_row_dbl_click(self, index) -> None:
-        """행 더블클릭 → RECIPE 변경 (사용자 정책 2026-04-30).
+        """행 더블클릭 → 좌표 수정 (RECIPE + 좌표값 통합 편집, 사용자 정책 2026-04-30).
 
         미리보기는 우클릭 메뉴 또는 '미리보기' 버튼으로.
         """
@@ -962,7 +962,7 @@ class CoordLibraryTab(QWidget):
             return
         # 단일 선택 보장 — 더블클릭한 행만 선택
         self._table.selectRow(row)
-        self._on_recipe()
+        self._on_edit()
 
     def _on_table_context_menu(self, pos) -> None:
         """우클릭 → 컨텍스트 메뉴 (좌표 미리보기)."""
@@ -1010,16 +1010,39 @@ class CoordLibraryTab(QWidget):
             return
         self._refresh_table()
 
-    def _on_recipe(self) -> None:
+    def _on_edit(self) -> None:
+        """좌표 수정 — RECIPE + 좌표값 통합 편집 다이얼로그 (사용자 정책 2026-04-30).
+
+        이전 _on_recipe (RECIPE 만 QInputDialog) 폐기. PresetEditDialog 가
+        미리보기 형태 (좌: 맵 / 우: 표) 로 RECIPE LineEdit + 표 cell 직접 편집.
+        """
         presets = self._selected_presets()
         if len(presets) != 1:
-            QMessageBox.information(self, "RECIPE 변경", "레코드 한 개를 선택하세요.")
+            QMessageBox.information(self, "좌표 수정", "레코드 한 개를 선택하세요.")
             return
         p = presets[0]
-        new_rcp, ok = QInputDialog.getText(self, "RECIPE 변경", "새 RECIPE:", text=p.recipe)
-        if ok and new_rcp.strip():
-            self._library.set_recipe(p, new_rcp.strip(), save=True)
-            self._refresh_table()
+        from widgets.preset_edit_dialog import PresetEditDialog
+        dlg = PresetEditDialog(
+            recipe=p.recipe,
+            x_mm=p.x_mm, y_mm=p.y_mm,
+            x_name=p.x_name, y_name=p.y_name,
+            parent=self,
+        )
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        result = dlg.result_values()
+        if result is None:
+            return
+        new_recipe, new_x, new_y = result
+        if new_recipe != p.recipe:
+            self._library.set_recipe(p, new_recipe, save=False)
+        # 좌표값 변경 — 길이 같고 값만 바뀌면 자체 갱신, n_points 도 함께 set.
+        if (len(new_x) != len(p.x_mm)
+                or any(float(a) != float(b) for a, b in zip(new_x, p.x_mm))
+                or any(float(a) != float(b) for a, b in zip(new_y, p.y_mm))):
+            self._library.set_coords(p, list(new_x), list(new_y), save=False)
+        self._library.save()
+        self._refresh_table()
 
     def _on_delete(self) -> None:
         presets = self._selected_presets()

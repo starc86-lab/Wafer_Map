@@ -324,6 +324,25 @@ class CoordLibrary:
         if save:
             self.save()
 
+    def set_coords(
+        self, preset: CoordPreset,
+        x_mm: list[float] | "np.ndarray",
+        y_mm: list[float] | "np.ndarray",
+        *, save: bool = True,
+    ) -> None:
+        """좌표값 직접 편집 — Settings 탭 좌표 수정 다이얼로그용 (사용자 정책 2026-04-30).
+
+        n_points 도 같이 갱신. 키 (RECIPE, x_name, y_name, n_points) 의
+        n_points 가 바뀔 수 있어 호출자가 dedup 책임 (필요 시).
+        """
+        xs = [float(v) for v in x_mm]
+        ys = [float(v) for v in y_mm]
+        preset.x_mm = xs
+        preset.y_mm = ys
+        preset.n_points = len(xs)
+        if save:
+            self.save()
+
     # ── 자동 정리 ──────────────────────────────────
     def enforce_limits(
         self,
