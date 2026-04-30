@@ -102,9 +102,11 @@ class SummaryVerticalStack(SummaryWidget):
         self._table.setFixedHeight(h)
 
     def set_target_width(self, w: int) -> None:
-        # vertical_stack 만 가로 0.7배 — 라벨/값 사이 너무 벌어지지 않게
-        # (사용자 정책 2026-04-30). cell layout 의 AlignHCenter 로 가운데 정렬됨.
-        target = int(w * 0.7)
+        # vertical_stack 만 가로 좁게 — 그래프 x축 (웨이퍼 직경 ~300mm /
+        # ViewBox ±170 = 88%) 에 맞춤. cell w 는 chart_area 보다 약간 큼
+        # (컬러바 영역 포함) 이라 0.85 적용 시 wafer 직경 폭 근접.
+        # cell layout 의 AlignHCenter 로 가운데 정렬됨 (사용자 정책 2026-04-30).
+        target = int(w * 0.85)
         self.setFixedWidth(target)
         self._table.setFixedWidth(target)
 
