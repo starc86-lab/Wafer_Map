@@ -7,16 +7,12 @@ Big Number style — 값 매우 크게, 라벨 작은 uppercase (옵션 J).
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget,
 )
 
 from widgets.summary.base import SummaryWidget, font_px, format_metrics
-
-
-def _spaced(s: str) -> str:
-    """uppercase + 토큰별 공백 — letterspacing 흉내."""
-    return " ".join(s.upper())
 
 
 class SummaryBigNumber(SummaryWidget):
@@ -46,12 +42,17 @@ class SummaryBigNumber(SummaryWidget):
             col = QVBoxLayout()
             col.setContentsMargins(0, 0, 0, 0)
             col.setSpacing(0)
-            lbl = QLabel(_spaced(h))
+            lbl = QLabel(h.upper())
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl.setStyleSheet(
                 f"QLabel {{ color: #6c757d; font-size: {lbl_px}px;"
                 " font-weight: bold; background-color: transparent; }}"
             )
+            # letter-spacing — uppercase 라벨 글자 간격 (이전 " ".join 의 절반).
+            # PercentageSpacing 150 = default 100 의 +50%. font_scale 자동 비례.
+            _lf = lbl.font()
+            _lf.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 150)
+            lbl.setFont(_lf)
             val = QLabel("—")
             val.setAlignment(Qt.AlignmentFlag.AlignCenter)
             val.setStyleSheet(
