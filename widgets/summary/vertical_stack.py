@@ -26,11 +26,10 @@ class _VerticalDelegate(QStyledItemDelegate):
         painter.fillRect(option.rect, self.BG)
         text = index.data(Qt.ItemDataRole.DisplayRole)
         if text is not None:
+            # painter.font() sticky 회피 — 매 cell 마다 명시적으로 bold on/off 셋.
+            # col 0 (라벨) 은 항상 normal, col 1 (값) 만 bold (사용자 정책 2026-04-30).
             font = index.data(Qt.ItemDataRole.FontRole) or painter.font()
-            # col 1 (값) 만 bold — font weight 는 글로벌 스타일/사이즈와 독립
-            # (사용자 정책 2026-04-30, 시각 강조).
-            if index.column() == 1:
-                font.setBold(True)
+            font.setBold(index.column() == 1)
             painter.setFont(font)
             painter.setPen(self.TEXT_LABEL if index.column() == 0 else self.TEXT_VALUE)
             r = option.rect.adjusted(8, 0, -8, 0)
