@@ -106,7 +106,7 @@ class SummaryVerticalStack(SummaryWidget):
         # ViewBox ±170 = 88%) 에 맞춤. cell w 는 chart_area 보다 약간 큼
         # (컬러바 영역 포함) 이라 0.85 적용 시 wafer 직경 폭 근접.
         # cell layout 의 AlignHCenter 로 가운데 정렬됨 (사용자 정책 2026-04-30).
-        target = int(w * 0.85)
+        target = int(w * 0.87)
         self.setFixedWidth(target)
         self._table.setFixedWidth(target)
 
