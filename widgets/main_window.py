@@ -103,7 +103,11 @@ class MainWindow(QMainWindow):
         # (Run 활성화) + ReasonBar 양쪽에서 재사용. 단일 입력 / 빈 입력은 빈 list.
         self._delta_warnings: list = []
         self._main_splitter_restored = False
-        self._preset_override: CoordPreset | None = None
+        # 사용자 명시 추가 / 자동 RECIPE 매칭으로 가족 좌표 list 에 추가될 라이브러리
+        # entries (사용자 정책 2026-04-30 — 이전 _preset_override 대체).
+        # 단일 entry 시 priority 1 강제 적용 (이전 override 동일). F4 에서 가족 list
+        # 에 통합 + F6 에서 priority 1 폐지 예정.
+        self._added_presets: list[CoordPreset] = []
         # PARA 합성 누적 상태 — 단일 진실원. sentinel/콤보 라벨/임시 키 모두 여기서.
         self._combined_state = CombinedState()
 
@@ -413,14 +417,14 @@ class MainWindow(QMainWindow):
     # ── 시그널 핸들러 ────────────────────────────────────────
     def _on_a_parsed(self, result: ParseResult | None) -> None:
         self._result_a = result
-        self._reset_preset_override()
+        self._clear_added_presets()
         self._clear_combined()  # 입력 변경 시 PARA 조합 자동 해제
         self._update_delta_validation()
         self._refresh_controls()
 
     def _on_b_parsed(self, result: ParseResult | None) -> None:
         self._result_b = result
-        self._reset_preset_override()
+        self._clear_added_presets()
         self._clear_combined()
         self._update_delta_validation()
         self._refresh_controls()
@@ -547,7 +551,7 @@ class MainWindow(QMainWindow):
 
         # 자동 프리셋 감지 — 입력에 X/Y 없고 RECIPE 로 라이브러리 매칭 되면 자동 적용.
         # 사용자 explicit override 가 없을 때만.
-        if self._preset_override is None and any_input:
+        if not self._added_presets and any_input:
             self._try_auto_preset(value_sel, x_sel, y_sel, available_ns)
         # 프리셋 active 상태면 콤보 상단에 X_Preset / Y_Preset 합성 아이템 삽입
         self._apply_preset_indicator()
@@ -673,22 +677,22 @@ class MainWindow(QMainWindow):
             return
         is_preset = self.cb_coord.itemData(idx, self._ROLE_PRESET) == "preset"
 
-        if is_preset and self._preset_override is not None:
+        if is_preset and bool(self._added_presets):
             xy = self.cb_coord.itemData(idx)
             if isinstance(xy, tuple) and len(xy) == 2:
                 xn, yn = xy
                 library = CoordLibrary()
                 matched = library.find_match_by_names(
-                    self._preset_override.recipe, xn, yn,
+                    self._first_preset().recipe, xn, yn,
                 )
                 if matched is not None:
-                    self._preset_override = matched
+                    self._added_presets = [matched]
                     self.btn_load_preset.setText(PRESET_BUTTON_ACTIVE_TEXT)
                     self._refilter_value_combo()
                     return
 
         # 비-preset 경로 — override 해제 + VALUE 재필터
-        self._reset_preset_override()
+        self._clear_added_presets()
         self._refilter_value_combo()
 
     def _on_value_changed(self, idx: int) -> None:
@@ -711,7 +715,7 @@ class MainWindow(QMainWindow):
         new_v = self._current_value()
         if not new_v:
             return
-        if self._preset_override is None:
+        if not self._added_presets:
             self._auto_match_coord_by_value(new_v)
         if self._result_panel.cells:
             self._on_visualize()
@@ -831,14 +835,19 @@ class MainWindow(QMainWindow):
         if preset is None:
             return
         library.touch(preset)
-        self._preset_override = preset
+        self._added_presets = [preset]
         self.btn_load_preset.setText(PRESET_BUTTON_ACTIVE_TEXT)
         self._apply_preset_indicator()
 
-    def _reset_preset_override(self) -> None:
-        if self._preset_override is None:
+    def _first_preset(self) -> CoordPreset | None:
+        """`_added_presets` 의 첫 entry — 이전 `_preset_override` 호환 호출용."""
+        return self._added_presets[0] if self._added_presets else None
+
+    def _clear_added_presets(self) -> None:
+        """추가된 라이브러리 좌표 모두 clear + 버튼 텍스트 / indicator 리셋."""
+        if not self._added_presets:
             return
-        self._preset_override = None
+        self._added_presets.clear()
         self.btn_load_preset.setText(PRESET_BUTTON_DEFAULT_TEXT)
         self._apply_preset_indicator()
 
@@ -870,7 +879,7 @@ class MainWindow(QMainWindow):
         hits = library.find_by_recipe(first_wafer.recipe, n_points=int(n))
         if hits:
             preset = hits[0]
-            self._preset_override = preset
+            self._added_presets = [preset]
             self.btn_load_preset.setText(PRESET_BUTTON_ACTIVE_TEXT)
 
     # preset 소스 마킹 role — UserRole 은 (x, y) tuple 로 이미 사용 중.
@@ -893,10 +902,10 @@ class MainWindow(QMainWindow):
                 if combo.itemData(i, self._ROLE_PRESET) == "preset":
                     combo.removeItem(i)
 
-            if self._preset_override is None:
+            if not self._added_presets:
                 return
 
-            p = self._preset_override
+            p = self._first_preset()
             n = len(p.x_mm)
             label = f"{p.x_name} / {p.y_name} [{n} pt]"
             for j in range(combo.count() - 1, -1, -1):
@@ -956,7 +965,7 @@ class MainWindow(QMainWindow):
         elif a or b:
             self._visualize_single(a or b, v, x, y)
 
-        if self._preset_override is None:
+        if not self._added_presets:
             QTimer.singleShot(0, lambda: self._warn_n_mismatch_once(v, x, y))
 
     def _inject_combined_temp_paras(
@@ -1078,7 +1087,7 @@ class MainWindow(QMainWindow):
         coord_valid = bool(v and x and y and v != x and v != y and x != y)
         view_mode = self.cb_view.currentText() or "2D"
 
-        override = self._preset_override
+        override = self._first_preset()
 
         # 가족 공통 좌표 정책 (Phase 3, 사용자 정책 2026-04-30):
         #   가족이 보유한 좌표 페어 list 를 paste 의 family_coord 모듈에서 결정.
@@ -1178,7 +1187,7 @@ class MainWindow(QMainWindow):
         # 인 케이스에만 의미. 단순화: 가족 내 v/x/y 보유 + recipe 보유한 첫 wafer
         # 의 좌표 1번만 저장. 같은 4-tuple key 면 internal dedup (사용자 정책 2026-04-30).
         coord_valid_for_save = (
-            coord_valid and self._preset_override is None
+            coord_valid and not self._added_presets
             and family_pair is not None
         )
         if coord_valid_for_save:
@@ -1220,7 +1229,7 @@ class MainWindow(QMainWindow):
         # 라이브러리 저장 가족 단위 — A 가족 + B 가족 각자 1번씩 (가족 좌표 정책,
         # 사용자 정책 2026-04-30). preset_override 적용 시엔 저장 X (이미 라이브러리
         # 에 있는 좌표라 round-trip 의미 없음).
-        if coord_valid and self._preset_override is None:
+        if coord_valid and not self._added_presets:
             self._save_family_coords_to_library(library, a, v, x, y)
             self._save_family_coords_to_library(library, b, v, x, y)
             self._enforce_library_limits(library)
@@ -1412,9 +1421,9 @@ class MainWindow(QMainWindow):
             return {}
 
         # preset_override 우선 처리 — 양 가족 모두 동일 좌표 적용 (사용자 정책 2026-04-30)
-        if self._preset_override is not None:
+        if bool(self._added_presets):
             matched = library.find_match_by_names(
-                self._preset_override.recipe, x_name, y_name,
+                self._first_preset().recipe, x_name, y_name,
             )
             if matched is not None:
                 xy = (np.asarray(matched.x_mm, dtype=float),

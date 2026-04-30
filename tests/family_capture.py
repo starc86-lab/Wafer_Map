@@ -64,7 +64,7 @@ def reset(mw):
     mw.paste_b._result = None
     mw._result_a = None
     mw._result_b = None
-    mw._reset_preset_override()
+    mw._clear_added_presets()
     mw._clear_combined()
     mw._result_panel.clear()
     mw._update_delta_validation()
