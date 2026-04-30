@@ -17,12 +17,12 @@ from widgets.summary.base import SummaryWidget, format_metrics
 
 
 class _DarkNeonDelegate(QStyledItemDelegate):
-    # 사용자 정책 2026-04-30 — 셀 바탕 ~15% 연하게 (#0d1117 → #1f262e).
-    # 너무 검정 → 조금 부드러운 다크 톤. 헤더는 살짝 더 라이트.
-    BG_HEADER = QColor("#262d36")
-    BG_VALUE = QColor("#1f262e")
-    BORDER = QColor("#30363d")
-    TEXT_LABEL = QColor("#9aa3ad")
+    # 사용자 정책 2026-04-30 — 추가 +20% 라이트닝 + 라벨 글자 더 흰색 톤.
+    # BG: #1f262e → #404a55 / 헤더 #4a5460. 라벨 #9aa3ad → #d8dde3.
+    BG_HEADER = QColor("#4a5460")
+    BG_VALUE = QColor("#404a55")
+    BORDER = QColor("#5a6470")
+    TEXT_LABEL = QColor("#d8dde3")
     TEXT_VALUE = QColor("#00d9a3")  # 민트 accent
 
     def paint(self, painter, option, index) -> None:
@@ -63,8 +63,8 @@ class SummaryDarkNeon(SummaryWidget):
         self._table.setFrameShape(QFrame.Shape.NoFrame)
         self._table.setShowGrid(False)
         self._table.setStyleSheet(
-            "QTableWidget { background-color: #1f262e;"
-            " border: 1px solid #30363d; }"
+            "QTableWidget { background-color: #404a55;"
+            " border: 1px solid #5a6470; }"
         )
         self._table.setItemDelegate(_DarkNeonDelegate(self._table))
         layout.addWidget(self._table)
