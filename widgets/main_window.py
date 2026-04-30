@@ -645,11 +645,18 @@ class MainWindow(QMainWindow):
         self.cb_coord.clear()
         for triple in items:
             x, y, lib_id = triple
-            n = available_ns.get(x)
-            if n is None and lib_id is not None:
+            # n_points 출처:
+            #   - lib_id 있음 (라이브러리 source) → preset.n_points 사용. 라이브러리
+            #     entry 의 X 이름이 가족 wafer 의 X PARA 와 동일해도 라이브러리 자체
+            #     n 이 정확 (사용자 정책 2026-04-30, 라벨 12pt 회귀 fix).
+            #   - lib_id 없음 (가족 source) → available_ns[x] (가족 wafer 의 n).
+            n: int | None = None
+            if lib_id is not None:
                 ap = added_by_id.get(lib_id)
                 if ap is not None:
                     n = ap.n_points
+            else:
+                n = available_ns.get(x)
             prefix = f"{lib_id}. " if lib_id is not None else ""
             label = (f"{prefix}{x} / {y} [{n} pt]" if n is not None
                      else f"{prefix}{x} / {y}")
@@ -817,6 +824,9 @@ class MainWindow(QMainWindow):
             return
         v_suffix = self._name_suffix(value_name)
 
+        # 라이브러리 entry n_points 는 preset 자체 값 (가족 wafer X 와 이름 같아도
+        # n 다를 수 있음, 사용자 정책 2026-04-30, 라벨 12pt 회귀 fix 와 동일).
+        added_by_id = {p.id: p for p in self._added_presets if p.id}
         candidates: list[tuple[int, int, str]] = []  # (idx, pair_n, x_suffix)
         for i in range(self.cb_coord.count()):
             data = self.cb_coord.itemData(i)
@@ -824,8 +834,12 @@ class MainWindow(QMainWindow):
                 continue
             if is_combined_data(data):
                 continue
-            x, _y, _lib_id = data
-            pair_n = available_ns.get(x)
+            x, _y, lib_id = data
+            if lib_id is not None:
+                ap = added_by_id.get(lib_id)
+                pair_n = ap.n_points if ap is not None else None
+            else:
+                pair_n = available_ns.get(x)
             if pair_n is None:
                 continue
             candidates.append((i, pair_n, self._name_suffix(x)))
