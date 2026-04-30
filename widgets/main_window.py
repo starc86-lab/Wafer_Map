@@ -531,24 +531,32 @@ class MainWindow(QMainWindow):
             self._try_auto_preset(value_sel, x_sel, y_sel, available_ns)
 
         self._fill_value_combo(value_ordered, value_sel)
-        # 좌표 콤보: pair 단위 — "x / y" 표시, itemData = (x, y) 튜플.
-        # 가족 자체 페어 + _added_presets (사용자 명시 추가 / 자동 매칭 결과).
-        # 같은 (x, y) 페어 중복은 가족 자체 우선 (콤보 순서 = 자동매칭 우선순위).
+        # 좌표 콤보: itemData = (x_name, y_name, lib_id|None) 3-tuple.
+        # 가족 자체 페어 (lib_id=None) + _added_presets (lib_id=preset.id).
+        # 같은 (x, y) 라도 lib_id 다르면 별개 entry — 사용자 정책 2026-04-30 (a):
+        # 라이브러리 다른 RECIPE entries 별개 콤보 항목, id 로 구분.
         family_pairs = set(zip(x_ordered, y_ordered))
-        pairs = list(zip(x_ordered, y_ordered))
-        seen = set(pairs)
+        items: list[tuple[str, str, int | None]] = []
+        seen: set[tuple[str, str, int | None]] = set()
+        for x, y in zip(x_ordered, y_ordered):
+            triple = (x, y, None)
+            items.append(triple)
+            seen.add(triple)
         for p in self._added_presets:
-            pair = (p.x_name, p.y_name)
-            if pair not in seen:
-                pairs.append(pair)
-                seen.add(pair)
-        # 자동 매칭으로 추가된 페어가 있으면 콤보 selected 도 그것으로
-        if not (x_sel and y_sel) and self._added_presets:
+            triple = (p.x_name, p.y_name, p.id if p.id else None)
+            if triple not in seen:
+                items.append(triple)
+                seen.add(triple)
+        # 자동 매칭 결과 selected — 가족 페어 없을 때 _added_presets[0]
+        selected_triple: tuple[str, str, int | None] | None = None
+        if x_sel and y_sel:
+            selected_triple = (x_sel, y_sel, None)
+        elif self._added_presets:
             ap = self._added_presets[0]
-            x_sel, y_sel = ap.x_name, ap.y_name
+            selected_triple = (ap.x_name, ap.y_name, ap.id if ap.id else None)
         self._fill_coord_combo(
-            pairs,
-            (x_sel, y_sel) if x_sel and y_sel else None,
+            items,
+            selected_triple,
             family_pairs=family_pairs,
         )
 
@@ -615,38 +623,38 @@ class MainWindow(QMainWindow):
 
     def _fill_coord_combo(
         self,
-        pairs: list[tuple[str, str]],
-        selected: tuple[str, str] | None,
+        items: list[tuple[str, str, int | None]],
+        selected: tuple[str, str, int | None] | None,
         family_pairs: set[tuple[str, str]] | None = None,
     ) -> None:
-        """cb_coord 를 (x, y) pair 리스트로 채움.
+        """cb_coord 를 (x_name, y_name, lib_id|None) 3-tuple list 로 채움.
 
-        각 아이템 표시: "x / y   [N pt]" (가족 자체) 또는 "{id}. x / y   [N pt]"
-        (라이브러리 source). UserRole: (x, y) 튜플.
+        라벨:
+          - 가족 자체 (lib_id=None): "x / y [N pt]"
+          - 라이브러리 source (lib_id=int): "{id}. x / y [N pt]"
 
-        라이브러리에서 추가된 페어 (가족에 없음) 는 _added_presets 의 id prefix 표기.
-        가족 자체와 같은 페어는 가족 우선 (prefix X) — 사용자 정책 2026-04-30.
+        같은 (x, y) 라도 lib_id 다르면 별개 entry (사용자 정책 2026-04-30).
+        itemData = (x, y, lib_id) — 시각화 흐름에서 lib_id 로 정확한 좌표 entry 매칭.
         """
         prev = self._current_xy()
         available_ns = self._build_selection_context()[0]
-        added_by_pair = {
-            (p.x_name, p.y_name): p for p in self._added_presets
+        added_by_id = {
+            p.id: p for p in self._added_presets if p.id
         }
         family_pairs = family_pairs or set()
         self.cb_coord.blockSignals(True)
         self.cb_coord.clear()
-        for x, y in pairs:
+        for triple in items:
+            x, y, lib_id = triple
             n = available_ns.get(x)
-            ap = added_by_pair.get((x, y))
-            if n is None and ap is not None:
-                n = ap.n_points
-            # 가족 자체에 없는 페어 + 라이브러리 source 면 id prefix
-            prefix = ""
-            if (x, y) not in family_pairs and ap is not None and ap.id:
-                prefix = f"{ap.id}. "
+            if n is None and lib_id is not None:
+                ap = added_by_id.get(lib_id)
+                if ap is not None:
+                    n = ap.n_points
+            prefix = f"{lib_id}. " if lib_id is not None else ""
             label = (f"{prefix}{x} / {y} [{n} pt]" if n is not None
                      else f"{prefix}{x} / {y}")
-            self.cb_coord.addItem(label, (x, y))
+            self.cb_coord.addItem(label, triple)
         target = selected if selected else prev
         if target:
             for i in range(self.cb_coord.count()):
@@ -655,10 +663,15 @@ class MainWindow(QMainWindow):
                     break
         self.cb_coord.blockSignals(False)
 
-    def _current_xy(self) -> tuple[str, str] | None:
-        """cb_coord 현재 선택의 (x_name, y_name) 튜플. 선택 없으면 None."""
+    def _current_xy(self) -> tuple[str, str, int | None] | None:
+        """cb_coord 현재 선택의 (x_name, y_name, lib_id|None) 3-tuple. 선택 없으면 None.
+
+        lib_id None = 가족 자체 페어, int = 라이브러리 source 페어 (사용자 정책 2026-04-30).
+        PARA combine sentinel (`__combined__` tag) 은 별도 분기라 None 반환.
+        """
         data = self.cb_coord.currentData()
-        if isinstance(data, tuple) and len(data) == 2:
+        if (isinstance(data, tuple) and len(data) == 3
+                and not is_combined_data(data)):
             return data
         return None
 
@@ -785,9 +798,11 @@ class MainWindow(QMainWindow):
         candidates: list[tuple[int, int, str]] = []  # (idx, pair_n, x_suffix)
         for i in range(self.cb_coord.count()):
             data = self.cb_coord.itemData(i)
-            if not (isinstance(data, tuple) and len(data) == 2):
+            if not (isinstance(data, tuple) and len(data) == 3):
                 continue
-            x, _ = data
+            if is_combined_data(data):
+                continue
+            x, _y, _lib_id = data
             pair_n = available_ns.get(x)
             if pair_n is None:
                 continue
@@ -825,8 +840,8 @@ class MainWindow(QMainWindow):
             return
         auto = load_settings().get("auto_select", {})
         vpat = auto.get("value_patterns", ["T*"])
-        xy = self._current_xy() or ("", "")
-        x_cur, y_cur = xy
+        xy = self._current_xy() or ("", "", None)
+        x_cur, y_cur, _lib_id = xy
         n_coords = int(available_ns.get(x_cur, data_cols_n))
         exclude = {x_cur, y_cur} - {""}
         _, value_ordered = select_value_by_variability(
@@ -936,11 +951,14 @@ class MainWindow(QMainWindow):
             item = self._combined_state.get_by_v_sentinel(v_data)
         if item is not None:
             v, x, y = item.v_key, item.x_key, item.y_key
+            lib_id = None
         else:
             v = self._current_value()
             xy = self._current_xy()
-            x = xy[0] if xy else ""
-            y = xy[1] if xy else ""
+            if xy:
+                x, y, lib_id = xy
+            else:
+                x, y, lib_id = "", "", None
             if not v:
                 self._show_blocking_reason("no_value_para", "error", "측정값 없음")
                 return
@@ -950,9 +968,9 @@ class MainWindow(QMainWindow):
 
         # 렌더링 먼저 → Qt paint 완료 후 n 불일치 경고 (QTimer 한 틱 지연)
         if a and b:
-            self._visualize_delta(a, b, v, x, y)
+            self._visualize_delta(a, b, v, x, y, lib_id=lib_id)
         elif a or b:
-            self._visualize_single(a or b, v, x, y)
+            self._visualize_single(a or b, v, x, y, lib_id=lib_id)
 
         # n_mismatch 검사 — preset_override 강제 1순위 폐지 후 가족 list 의 일반
         # entry 라 정상 검증 (사용자 정책 2026-04-30, F6).
@@ -1066,7 +1084,9 @@ class MainWindow(QMainWindow):
 
     def _visualize_single(
         self, result: ParseResult, v: str, x: str, y: str,
+        lib_id: int | None = None,
     ) -> None:
+        """lib_id: 콤보 selected 의 라이브러리 entry id. None = 가족 자체 선택."""
         from core.interp import is_collinear  # lazy: scipy.interpolate 무거움
         from core.family_coord import compute_family_coords, get_family_coord
         library = CoordLibrary()
@@ -1088,7 +1108,10 @@ class MainWindow(QMainWindow):
             compute_family_coords(result, added_presets=self._added_presets)
             if coord_valid else []
         )
-        family_pair = get_family_coord(family_coords, x, y) if coord_valid else None
+        family_pair = (
+            get_family_coord(family_coords, x, y, lib_id=lib_id)
+            if coord_valid else None
+        )
 
         for w in result.wafers.values():
             # VALUE PARAMETER 가 이 wafer 에 없으면 **NaN 으로 표시** (skip 하지 않음).
@@ -1104,7 +1127,9 @@ class MainWindow(QMainWindow):
 
             # priority 1 — wafer 자체 X/Y. 단 N 이 가족 max 보다 작으면 가족 좌표
             # 차용 우선 (paste 잘림 시 짧은 좌표 사용 회피).
-            if (coord_valid
+            # lib_id 있으면 wafer 자체 무시 — 사용자가 라이브러리 entry 명시 선택
+            # 했으니 그 좌표 사용 (사용자 정책 2026-04-30).
+            if (lib_id is None and coord_valid
                     and x in w.parameters and y in w.parameters):
                 xr_raw = np.asarray(w.parameters[x].values, dtype=float)
                 yr_raw = np.asarray(w.parameters[y].values, dtype=float)
@@ -1201,6 +1226,7 @@ class MainWindow(QMainWindow):
 
     def _visualize_delta(
         self, a: ParseResult, b: ParseResult, v: str, x: str, y: str,
+        lib_id: int | None = None,
     ) -> None:
         from core.delta import compute_delta  # lazy
         from core.interp import is_collinear  # lazy: scipy.interpolate 무거움
@@ -1220,7 +1246,9 @@ class MainWindow(QMainWindow):
         #   A 전체 누락 + B 전체 있음 → B 좌표 사용
         #   A, B 양쪽 누락 → 라이브러리 (A RECIPE → B RECIPE)
         # 일부 누락은 input_validation case 3 가 paste 단계에서 Run 비활성으로 차단.
-        coords_per_wafer = self._resolve_delta_coords(a, b, x, y, library)
+        coords_per_wafer = self._resolve_delta_coords(
+            a, b, x, y, library, lib_id=lib_id,
+        )
         if coords_per_wafer is None:
             # 좌표 결정 실패 (양쪽 누락 + 라이브러리 매칭 X). paste 시점 delta_validation
             # 이 이미 error 로 Run 비활성하지만 외부 라이브러리 변경 후 재시도 등
@@ -1378,6 +1406,7 @@ class MainWindow(QMainWindow):
         x_name: str,
         y_name: str,
         library: CoordLibrary,
+        lib_id: int | None = None,
     ) -> dict[str, tuple[tuple[np.ndarray, np.ndarray],
                           tuple[np.ndarray, np.ndarray]]] | None:
         """DELTA 모드 wafer 별 좌표 결정 (가족 좌표 정책, 사용자 정책 2026-04-30).
@@ -1406,8 +1435,8 @@ class MainWindow(QMainWindow):
         # 폐지, 사용자 정책 2026-04-30).
         fam_a = compute_family_coords(a, added_presets=self._added_presets)
         fam_b = compute_family_coords(b, added_presets=self._added_presets)
-        fc_a = get_family_coord(fam_a, x_name, y_name)
-        fc_b = get_family_coord(fam_b, x_name, y_name)
+        fc_a = get_family_coord(fam_a, x_name, y_name, lib_id=lib_id)
+        fc_b = get_family_coord(fam_b, x_name, y_name, lib_id=lib_id)
 
         recipe_a = self._dominant_recipe(a)
         recipe_b = self._dominant_recipe(b)
@@ -1441,11 +1470,16 @@ class MainWindow(QMainWindow):
         if a_family is None or b_family is None:
             return None
 
-        # 3. per-wafer — 자기 좌표 우선, 가족 좌표 fallback
+        # 3. per-wafer — 자기 좌표 우선, 가족 좌표 fallback.
+        # lib_id 있으면 wafer 자체 무시 (사용자가 라이브러리 entry 명시 선택,
+        # 사용자 정책 2026-04-30, _visualize_single priority 1 가드와 동일).
         coords: dict = {}
+        skip_own = lib_id is not None
         for wid in common:
-            a_xy = self._wafer_own_coord(a.wafers[wid], x_name, y_name, fc_a)
-            b_xy = self._wafer_own_coord(b.wafers[wid], x_name, y_name, fc_b)
+            a_xy = (None if skip_own else
+                    self._wafer_own_coord(a.wafers[wid], x_name, y_name, fc_a))
+            b_xy = (None if skip_own else
+                    self._wafer_own_coord(b.wafers[wid], x_name, y_name, fc_b))
             coords[wid] = (
                 a_xy if a_xy is not None else a_family,
                 b_xy if b_xy is not None else b_family,

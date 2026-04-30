@@ -190,10 +190,28 @@ def _preset_to_family_coord(preset) -> FamilyCoord:
 
 def get_family_coord(
     family_coords: list[FamilyCoord], x_name: str, y_name: str,
+    lib_id: int | None = None,
 ) -> FamilyCoord | None:
-    """좌표 페어 이름으로 FamilyCoord 조회."""
+    """좌표 페어 이름 (+ 선택적 lib_id) 으로 FamilyCoord 조회.
+
+    `lib_id` 시멘틱 (사용자 정책 2026-04-30, 별개 콤보 entry 정책):
+      - lib_id is None → source='family' 우선 매칭. 가족 자체 entry 없으면
+        같은 페어의 첫 번째 fallback (콤보에 family 없고 library 만 있을 때).
+      - lib_id is not None → source='library' + 같은 lib_id 매칭만.
+        entry 없으면 None (사용자가 명시 선택한 라이브러리 entry 가 사라진 경우).
+    """
+    if lib_id is None:
+        for fc in family_coords:
+            if (fc.x_name == x_name and fc.y_name == y_name
+                    and fc.source == "family"):
+                return fc
+        for fc in family_coords:
+            if fc.x_name == x_name and fc.y_name == y_name:
+                return fc
+        return None
     for fc in family_coords:
-        if fc.x_name == x_name and fc.y_name == y_name:
+        if (fc.x_name == x_name and fc.y_name == y_name
+                and fc.source == "library" and fc.lib_id == lib_id):
             return fc
     return None
 
