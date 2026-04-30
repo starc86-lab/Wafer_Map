@@ -16,7 +16,7 @@ from __future__ import annotations
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QDoubleValidator, QFont
+from PySide6.QtGui import QDoubleValidator, QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QDialog, QDialogButtonBox, QGridLayout,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox, QPushButton,
@@ -232,8 +232,12 @@ class PresetEditDialog(QDialog):
         # Undo: 무제한 stack — 매 변경마다 snapshot push, pop 으로 단계별 복원.
         # 초기 상태에 도달하면 자동 disabled (사용자 정책 2026-04-30).
         self.btn_undo = QPushButton("Undo")
-        self.btn_undo.setShortcut("Ctrl+Z")
         self.btn_undo.clicked.connect(self._on_undo)
+        # Ctrl+Z dialog-level shortcut — WindowShortcut context 로 cell editor /
+        # RECIPE LineEdit 활성 시에도 가로채임 없이 작동 (사용자 정책 2026-04-30).
+        self._sc_undo = QShortcut(QKeySequence("Ctrl+Z"), self)
+        self._sc_undo.setContext(Qt.ShortcutContext.WindowShortcut)
+        self._sc_undo.activated.connect(self._on_undo)
 
         btn_row = QHBoxLayout()
         btn_row.addStretch(1)
@@ -299,6 +303,13 @@ class PresetEditDialog(QDialog):
             self._x[row] = val
         else:
             self._y[row] = val
+        # 입력 즉시 .3f 포맷 재표시 — Undo 시점에야 포맷이 맞춰져 다른 cell 도
+        # 변경된 것처럼 보이는 시각적 혼란 방지 (사용자 정책 2026-04-30).
+        self._table.blockSignals(True)
+        try:
+            item.setText(f"{val:.3f}")
+        finally:
+            self._table.blockSignals(False)
         # 산점도 + 번호 위치 갱신
         self._scatter.setData(self._x, self._y)
         if 0 <= row < len(self._num_items):
