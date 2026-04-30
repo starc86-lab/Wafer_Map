@@ -511,19 +511,20 @@ def _fmt(v, decimals: int) -> str:
 
 
 def _dynamic_decimals(vmin: float, vmax: float, n_ticks: int = 5) -> int:
-    """tick 간격 기반 + Z-margin 미세변경 가시성 보장 자릿수 (cap 3).
+    """tick 간격 + range bucket 기반 자릿수 (cap 3).
 
     두 항의 max:
       - needed: tick distinct 보장 — `-log10(tick_step)`
-      - sensitivity: Z-margin 1% 변화가 LSD 에 보이도록 — `2 - log10(range)`
+      - bucket: range 크기별 고정 decimals — 다중 wafer 일관성 + Z-margin 가시성
 
-    cap 3 (사용자 정책 2026-04-30 갱신, 이전 4 → 3 으로 강화).
+    bucket 룰 (사용자 정책 2026-04-30 갱신, 이전 log10 ceil 은 100 boundary 에서
+    인접 wafer 간 자릿수 갈리는 inconsistency 있음):
+      - range < 1     → 3 (GOF, K)
+      - range < 10    → 2 (작은 스케일, NK)
+      - range < 1000  → 1 (thickness, 일반 다중 wafer)
+      - range >= 1000 → 0
 
-    예시:
-      - thickness 663~700 (range 37) → 1 자리
-      - 작은 스케일 range 7 → 2 자리 (Z-margin 변화 보임)
-      - GOF 0.99~0.995 → 3 자리 (cap)
-      - DELTA -2~2 → 2 자리
+    cap 3 — 매우 narrow range 에서도 무한정 길어지지 않음.
     """
     import math as _math
     if vmax <= vmin:
@@ -533,10 +534,16 @@ def _dynamic_decimals(vmin: float, vmax: float, n_ticks: int = 5) -> int:
     if tick_step <= 0 or range_val <= 0:
         return 2
     needed = max(0, -int(_math.floor(_math.log10(tick_step))))
-    # Z-margin 1% range 변화가 LSD 에 visible 하도록.
-    # decimals >= -log10(0.01 * range) = 2 - log10(range)
-    sensitivity = max(0, int(_math.ceil(2.0 - _math.log10(range_val))))
-    return min(max(needed, sensitivity), 3)
+    # range bucket — discrete, log10 ceil 의 boundary 미스매치 회피
+    if range_val < 1.0:
+        bucket = 3
+    elif range_val < 10.0:
+        bucket = 2
+    elif range_val < 1000.0:
+        bucket = 1
+    else:
+        bucket = 0
+    return min(max(needed, bucket), 3)
 
 
 class _SummaryTableDelegate(QStyledItemDelegate):
