@@ -41,7 +41,7 @@ class SummaryBigNumber(SummaryWidget):
         from core.themes import FONT_SIZES
         _base = int(FONT_SIZES.get("body", 14))
         val_px = _base + 6   # base 14 → 20
-        lbl_px = max(9, _base - 2)  # base 14 → 12
+        lbl_px = max(8, _base - 4)  # base 14 → 10
         for i, h in enumerate(self.HEADERS):
             col = QVBoxLayout()
             col.setContentsMargins(0, 1, 0, 1)
