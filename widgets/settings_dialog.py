@@ -811,9 +811,9 @@ class CoordLibraryTab(QWidget):
         top.addStretch(1)
         lay.addLayout(top)
 
-        self._table = QTableWidget(0, 5)
+        self._table = QTableWidget(0, 6)
         self._table.setHorizontalHeaderLabels(
-            ["RECIPE", "X / Y", "Point", "최초 저장", "마지막 사용"],
+            ["#", "RECIPE", "X / Y", "Point", "최초 저장", "마지막 사용"],
         )
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -871,24 +871,32 @@ class CoordLibraryTab(QWidget):
         self._refresh_table()
 
     def _refresh_table(self) -> None:
-        """레코드 개별 행 표시 — (RECIPE, X/Y) 조합이 키라 같은 RECIPE 여러 행 가능."""
-        presets = self._library.presets
+        """레코드 개별 행 표시 — (RECIPE, X/Y) 조합이 키라 같은 RECIPE 여러 행 가능.
+
+        # 컬럼 = 라이브러리 entry id (영구 고유 번호, 사용자 정책 2026-04-30).
+        기본 정렬은 id 오름차순 — 헤더 클릭 시 다른 컬럼 기준 정렬 가능.
+        """
+        presets = sorted(self._library.presets, key=lambda p: p.id)
         self._count_label.setText(f"저장된 레코드: {len(presets)}개")
         self._table.setSortingEnabled(False)
         self._table.setUpdatesEnabled(False)
         try:
             self._table.setRowCount(len(presets))
             for r, p in enumerate(presets):
-                rec_item = QTableWidgetItem(p.recipe)
-                rec_item.setData(Qt.ItemDataRole.UserRole, p)
-                self._table.setItem(r, 0, rec_item)
-                self._table.setItem(r, 1, QTableWidgetItem(f"{p.x_name} / {p.y_name}"))
+                # # (id) — DisplayRole 정수로 헤더 클릭 시 숫자 정렬, UserRole 에 preset
+                id_item = QTableWidgetItem()
+                id_item.setData(Qt.ItemDataRole.DisplayRole, p.id)
+                id_item.setData(Qt.ItemDataRole.UserRole, p)
+                id_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self._table.setItem(r, 0, id_item)
+                self._table.setItem(r, 1, QTableWidgetItem(p.recipe))
+                self._table.setItem(r, 2, QTableWidgetItem(f"{p.x_name} / {p.y_name}"))
                 n_item = QTableWidgetItem()
                 n_item.setData(Qt.ItemDataRole.DisplayRole, p.n_points)
                 n_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                self._table.setItem(r, 2, n_item)
-                self._table.setItem(r, 3, QTableWidgetItem(format_dt_display(p.created_at)))
-                self._table.setItem(r, 4, QTableWidgetItem(format_dt_display(p.last_used)))
+                self._table.setItem(r, 3, n_item)
+                self._table.setItem(r, 4, QTableWidgetItem(format_dt_display(p.created_at)))
+                self._table.setItem(r, 5, QTableWidgetItem(format_dt_display(p.last_used)))
         finally:
             self._table.setUpdatesEnabled(True)
             self._table.setSortingEnabled(True)

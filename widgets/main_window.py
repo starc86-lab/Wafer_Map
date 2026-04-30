@@ -519,9 +519,20 @@ class MainWindow(QMainWindow):
             params, n_coords, vpat, exclude_names=exclude,
         )
 
+        any_input = bool(self._result_a or self._result_b)
+
+        # 자동 RECIPE 매칭 — 가족 자체 페어 비어있고 사용자 명시 추가도 없으면
+        # 라이브러리에서 좌표 자동 추가 (가족 list 에 silent 추가).
+        # **콤보 빌드 전에** 호출 — _added_presets 가 셋된 상태에서 콤보 채워야
+        # 자동 매칭 결과가 노출됨 (사용자 정책 2026-04-30, 회귀 fix).
+        if (not self._added_presets and any_input
+                and not (x_sel and y_sel and x_sel != value_sel
+                         and y_sel != value_sel and x_sel != y_sel)):
+            self._try_auto_preset(value_sel, x_sel, y_sel, available_ns)
+
         self._fill_value_combo(value_ordered, value_sel)
         # 좌표 콤보: pair 단위 — "x / y" 표시, itemData = (x, y) 튜플.
-        # 가족 자체 페어 + 사용자 명시 추가 라이브러리 entries (사용자 정책 2026-04-30).
+        # 가족 자체 페어 + _added_presets (사용자 명시 추가 / 자동 매칭 결과).
         # 같은 (x, y) 페어 중복은 가족 자체 우선 (콤보 순서 = 자동매칭 우선순위).
         family_pairs = set(zip(x_ordered, y_ordered))
         pairs = list(zip(x_ordered, y_ordered))
@@ -531,13 +542,16 @@ class MainWindow(QMainWindow):
             if pair not in seen:
                 pairs.append(pair)
                 seen.add(pair)
+        # 자동 매칭으로 추가된 페어가 있으면 콤보 selected 도 그것으로
+        if not (x_sel and y_sel) and self._added_presets:
+            ap = self._added_presets[0]
+            x_sel, y_sel = ap.x_name, ap.y_name
         self._fill_coord_combo(
             pairs,
             (x_sel, y_sel) if x_sel and y_sel else None,
             family_pairs=family_pairs,
         )
 
-        any_input = bool(self._result_a or self._result_b)
         # Run 분기 — 단일 입력 검증 (case 1/2/3) + DELTA 검증 (no_intersect 등)
         # 양쪽 모두 반영해 비활성.
         all_valid = self.paste_a.is_valid and self.paste_b.is_valid
@@ -561,12 +575,6 @@ class MainWindow(QMainWindow):
         self.chk_delta_interp.setEnabled(delta_ready)
         if not delta_ready and self.chk_delta_interp.isChecked():
             self.chk_delta_interp.setChecked(False)
-
-        # 자동 프리셋 감지 — 입력에 X/Y 없고 RECIPE 로 라이브러리 매칭 되면 자동 적용.
-        # 가족 자체 페어 비어있고 사용자 명시 추가도 없으면 자동 RECIPE 매칭 시도
-        # (가족 list 에 silent 추가, 사용자 정책 2026-04-30 — F6).
-        if not self._added_presets and any_input:
-            self._try_auto_preset(value_sel, x_sel, y_sel, available_ns)
 
     def _build_selection_context(self) -> tuple[dict[str, int], dict, int]:
         """현재 양측 결과로부터 (available_ns, first_wafer_parameters, data_cols_n).
