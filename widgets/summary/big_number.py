@@ -35,10 +35,13 @@ class SummaryBigNumber(SummaryWidget):
 
         self._labels: list[QLabel] = []
         self._values: list[QLabel] = []
-        # 사용자 정책 2026-04-30 — 라벨 진하게 (#6c757d), 값 큰 폰트 (value_xl).
-        # font_px 로 font_scale 자동 반영.
-        lbl_px = font_px("label_xs")
-        val_px = font_px("value_xl")
+        # 사용자 정책 2026-04-30 — Big Number 정체성 강조. 값 / 라벨 모두
+        # 일반 style 보다 큼. base 받아 자체 비율 (val=base+6, lbl=base-2).
+        # font_scale 자동 비례.
+        from core.themes import FONT_SIZES
+        _base = int(FONT_SIZES.get("body", 14))
+        val_px = _base + 6   # base 14 → 20
+        lbl_px = max(9, _base - 2)  # base 14 → 12
         for i, h in enumerate(self.HEADERS):
             col = QVBoxLayout()
             col.setContentsMargins(0, 1, 0, 1)
