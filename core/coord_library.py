@@ -61,6 +61,10 @@ class CoordPreset:
     last_used: str
     x_name: str = "X"   # 원본 X PARAMETER 이름 (예: "X", "X_1000", "X_1000_A")
     y_name: str = "Y"   # 원본 Y PARAMETER 이름
+    # 영구 고유 번호 — 콤보 라벨 prefix 등에 사용. 1부터 시작, 0 은 미할당
+    # (load 시 _ensure_ids 가 created_at 순으로 자동 부여). 삭제 후 빈 번호는
+    # 다음 add 시 smallest-unused 로 채움 (사용자 정책 2026-04-30).
+    id: int = 0
 
     # recipe + pair 로 자동 표시 이름 (UI 전용, 저장 X)
     @property
@@ -81,6 +85,7 @@ class CoordPreset:
             last_used=str(d.get("last_used", "")),
             x_name=str(d.get("x_name", "X")),
             y_name=str(d.get("y_name", "Y")),
+            id=int(d.get("id", 0) or 0),
         )
 
 
@@ -131,6 +136,32 @@ class CoordLibrary:
             self.presets = [CoordPreset.from_dict(p) for p in raw if isinstance(p, dict)]
         except Exception:
             self.presets = []
+        # id 부여 — 누락된 entry (id=0) 들에 created_at 순서로 smallest-unused 채움
+        # (사용자 정책 2026-04-30: 영구 고유 번호, 삭제 후 빈 번호 다음 추가 시 채움)
+        self._ensure_ids()
+
+    def _ensure_ids(self) -> None:
+        """id=0 인 entry 들에 smallest-unused 부여 (created_at 오름차순)."""
+        used = {p.id for p in self.presets if p.id > 0}
+        no_id = [p for p in self.presets if p.id <= 0]
+        if not no_id:
+            return
+        no_id.sort(key=lambda p: p.created_at)
+        next_avail = 1
+        for p in no_id:
+            while next_avail in used:
+                next_avail += 1
+            p.id = next_avail
+            used.add(next_avail)
+            next_avail += 1
+
+    def next_id(self) -> int:
+        """다음 신규 entry 에 부여할 smallest-unused id."""
+        used = {p.id for p in self.presets}
+        i = 1
+        while i in used:
+            i += 1
+        return i
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -256,6 +287,7 @@ class CoordLibrary:
             return existing, False
 
         # 신규 추가 — 페어 단위 overwrite 라 이름 자동생성 불필요
+        # id 는 smallest-unused (사용자 정책 2026-04-30 — 삭제 후 빈 번호 채움)
         preset = CoordPreset(
             recipe=recipe,
             n_points=len(x),
@@ -265,6 +297,7 @@ class CoordLibrary:
             y_mm=[float(v) for v in y],
             created_at=now,
             last_used=now,
+            id=self.next_id(),
         )
         self.presets.append(preset)
         if save:
