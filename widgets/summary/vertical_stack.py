@@ -102,8 +102,11 @@ class SummaryVerticalStack(SummaryWidget):
         self._table.setFixedHeight(h)
 
     def set_target_width(self, w: int) -> None:
-        self.setFixedWidth(w)
-        self._table.setFixedWidth(w)
+        # vertical_stack 만 가로 0.7배 — 라벨/값 사이 너무 벌어지지 않게
+        # (사용자 정책 2026-04-30). cell layout 의 AlignHCenter 로 가운데 정렬됨.
+        target = int(w * 0.7)
+        self.setFixedWidth(target)
+        self._table.setFixedWidth(target)
 
     def context_menu_target(self) -> QWidget:
         return self._table
