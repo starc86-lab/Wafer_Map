@@ -520,8 +520,16 @@ class MainWindow(QMainWindow):
         )
 
         self._fill_value_combo(value_ordered, value_sel)
-        # 좌표 콤보: pair 단위 — "x / y" 표시, itemData = (x, y) 튜플
+        # 좌표 콤보: pair 단위 — "x / y" 표시, itemData = (x, y) 튜플.
+        # 가족 자체 페어 + 사용자 명시 추가 라이브러리 entries (사용자 정책 2026-04-30).
+        # 같은 (x, y) 페어 중복은 가족 자체 우선 (콤보 순서 = 자동매칭 우선순위).
         pairs = list(zip(x_ordered, y_ordered))
+        seen = set(pairs)
+        for p in self._added_presets:
+            pair = (p.x_name, p.y_name)
+            if pair not in seen:
+                pairs.append(pair)
+                seen.add(pair)
         self._fill_coord_combo(pairs, (x_sel, y_sel) if x_sel and y_sel else None)
 
         any_input = bool(self._result_a or self._result_b)
@@ -601,14 +609,21 @@ class MainWindow(QMainWindow):
         """cb_coord 를 (x, y) pair 리스트로 채움.
 
         각 아이템 표시: "x / y   [N pt]", UserRole: (x, y) 튜플.
-        N 은 x 의 좌표 개수 (같은 pair 의 x/y 는 n 동일 전제).
+        N 은 x 의 좌표 개수 (같은 pair 의 x/y 는 n 동일 전제). 라이브러리에서
+        추가된 페어는 가족 wafer.parameters 에 없을 수 있어 _added_presets 에서
+        n_points fallback 조회 (사용자 정책 2026-04-30).
         """
         prev = self._current_xy()
         available_ns = self._build_selection_context()[0]
+        added_n_by_pair = {
+            (p.x_name, p.y_name): p.n_points for p in self._added_presets
+        }
         self.cb_coord.blockSignals(True)
         self.cb_coord.clear()
         for x, y in pairs:
             n = available_ns.get(x)
+            if n is None:
+                n = added_n_by_pair.get((x, y))
             label = f"{x} / {y} [{n} pt]" if n is not None else f"{x} / {y}"
             self.cb_coord.addItem(label, (x, y))
         target = selected if selected else prev
@@ -831,13 +846,21 @@ class MainWindow(QMainWindow):
         dialog = PresetSelectDialog(library, current_recipe, n, parent=self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        preset = dialog.selected_preset()
-        if preset is None:
+        presets = dialog.selected_presets()
+        if not presets:
             return
-        library.touch(preset)
-        self._added_presets = [preset]
+        # 다이얼로그에서 선택한 모든 entries 추가 (다중, 사용자 정책 2026-04-30).
+        # 같은 (x_name, y_name) 페어 중복 제거 (id 기준, 가족 list 에서 처리).
+        existing_ids = {p.id for p in self._added_presets if p.id}
+        for p in presets:
+            library.touch(p, save=False)
+            if p.id not in existing_ids:
+                self._added_presets.append(p)
+                existing_ids.add(p.id)
+        library.save()
         self.btn_load_preset.setText(PRESET_BUTTON_ACTIVE_TEXT)
-        self._apply_preset_indicator()
+        # 콤보 재빌드 → 추가된 페어들 노출
+        self._refresh_controls()
 
     def _first_preset(self) -> CoordPreset | None:
         """`_added_presets` 의 첫 entry — 이전 `_preset_override` 호환 호출용."""
@@ -882,46 +905,16 @@ class MainWindow(QMainWindow):
             self._added_presets = [preset]
             self.btn_load_preset.setText(PRESET_BUTTON_ACTIVE_TEXT)
 
-    # preset 소스 마킹 role — UserRole 은 (x, y) tuple 로 이미 사용 중.
-    # UserRole+1 을 별도 role 로 써서 "preset" 여부 플래그만 저장.
-    _ROLE_PRESET = int(Qt.ItemDataRole.UserRole) + 1
-
     def _apply_preset_indicator(self):
-        """preset 활성 시 cb_coord 상단에 해당 preset pair **하나만** "x / y   [N pt]" 로 삽입.
+        """과거 preset_override 콤보 sentinel 마킹 — F4 에서 폐지.
 
-        - 저장 단위가 per-pair 로 바뀐 뒤 프리셋 로드 = pair 하나 → 상단에 그 하나만.
-        - UserRole = (x_name, y_name) tuple (기존 아이템과 동일 규약 유지)
-        - UserRole+1 = "preset" 플래그 (스타일 구분용)
-        - 입력에 같은 pair 가 있으면 제거 (preset 버전이 대체).
+        가족 좌표 list 에 _added_presets 가 통합되어 콤보에 자연 노출되므로 별도
+        sentinel 처리 불필요. 호출처는 _refresh_controls 호출로 대체 (사용자 정책
+        2026-04-30). 기존 호출자가 남아있으면 _refresh_controls 위임.
         """
-        from PySide6.QtGui import QBrush, QColor, QFont
-        combo = self.cb_coord
-        combo.blockSignals(True)
-        try:
-            for i in range(combo.count() - 1, -1, -1):
-                if combo.itemData(i, self._ROLE_PRESET) == "preset":
-                    combo.removeItem(i)
-
-            if not self._added_presets:
-                return
-
-            p = self._first_preset()
-            n = len(p.x_mm)
-            label = f"{p.x_name} / {p.y_name} [{n} pt]"
-            for j in range(combo.count() - 1, -1, -1):
-                data = combo.itemData(j)
-                if isinstance(data, tuple) and data == (p.x_name, p.y_name):
-                    combo.removeItem(j)
-            combo.insertItem(0, label, (p.x_name, p.y_name))
-            combo.setItemData(0, "preset", self._ROLE_PRESET)
-            f = QFont(combo.font())
-            f.setBold(True)
-            combo.setItemData(0, f, Qt.ItemDataRole.FontRole)
-            combo.setItemData(0, QBrush(QColor("#4361ee")),
-                              Qt.ItemDataRole.ForegroundRole)
-            combo.setCurrentIndex(0)
-        finally:
-            combo.blockSignals(False)
+        # F4 에선 콤보 재빌드만 (가족 list 통합으로 added_presets 자연 노출)
+        # 기존 호출처가 남아있으면 _refresh_controls 가 처리
+        return
 
     def _on_visualize(self) -> None:
         # signature skip 정책 폐기 (2026-04-27) — 같은 입력 재클릭 시에도 매번

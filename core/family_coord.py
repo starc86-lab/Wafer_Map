@@ -91,22 +91,36 @@ class FamilyCoord:
 
     좌표값은 가족 내 그 페어 보유한 wafer 중 **가장 긴 N 의 wafer 좌표**
     (mm 환산 후). 사용자 정책 2026-04-30 — paste 마지막 cell 누락 edge 대응.
+
+    source / lib_id (사용자 정책 2026-04-30, 라이브러리 통합):
+      - "family": 가족 wafer 들이 자체 보유한 좌표 (lib_id=None)
+      - "library": 라이브러리 entry 에서 가족 list 에 추가됨 (lib_id=entry.id)
     """
     x_name: str
     y_name: str
     n: int
     x_mm: np.ndarray
     y_mm: np.ndarray
+    source: str = "family"
+    lib_id: int | None = None
 
 
-def compute_family_coords(result: ParseResult) -> list[FamilyCoord]:
+def compute_family_coords(
+    result: ParseResult,
+    added_presets: list | None = None,
+) -> list[FamilyCoord]:
     """가족이 보유한 좌표 페어 list. select_xy_pairs 동일 룰로 페어 추출 후
     각 페어 별 가장 긴 N 의 wafer 좌표 (mm 환산) 채택.
 
     같은 RECIPE 내 같은 좌표 PARA 이름 = 좌표값 동일 보장 (사용자 정책) —
     좌표값 비교 검증 없이 가장 긴 N 채택만.
+
+    `added_presets`: 사용자 명시 추가 / 자동 RECIPE 매칭으로 가족 list 에 추가된
+    라이브러리 CoordPreset list. 가족 자체 페어 뒤에 append (사용자 정책 2026-04-30).
     """
     if not result.wafers:
+        if added_presets:
+            return [_preset_to_family_coord(p) for p in added_presets]
         return []
 
     # lazy imports — main_window 의존 없음
@@ -148,8 +162,30 @@ def compute_family_coords(result: ParseResult) -> list[FamilyCoord]:
             family_coords.append(FamilyCoord(
                 x_name=x_name, y_name=y_name, n=best_n,
                 x_mm=best_x_mm, y_mm=best_y_mm,
+                source="family",
             ))
+
+    # 라이브러리 추가 entries — 가족 페어 뒤에 append. 동일 (x_name, y_name) 페어가
+    # 가족에 이미 있어도 중복 노출 허용 (사용자 정책: 콤보에 둘 다 보임,
+    # 자동매칭은 콤보 순서 첫 번째 = 가족 우선).
+    if added_presets:
+        for p in added_presets:
+            family_coords.append(_preset_to_family_coord(p))
+
     return family_coords
+
+
+def _preset_to_family_coord(preset) -> FamilyCoord:
+    """CoordPreset → FamilyCoord (source='library')."""
+    return FamilyCoord(
+        x_name=preset.x_name,
+        y_name=preset.y_name,
+        n=int(preset.n_points),
+        x_mm=np.asarray(preset.x_mm, dtype=float),
+        y_mm=np.asarray(preset.y_mm, dtype=float),
+        source="library",
+        lib_id=int(preset.id) if preset.id else None,
+    )
 
 
 def get_family_coord(
