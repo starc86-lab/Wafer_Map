@@ -31,7 +31,9 @@ STYLES: dict[str, tuple[str, str]] = {
     "minimal_underline": ("widgets.summary.minimal_underline", "SummaryMinimalUnderline"),
     "pill_badge":        ("widgets.summary.pill_badge", "SummaryPillBadge"),
     "color_footer":      ("widgets.summary.color_footer", "SummaryColorFooter"),
-    # phase 4~5 에서 추가
+    # Group 3 — paintEvent (phase 4)
+    "layered_depth":     ("widgets.summary.layered_depth", "SummaryLayeredDepth"),
+    # phase 5 에서 추가
 }
 
 DEFAULT_STYLE = "ppt_basic"
