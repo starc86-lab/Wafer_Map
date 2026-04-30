@@ -26,12 +26,14 @@ class _VerticalDelegate(QStyledItemDelegate):
         painter.fillRect(option.rect, self.BG)
         text = index.data(Qt.ItemDataRole.DisplayRole)
         if text is not None:
-            font = index.data(Qt.ItemDataRole.FontRole)
-            if font is not None:
-                painter.setFont(font)
-            # col 0 = 라벨 (좌측 정렬, 회색), col 1 = 값 (우측 정렬, 검정 bold)
+            font = index.data(Qt.ItemDataRole.FontRole) or painter.font()
+            # col 1 (값) 만 bold — font weight 는 글로벌 스타일/사이즈와 독립
+            # (사용자 정책 2026-04-30, 시각 강조).
+            if index.column() == 1:
+                font.setBold(True)
+            painter.setFont(font)
             painter.setPen(self.TEXT_LABEL if index.column() == 0 else self.TEXT_VALUE)
-            r = option.rect.adjusted(8, 0, -8, 0)  # 좌우 8 padding
+            r = option.rect.adjusted(8, 0, -8, 0)
             align = (Qt.AlignmentFlag.AlignLeft if index.column() == 0
                      else Qt.AlignmentFlag.AlignRight) | Qt.AlignmentFlag.AlignVCenter
             painter.drawText(r, align, str(text))
