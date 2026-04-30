@@ -145,6 +145,13 @@ class SummaryWidget(QWidget):
         # resizeRowsToContents 후 계산되지만, base default 는 공통 추정치.
         return 50
 
+    def fit_to_height(self, h: int) -> None:
+        """wafer_cell 이 setFixedHeight(reserved) 후 호출. style 별 내부 layout
+        이 reserved 안에 fit 되도록 후처리 — 다행 위젯 (vertical_stack) 의 행
+        높이 재배분 등. default no-op (대부분 style 은 자연 sizeHint 로 충분).
+        """
+        return
+
     def is_chart_overlay_only(self) -> bool:
         """True 면 표 영역 안 그리고 cell 의 chart 좌상단 overlay 만 표시.
 

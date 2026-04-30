@@ -963,6 +963,9 @@ class WaferCell(QFrame):
             SUMMARY_RESERVED_H = self._reserved_h_cache
         if self._summary.height() != SUMMARY_RESERVED_H:
             self._summary.setFixedHeight(SUMMARY_RESERVED_H)
+        # 다행 위젯 (vertical_stack 등) 이 reserved 안에 fit 되도록 후처리.
+        # default no-op — style 별 override (사용자 정책 2026-04-30).
+        self._summary.fit_to_height(SUMMARY_RESERVED_H)
         # no_table 이면 summary 위젯 hidden, chart overlay 라벨 visible
         self._summary.setVisible(not is_overlay_only)
         self._chart_overlay_avg.setVisible(is_overlay_only)

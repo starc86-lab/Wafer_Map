@@ -85,9 +85,20 @@ class SummaryVerticalStack(SummaryWidget):
                 self._table.setItem(r, 1, QTableWidgetItem(val))
             else:
                 it.setText(val)
-        # 자연 row height (font 반영) 으로 행간 자동. cell 이 setFixedHeight 으로
-        # 강제하면 그 안에 fit (resizeRowsToContents 호출).
-        self._table.resizeRowsToContents()
+        # 자연 row height — fit_to_height 가 cell 강제 height 받아 재배분.
+
+    def fit_to_height(self, h: int) -> None:
+        """3 행을 reserved 안에 균등 분배. ppt_basic 자연 height (≈34) 기준이라
+        각 행 약 11px. font_scale 클 때도 자동 비례 (사용자 정책 2026-04-30).
+        """
+        if h <= 0:
+            return
+        frame = 2 * self._table.frameWidth()
+        per_row = max(8, (h - frame) // 3)
+        self._table.verticalHeader().setDefaultSectionSize(per_row)
+        for r in range(3):
+            self._table.setRowHeight(r, per_row)
+        self._table.setFixedHeight(h)
 
     def set_target_width(self, w: int) -> None:
         self.setFixedWidth(w)
