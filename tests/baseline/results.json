@@ -44,7 +44,7 @@
     "after_paste_run_enabled": true
   },
   "s_family_partial_coord": {
-    "reason_bar_text": "A: LX002.03 좌표 누락: X_A/Y_A",
+    "reason_bar_text": "LX002.03 좌표 누락: X_A/Y_A",
     "reason_bar_severity": "info",
     "n_cells": 3,
     "cells": [
@@ -86,15 +86,15 @@
       {
         "code": "family_coord_missing",
         "severity": "info",
-        "message": "A: LX002.03 좌표 누락: X_A/Y_A"
+        "message": "LX002.03 좌표 누락: X_A/Y_A"
       }
     ],
-    "after_paste_reason_bar": "A: LX002.03 좌표 누락: X_A/Y_A",
+    "after_paste_reason_bar": "LX002.03 좌표 누락: X_A/Y_A",
     "after_paste_severity": "info",
     "after_paste_run_enabled": true
   },
   "s_family_short_n": {
-    "reason_bar_text": "A: LX003.03 좌표 Point 부족: X (12pt, 1점 부족)",
+    "reason_bar_text": "LX003.03 좌표 Point 부족: X (12pt, 1점 부족)",
     "reason_bar_severity": "info",
     "n_cells": 3,
     "cells": [
@@ -136,15 +136,15 @@
       {
         "code": "family_coord_short",
         "severity": "info",
-        "message": "A: LX003.03 좌표 Point 부족: X (12pt, 1점 부족)"
+        "message": "LX003.03 좌표 Point 부족: X (12pt, 1점 부족)"
       }
     ],
-    "after_paste_reason_bar": "A: LX003.03 좌표 Point 부족: X (12pt, 1점 부족)",
+    "after_paste_reason_bar": "LX003.03 좌표 Point 부족: X (12pt, 1점 부족)",
     "after_paste_severity": "info",
     "after_paste_run_enabled": true
   },
   "s_family_multi_recipe": {
-    "reason_bar_text": "⚠ A: RECIPE 다름 — LX004.03: RECIPE_B vs 가족: RECIPE_A",
+    "reason_bar_text": "⚠ RECIPE 다름 — LX004.03: RECIPE_B vs 가족: RECIPE_A",
     "reason_bar_severity": "error",
     "n_cells": 0,
     "cells": [],
@@ -155,10 +155,10 @@
       {
         "code": "single_recipe_mismatch",
         "severity": "error",
-        "message": "A: RECIPE 다름 — LX004.03: RECIPE_B vs 가족: RECIPE_A"
+        "message": "RECIPE 다름 — LX004.03: RECIPE_B vs 가족: RECIPE_A"
       }
     ],
-    "after_paste_reason_bar": "⚠ A: RECIPE 다름 — LX004.03: RECIPE_B vs 가족: RECIPE_A",
+    "after_paste_reason_bar": "⚠ RECIPE 다름 — LX004.03: RECIPE_B vs 가족: RECIPE_A",
     "after_paste_severity": "error",
     "after_paste_run_enabled": false
   },

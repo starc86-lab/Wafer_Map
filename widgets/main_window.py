@@ -475,11 +475,16 @@ class MainWindow(QMainWindow):
 
         a, b = self._result_a, self._result_b
         all_warnings: list = []
+        is_delta = bool(a and b)
+        # A/B prefix 는 DELTA 모드 (양쪽 paste 사용) 일 때만 — 어느 pane 의 warning
+        # 인지 구분 필요. single 모드면 prefix redundant 라 부착 X (사용자 정책 2026-04-30).
         if a:
-            all_warnings.extend(self._prefixed("A", validate_single(a)))
+            warns = validate_single(a)
+            all_warnings.extend(self._prefixed("A", warns) if is_delta else warns)
         if b:
-            all_warnings.extend(self._prefixed("B", validate_single(b)))
-        if a and b:
+            warns = validate_single(b)
+            all_warnings.extend(self._prefixed("B", warns) if is_delta else warns)
+        if is_delta:
             all_warnings.extend(validate_delta(a, b))
 
         self._delta_warnings = all_warnings
