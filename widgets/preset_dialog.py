@@ -2,9 +2,11 @@
 좌표 추가 다이얼로그 — 라이브러리에서 좌표 페어 1개+ 선택 후 가족 좌표 list 에
 추가 (사용자 정책 2026-04-30, preset_override 강제 1순위 폐지).
 
-- 필터: 현재 VALUE PARAMETER의 DATA 개수(`n_points`)가 일치하는 프리셋만
+- 필터: "Point 일치만 표시" 체크박스 (기본 체크). 체크 시 현재 VALUE n_points
+  일치 entry 만, 해제 시 라이브러리 전체 entry 표시 (사용자 정책 2026-04-30).
 - 개별 레코드 행 표시 (레시피 그룹 병합 없음). 첫 컬럼 # = id (영구 고유 번호)
-- 정렬: 완전일치 최우선 → 토큰 매칭 수 내림차순 → `last_used` 최신순 (tiebreak)
+- 정렬: 1순위 point 매칭 (현재 n 일치 우선), 2순위 RECIPE 유사도 (완전일치 →
+  토큰 매칭 수), 3순위 last_used 최신순 — 체크박스 무관 동일 정렬 키.
 - ExtendedSelection — 여러 행 동시 선택 후 Add
 - 더블클릭 / Add → accept (선택된 행들 모두 반환)
 """
@@ -13,16 +15,16 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
-    QAbstractItemView, QDialog, QDialogButtonBox, QHBoxLayout, QHeaderView,
-    QLabel, QMenu, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout,
-    QWidget,
+    QAbstractItemView, QCheckBox, QDialog, QDialogButtonBox, QHBoxLayout,
+    QHeaderView, QLabel, QMenu, QPushButton, QTableWidget, QTableWidgetItem,
+    QVBoxLayout, QWidget,
 )
 
 from core.coord_library import CoordLibrary, CoordPreset, format_dt_display, recipe_similarity
 
 
 class PresetSelectDialog(QDialog):
-    """n_points 필터 + RECIPE 유사도 정렬. 레코드 개별 행 표시."""
+    """n_points 필터 (체크박스) + 통합 정렬. 레코드 개별 행 표시."""
 
     def __init__(
         self,
@@ -35,26 +37,26 @@ class PresetSelectDialog(QDialog):
         self.setWindowTitle("좌표 추가")
         self.resize(720, 500)
 
-        # n_points 필터
-        filtered = library.filter_by_n(current_n)
-        # RECIPE 유사도 → last_used 최신 순
-        filtered.sort(
-            key=lambda p: (recipe_similarity(p.recipe, current_recipe), p.last_used),
-            reverse=True,
-        )
-        self._presets: list[CoordPreset] = filtered
+        self._library = library
+        self._current_recipe = current_recipe
+        self._current_n = current_n
+        self._presets: list[CoordPreset] = []
 
         lay = QVBoxLayout(self)
 
-        info = QLabel(
-            f"현재 입력: n_points = {current_n}  ·  "
-            f"recipe = \"{current_recipe or '-'}\""
-            f"   →   {len(filtered)}개 레코드 후보"
-        )
-        info.setStyleSheet("color: #495057; padding: 4px 0;")
-        lay.addWidget(info)
+        # 상단: 정보 라벨 + Point 일치만 표시 체크박스
+        top_row = QHBoxLayout()
+        self._info = QLabel()
+        self._info.setStyleSheet("color: #495057; padding: 4px 0;")
+        top_row.addWidget(self._info)
+        top_row.addStretch(1)
+        self._chk_n_filter = QCheckBox("Point 일치만 표시")
+        self._chk_n_filter.setChecked(True)
+        self._chk_n_filter.toggled.connect(self._reload)
+        top_row.addWidget(self._chk_n_filter)
+        lay.addLayout(top_row)
 
-        self._table = QTableWidget(len(filtered), 6)
+        self._table = QTableWidget(0, 6)
         self._table.setHorizontalHeaderLabels(
             ["#", "RECIPE", "X / Y", "유사도", "Point", "마지막 사용"],
         )
@@ -73,29 +75,6 @@ class PresetSelectDialog(QDialog):
         # 우클릭 → 컨텍스트 메뉴 (좌표 미리보기)
         self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._table.customContextMenuRequested.connect(self._on_table_context_menu)
-
-        for i, p in enumerate(filtered):
-            sim = recipe_similarity(p.recipe, current_recipe)
-            sim_text = self._format_similarity(sim, p.recipe, current_recipe)
-            # # (id) — 영구 고유 번호. 콤보 라벨 prefix 와 동일 (사용자 정책 2026-04-30).
-            id_item = QTableWidgetItem(str(p.id) if p.id else "")
-            id_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self._table.setItem(i, 0, id_item)
-            for col, text in enumerate([
-                p.recipe,
-                f"{p.x_name} / {p.y_name}",
-                sim_text,
-                str(p.n_points),
-                format_dt_display(p.last_used),
-            ], start=1):
-                item = QTableWidgetItem(text)
-                if col in (3, 4):
-                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                self._table.setItem(i, col, item)
-
-        if filtered:
-            self._table.selectRow(0)
-
         lay.addWidget(self._table, stretch=1)
 
         # 좌측: 좌표 미리보기 버튼 / 우측: Apply / Cancel
@@ -114,6 +93,61 @@ class PresetSelectDialog(QDialog):
         btns.rejected.connect(self.reject)
         btn_row.addWidget(btns)
         lay.addLayout(btn_row)
+
+        self._reload()
+
+    def _reload(self) -> None:
+        """체크박스 상태 기반 필터 + 통합 정렬 + 테이블 재빌드."""
+        n_only = self._chk_n_filter.isChecked()
+        if n_only:
+            presets = self._library.filter_by_n(self._current_n)
+        else:
+            presets = list(self._library.presets)
+
+        cur_n = self._current_n
+        cur_r = self._current_recipe
+        # 통합 정렬 키 — reverse=True 로 큰 값 우선:
+        #   1순위 point 매칭 (True > False)
+        #   2순위 recipe similarity (완전일치 10000+ > 토큰수 > 0)
+        #   3순위 last_used (ISO 문자열, 최신 우선)
+        presets.sort(
+            key=lambda p: (
+                p.n_points == cur_n,
+                recipe_similarity(p.recipe, cur_r),
+                p.last_used,
+            ),
+            reverse=True,
+        )
+        self._presets = presets
+
+        self._info.setText(
+            f"현재 입력: n_points = {cur_n}  ·  "
+            f"recipe = \"{cur_r or '-'}\""
+            f"   →   {len(presets)}개 레코드 후보"
+        )
+
+        self._table.setRowCount(len(presets))
+        for i, p in enumerate(presets):
+            sim = recipe_similarity(p.recipe, cur_r)
+            sim_text = self._format_similarity(sim, p.recipe, cur_r)
+            # # (id) — 영구 고유 번호. 콤보 라벨 prefix 와 동일 (사용자 정책 2026-04-30).
+            id_item = QTableWidgetItem(str(p.id) if p.id else "")
+            id_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._table.setItem(i, 0, id_item)
+            for col, text in enumerate([
+                p.recipe,
+                f"{p.x_name} / {p.y_name}",
+                sim_text,
+                str(p.n_points),
+                format_dt_display(p.last_used),
+            ], start=1):
+                item = QTableWidgetItem(text)
+                if col in (3, 4):
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self._table.setItem(i, col, item)
+
+        if presets:
+            self._table.selectRow(0)
 
     @staticmethod
     def _format_similarity(sim: int, preset_recipe: str, current: str) -> str:

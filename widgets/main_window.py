@@ -654,7 +654,17 @@ class MainWindow(QMainWindow):
             label = (f"{prefix}{x} / {y} [{n} pt]" if n is not None
                      else f"{prefix}{x} / {y}")
             self.cb_coord.addItem(label, triple)
-        target = selected if selected else prev
+        # prev 우선 — 새 list 에 prev 가 있으면 보존, 없으면 selected fallback.
+        # 좌표 추가 시점엔 호출자 (_open_preset_dialog) 가 _refresh_controls 후
+        # 직접 setCurrentIndex 로 추가된 entry 선택 (사용자 정책 2026-04-30).
+        target = None
+        if prev:
+            for i in range(self.cb_coord.count()):
+                if self.cb_coord.itemData(i) == prev:
+                    target = prev
+                    break
+        if target is None:
+            target = selected
         if target:
             for i in range(self.cb_coord.count()):
                 if self.cb_coord.itemData(i) == target:
@@ -695,6 +705,11 @@ class MainWindow(QMainWindow):
 
         이름 획득은 _current_value() 로. currentText() 대신 UserRole 읽어야
         표시 텍스트 ([N pt] 포함) 가 아닌 순수 이름을 얻음.
+
+        target 결정: prev (사용자 현재 선택) 우선 → selected (자동선택) fallback.
+        paste 직후엔 cb_value 비어있어 prev='' → selected 자동선택 작동.
+        이후 _refresh_controls 호출 (좌표 추가 등) 시 사용자 현재 선택 보존
+        (사용자 정책 2026-04-30, 좌표 추가 후 VALUE 초기화 회귀 fix).
         """
         prev = self._current_value()
         available_ns = self._build_selection_context()[0]
@@ -704,7 +719,15 @@ class MainWindow(QMainWindow):
             n = available_ns.get(name)
             label = f"{name} [{n} pt]" if n is not None else name
             self.cb_value.addItem(label, name)
-        target = selected or prev
+        # prev 우선 — 새 list 에 prev 가 있으면 보존, 없으면 selected fallback
+        target = None
+        if prev:
+            for i in range(self.cb_value.count()):
+                if self.cb_value.itemData(i) == prev:
+                    target = prev
+                    break
+        if target is None:
+            target = selected
         if target:
             for i in range(self.cb_value.count()):
                 if self.cb_value.itemData(i) == target:
@@ -853,13 +876,21 @@ class MainWindow(QMainWindow):
         result = self._result_a or self._result_b
         if result is None or not result.wafers:
             return
-        v = self._current_value()
-        if not v:
-            return
         first_wafer = next(iter(result.wafers.values()))
-        if v not in first_wafer.parameters:
-            return
-        n = first_wafer.parameters[v].n
+        # VALUE n 결정 — 일반 PARA / 합성 PARA (sentinel) 분기.
+        # 합성 PARA 선택 상태 (cb_value sentinel) 면 _current_value() 가 빈 문자열
+        # 반환해 다이얼로그 안 열리던 버그 fix (사용자 정책 2026-04-30).
+        v_data = self.cb_value.currentData()
+        if is_combined_data(v_data):
+            item = self._combined_state.get_by_v_sentinel(v_data)
+            if item is None or item.v_key not in first_wafer.parameters:
+                return
+            n = first_wafer.parameters[item.v_key].n
+        else:
+            v = self._current_value()
+            if not v or v not in first_wafer.parameters:
+                return
+            n = first_wafer.parameters[v].n
         current_recipe = first_wafer.recipe
 
         from widgets.preset_dialog import PresetSelectDialog
@@ -873,14 +904,27 @@ class MainWindow(QMainWindow):
         # 다이얼로그에서 선택한 모든 entries 추가 (다중, 사용자 정책 2026-04-30).
         # 같은 (x_name, y_name) 페어 중복 제거 (id 기준, 가족 list 에서 처리).
         existing_ids = {p.id for p in self._added_presets if p.id}
+        newly_added: list[CoordPreset] = []
         for p in presets:
             library.touch(p, save=False)
             if p.id not in existing_ids:
                 self._added_presets.append(p)
                 existing_ids.add(p.id)
+                newly_added.append(p)
         library.save()
-        # 콤보 재빌드 → 추가된 페어들 노출
+        # 콤보 재빌드 → 추가된 페어들 노출 (VALUE 콤보는 prev 우선 = 사용자 현재
+        # 선택 보존). 추가된 entry 가 있으면 좌표 콤보에서 첫 추가 entry 강제 선택
+        # — "추가됨과 동시에 선택" 사용자 정책 2026-04-30.
+        target_triple: tuple[str, str, int | None] | None = None
+        if newly_added:
+            ap = newly_added[0]
+            target_triple = (ap.x_name, ap.y_name, ap.id if ap.id else None)
         self._refresh_controls()
+        if target_triple is not None:
+            for i in range(self.cb_coord.count()):
+                if self.cb_coord.itemData(i) == target_triple:
+                    self.cb_coord.setCurrentIndex(i)
+                    break
 
     def _first_preset(self) -> CoordPreset | None:
         """`_added_presets` 의 첫 entry — 이전 `_preset_override` 호환 호출용."""
