@@ -41,10 +41,10 @@ class SummaryBigNumber(SummaryWidget):
         from core.themes import FONT_SIZES
         _base = int(FONT_SIZES.get("body", 14))
         val_px = _base + 6   # base 14 → 20
-        lbl_px = max(8, _base - 3)  # base 14 → 11
+        lbl_px = max(8, _base - 4)  # base 14 → 10
         for i, h in enumerate(self.HEADERS):
             col = QVBoxLayout()
-            col.setContentsMargins(0, 1, 0, 1)
+            col.setContentsMargins(0, 0, 0, 0)
             col.setSpacing(0)
             lbl = QLabel(_spaced(h))
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -58,8 +58,12 @@ class SummaryBigNumber(SummaryWidget):
                 f"QLabel {{ color: #111111; font-size: {val_px}px;"
                 " font-weight: bold; background-color: transparent; }}"
             )
+            # 라벨+값 세로 중앙 정렬 — 위/아래 stretch 균등 (사용자 정책 2026-04-30,
+            # 표 아래쪽 치우침 fix)
+            col.addStretch(1)
             col.addWidget(lbl)
             col.addWidget(val)
+            col.addStretch(1)
             outer.addLayout(col, stretch=1)
             self._labels.append(lbl)
             self._values.append(val)
