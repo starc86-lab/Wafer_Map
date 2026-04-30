@@ -41,7 +41,7 @@ class SummaryBigNumber(SummaryWidget):
         for i, h in enumerate(self.HEADERS):
             col = QVBoxLayout()
             col.setContentsMargins(0, 0, 0, 0)
-            col.setSpacing(3)  # 라벨/값 사이 살짝 띄움 (사용자 정책 2026-04-30)
+            col.setSpacing(4)  # 라벨/값 사이 (3 × 1.3 ≈ 4, 사용자 정책 2026-04-30)
             # 라벨 — uppercase + thin space (U+2009, ≈ 일반 space 의 절반)
             # 글자 사이 끼움. PercentageSpacing 보다 호환성 확실 (사용자 정책 2026-04-30).
             lbl = QLabel(" ".join(h.upper()))
