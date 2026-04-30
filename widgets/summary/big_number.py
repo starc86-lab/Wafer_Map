@@ -41,7 +41,9 @@ class SummaryBigNumber(SummaryWidget):
         for i, h in enumerate(self.HEADERS):
             col = QVBoxLayout()
             col.setContentsMargins(0, 0, 0, 0)
-            col.setSpacing(4)  # 라벨/값 사이 (3 × 1.3 ≈ 4, 사용자 정책 2026-04-30)
+            # 라벨/값 사이 줄간격 — sizeHint 압축 방지 위해 child setFixedHeight
+            # 으로 자리 확보. spacing 은 그 후에 적용됨 (사용자 정책 2026-04-30).
+            col.setSpacing(6)
             # 라벨 — uppercase + thin space (U+2009, ≈ 일반 space 의 절반)
             # 글자 사이 끼움. PercentageSpacing 보다 호환성 확실 (사용자 정책 2026-04-30).
             lbl = QLabel(" ".join(h.upper()))
@@ -56,6 +58,10 @@ class SummaryBigNumber(SummaryWidget):
                 f"QLabel {{ color: #111111; font-size: {val_px}px;"
                 " font-weight: bold; background-color: transparent; }}"
             )
+            # child setFixedHeight 으로 layout 압축 방지 — 그래야 col.setSpacing
+            # 이 child 사이 자리 차지 가능 (사용자 정책 2026-04-30).
+            lbl.setFixedHeight(lbl_px + 2)
+            val.setFixedHeight(val_px + 2)
             # 라벨+값 세로 중앙 정렬 — 위/아래 stretch 균등 (사용자 정책 2026-04-30,
             # 표 아래쪽 치우침 fix)
             col.addStretch(1)
