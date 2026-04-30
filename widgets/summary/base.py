@@ -118,3 +118,15 @@ class SummaryWidget(QWidget):
         # ppt_basic: 2 row × 24 + frame ≈ 50px. 정확한 값은 _update_table 에서
         # resizeRowsToContents 후 계산되지만, base default 는 공통 추정치.
         return 50
+
+    def is_chart_overlay_only(self) -> bool:
+        """True 면 표 영역 안 그리고 cell 의 chart 좌상단 overlay 만 표시.
+
+        no_table style 만 True. wafer_cell 이 SUMMARY_RESERVED_H=0 + chart overlay
+        활성 (사용자 정책 2026-04-30).
+        """
+        return False
+
+    def overlay_texts(self) -> tuple[str, str]:
+        """is_chart_overlay_only True 인 style 만 의미. (Mean, NU) 문자열."""
+        return "—", "—"

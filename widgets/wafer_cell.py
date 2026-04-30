@@ -689,6 +689,24 @@ class WaferCell(QFrame):
 
         self._colorbar = _ColorBar(self._chart_box)   # chart_box 의 overlay 자식
 
+        # No Table style 용 chart overlay 라벨 — 좌상단 Mean / NU 표시 (사용자
+        # 정책 2026-04-30, 표 사라진 만큼 cell 세로 감소 + 간단출력 모드).
+        # 다른 style 에서는 hidden. parent=chart_area 로 chart 위에 floating.
+        self._chart_overlay_avg = QLabel(self._chart_area)
+        self._chart_overlay_avg.setStyleSheet(
+            "QLabel { color: #111; font-size: 11px; font-weight: bold;"
+            " background-color: rgba(255,255,255,200);"
+            " border: 1px solid #aaa; border-radius: 3px; padding: 1px 5px; }"
+        )
+        self._chart_overlay_avg.setVisible(False)
+        self._chart_overlay_nu = QLabel(self._chart_area)
+        self._chart_overlay_nu.setStyleSheet(
+            "QLabel { color: #111; font-size: 11px; font-weight: bold;"
+            " background-color: rgba(255,255,255,200);"
+            " border: 1px solid #aaa; border-radius: 3px; padding: 1px 5px; }"
+        )
+        self._chart_overlay_nu.setVisible(False)
+
         # chart_box 는 title_stack 의 자식 → capture_container layout 에 별도 추가 안 함.
         # title_stack 이 이미 lay 에 있으므로 chart_box 도 자동 포함.
 
@@ -920,14 +938,32 @@ class WaferCell(QFrame):
         # (radial 숨김 여부 등) 가 동적이라 계산이 어긋나 chart 가 잘리는 버그.
         # title_h + padding_top 은 위 title_stack 과 일관. title 위 6px 여백 포함.
         title_h = self._title.sizeHint().height()
-        # Summary 영역 — ppt_basic 자연 height (34px = 16px row × 2 + frame 2) 를
-        # 표준으로 통일. 모든 style 이 34 안에 fit 책임. cell 전체 크기 phase 1
-        # 이전과 동일 보장 (사용자 정책 2026-04-30).
-        SUMMARY_RESERVED_H = 34
-        # 모든 style 강제 — ppt_basic 외 style 도 동일 height. 자연값 큰 style 은
-        # 클립되지 않도록 자체 layout 에서 fit 처리 (vertical_stack 행 높이 등).
+        # Summary 영역 — ppt_basic 자연 height (34px) 표준. 모든 style 이 34 안에
+        # fit 책임. cell 전체 크기 phase 1 이전과 동일 보장 (사용자 정책 2026-04-30).
+        # 단 no_table style (is_chart_overlay_only) 은 0 — 표 영역 사라지고 cell
+        # 세로 길이가 표 사라진 만큼 감소.
+        is_overlay_only = bool(getattr(self._summary, "is_chart_overlay_only",
+                                         lambda: False)())
+        SUMMARY_RESERVED_H = 0 if is_overlay_only else 34
         if self._summary.height() != SUMMARY_RESERVED_H:
             self._summary.setFixedHeight(SUMMARY_RESERVED_H)
+        # no_table 이면 summary 위젯 hidden, chart overlay 라벨 visible
+        self._summary.setVisible(not is_overlay_only)
+        self._chart_overlay_avg.setVisible(is_overlay_only)
+        self._chart_overlay_nu.setVisible(is_overlay_only)
+        if is_overlay_only:
+            avg_s, nu_s = self._summary.overlay_texts()
+            self._chart_overlay_avg.setText(f"Mean: {avg_s}")
+            self._chart_overlay_nu.setText(f"NU: {nu_s}")
+            # 좌상단 8,8 / 8,28 (위/아래 두 라벨)
+            self._chart_overlay_avg.adjustSize()
+            self._chart_overlay_nu.adjustSize()
+            self._chart_overlay_avg.move(8, 8)
+            self._chart_overlay_nu.move(
+                8, 8 + self._chart_overlay_avg.height() + 2,
+            )
+            self._chart_overlay_avg.raise_()
+            self._chart_overlay_nu.raise_()
         table_h = SUMMARY_RESERVED_H
         cap_w = w + bar_w + 6 * 2              # inner margin 6+6
         cap_h = padding_top + title_h + h + radial_h + table_h + 6 * 2 + 4 * 2

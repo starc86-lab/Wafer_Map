@@ -33,7 +33,8 @@ STYLES: dict[str, tuple[str, str]] = {
     "color_footer":      ("widgets.summary.color_footer", "SummaryColorFooter"),
     # Group 3 — paintEvent (phase 4)
     "layered_depth":     ("widgets.summary.layered_depth", "SummaryLayeredDepth"),
-    # phase 5 에서 추가
+    # Group 4 — overlay only (phase 5, 표 영역 제거 + chart 좌상단 표시)
+    "no_table":          ("widgets.summary.no_table", "SummaryNoTable"),
 }
 
 DEFAULT_STYLE = "ppt_basic"
