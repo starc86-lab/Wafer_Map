@@ -143,6 +143,13 @@ class ResultPanel(QWidget):
         for c in self._cells:
             c.invalidate_3d()
 
+    def set_table_style(self, style: str) -> None:
+        """Settings table.style 변경 — 모든 cell 의 _summary 위젯 교체.
+        RBF / GL 캐시 유지 (사용자 정책 2026-04-30).
+        """
+        for c in self._cells:
+            c.swap_summary_style(style)
+
     def refresh_all(self) -> None:
         """Settings 변경 시 — 모든 cell 렌더 캐시 reset + 보간 병렬 prefetch.
 

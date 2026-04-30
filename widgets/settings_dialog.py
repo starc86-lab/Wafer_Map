@@ -138,9 +138,14 @@ _limit_width = _fix_width
 # UI 설정 카드
 # ────────────────────────────────────────────────────────
 class UiSettingsCard(QGroupBox):
-    """테마/글꼴/크기 — 콤보 변경 즉시 `changed` 시그널 emit (다이얼로그에서 즉시 Apply)."""
+    """테마/글꼴/크기 — 콤보 변경 즉시 `changed` 시그널 emit (다이얼로그에서 즉시 Apply).
+
+    table_style 만 별도 `table_style_changed(str)` — graph_changed 흐름과 분리해
+    cell.swap_summary_style 만 호출 (RBF / GL 재렌더 회피, 사용자 정책 2026-04-30).
+    """
 
     changed = Signal()
+    table_style_changed = Signal(str)
 
     def __init__(self, settings: dict[str, Any], parent: QWidget | None = None) -> None:
         super().__init__("UI 설정", parent)
@@ -206,7 +211,10 @@ class UiSettingsCard(QGroupBox):
         self.cb_font.currentIndexChanged.connect(self.changed)
         self.cb_scale.currentIndexChanged.connect(self.changed)
         self.chk_save_window.toggled.connect(self.changed)
-        self.cb_table_style.currentIndexChanged.connect(self.changed)
+        # table_style 은 별도 시그널 — RBF/GL 재렌더 없이 _summary 위젯만 swap
+        self.cb_table_style.currentIndexChanged.connect(
+            lambda: self.table_style_changed.emit(self.cb_table_style.currentData())
+        )
 
     def gather(self) -> dict[str, Any]:
         return {
@@ -730,8 +738,9 @@ class Chart3DGroup(QGroupBox):
 class DesignTab(QWidget):
     """UI · 2D · 3D 세 카드 + 하단 좌측 Default 버튼. 카드 changed 시그널 통합 forward."""
 
-    ui_changed = Signal()       # UI 설정(테마·글꼴·크기) 변경
-    graph_changed = Signal()    # 2D / 3D 설정 변경
+    ui_changed = Signal()              # UI 설정(테마·글꼴·크기) 변경
+    graph_changed = Signal()           # 2D / 3D 설정 변경
+    table_style_changed = Signal(str)  # 표 스타일만 (cell.swap_summary_style 직결)
 
     def __init__(self, settings: dict[str, Any], parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -778,6 +787,7 @@ class DesignTab(QWidget):
         lay.addLayout(btn_row)
 
         self._ui_card.changed.connect(self.ui_changed)
+        self._ui_card.table_style_changed.connect(self.table_style_changed)
         self._card_common.changed.connect(self.graph_changed)
         self._card_2d.changed.connect(self.graph_changed)
         self._card_3d.changed.connect(self.graph_changed)
@@ -1123,6 +1133,8 @@ class SettingsDialog(QDialog):
         # 되도록 graph refresh 도 같이 트리거.
         self._design.ui_changed.connect(self._apply_graph_runtime)
         self._design.graph_changed.connect(self._apply_graph_runtime)
+        # 표 스타일만 별도 — RBF/GL 재렌더 회피, _summary 위젯만 swap
+        self._design.table_style_changed.connect(self._apply_table_style)
 
         btns = QDialogButtonBox()
         self.btn_save = btns.addButton("Save", QDialogButtonBox.ButtonRole.AcceptRole)
@@ -1184,6 +1196,19 @@ class SettingsDialog(QDialog):
         main = self._main_window or self.parent()
         if main is not None and hasattr(main, "refresh_graph"):
             main.refresh_graph()
+
+    def _apply_table_style(self, style: str) -> None:
+        """표 스타일만 변경 → 모든 cell 의 _summary 위젯만 swap.
+        RBF / GL 캐시 유지 (사용자 정책 2026-04-30, table style 카탈로그).
+        """
+        merged = self._collect()
+        settings_io.set_runtime(merged)
+        main = self._main_window or self.parent()
+        if main is None:
+            return
+        rp = getattr(main, "_result_panel", None)
+        if rp is not None and hasattr(rp, "set_table_style"):
+            rp.set_table_style(style)
 
     def setMainWindow(self, w: QWidget) -> None:
         """parent=None 으로 생성된 경우에도 메인 윈도우 참조 유지."""

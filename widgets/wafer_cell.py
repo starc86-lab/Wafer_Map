@@ -920,7 +920,15 @@ class WaferCell(QFrame):
         # (radial 숨김 여부 등) 가 동적이라 계산이 어긋나 chart 가 잘리는 버그.
         # title_h + padding_top 은 위 title_stack 과 일관. title 위 6px 여백 포함.
         title_h = self._title.sizeHint().height()
-        table_h = self._summary.height()
+        # Summary 영역 — ppt_basic 자연 height (34px = 16px row × 2 + frame 2) 를
+        # 표준으로 통일. 모든 style 이 34 안에 fit 책임. cell 전체 크기 phase 1
+        # 이전과 동일 보장 (사용자 정책 2026-04-30).
+        SUMMARY_RESERVED_H = 34
+        # 모든 style 강제 — ppt_basic 외 style 도 동일 height. 자연값 큰 style 은
+        # 클립되지 않도록 자체 layout 에서 fit 처리 (vertical_stack 행 높이 등).
+        if self._summary.height() != SUMMARY_RESERVED_H:
+            self._summary.setFixedHeight(SUMMARY_RESERVED_H)
+        table_h = SUMMARY_RESERVED_H
         cap_w = w + bar_w + 6 * 2              # inner margin 6+6
         cap_h = padding_top + title_h + h + radial_h + table_h + 6 * 2 + 4 * 2
         self._capture_container.setFixedSize(cap_w, cap_h)
@@ -1637,6 +1645,49 @@ class WaferCell(QFrame):
         self._summary.update_metrics(m, decimals, percent_suffix)
         # 테이블 높이가 바뀌었으니 cell 전체 크기 재계산 (chart_area 는 그대로, 전체 높이만)
         self._apply_chart_size(common)
+
+    def swap_summary_style(self, new_style: str) -> None:
+        """Settings table.style 변경 시 _summary 위젯만 교체. RBF / GL 캐시는 유지.
+
+        layout 의 동일 인덱스에 새 위젯 insert — 1D radial / table 위치 보존.
+        값 즉시 채움 (현재 _v_in 사용). 사용자 정책 2026-04-30.
+        """
+        from widgets.summary import build_summary
+        parent_layout = self._capture_container.layout()
+        idx = -1
+        for i in range(parent_layout.count()):
+            it = parent_layout.itemAt(i)
+            if it is not None and it.widget() is self._summary:
+                idx = i
+                break
+        old = self._summary
+        if old is not None:
+            parent_layout.removeWidget(old)
+            old.deleteLater()
+
+        self._summary = build_summary(new_style, parent=self._capture_container)
+        self._table = getattr(self._summary, "_table", self._summary)
+        ctx_target = (self._summary.context_menu_target()
+                      if hasattr(self._summary, "context_menu_target")
+                      else self._summary)
+        ctx_target.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        ctx_target.customContextMenuRequested.connect(self._show_table_menu)
+        if idx >= 0:
+            parent_layout.insertWidget(
+                idx, self._summary,
+                alignment=Qt.AlignmentFlag.AlignHCenter,
+            )
+        else:
+            parent_layout.addWidget(
+                self._summary,
+                alignment=Qt.AlignmentFlag.AlignHCenter,
+            )
+        # 값 즉시 채움 + cell 크기 재계산
+        if self._v_in.size > 0:
+            settings = settings_io.load_settings()
+            self._update_table(self._v_in, settings)
+        else:
+            self._apply_chart_size(settings_io.load_settings().get("chart_common", {}))
 
     # ── 우클릭 메뉴 ────────────────────────────────
     def _show_plot_menu(self, pos: QPoint) -> None:

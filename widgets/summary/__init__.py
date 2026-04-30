@@ -20,8 +20,12 @@ if TYPE_CHECKING:
 
 # (module_path, class_name) — lazy import 하므로 여기 import 않음
 STYLES: dict[str, tuple[str, str]] = {
-    "ppt_basic": ("widgets.summary.ppt_basic", "SummaryPPTBasic"),
-    # phase 2~5 에서 추가될 style 들 — placeholder. 각 phase 에서 모듈 신설.
+    "ppt_basic":      ("widgets.summary.ppt_basic", "SummaryPPTBasic"),
+    # Group 1 — QTableWidget 변형 (phase 2)
+    "dark_neon":      ("widgets.summary.dark_neon", "SummaryDarkNeon"),
+    "vertical_stack": ("widgets.summary.vertical_stack", "SummaryVerticalStack"),
+    "big_number":     ("widgets.summary.big_number", "SummaryBigNumber"),
+    # phase 3~5 에서 추가
 }
 
 DEFAULT_STYLE = "ppt_basic"
