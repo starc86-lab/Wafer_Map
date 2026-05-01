@@ -147,6 +147,11 @@ class MainWindow(QMainWindow):
                     dlg.close()
             except Exception:
                 pass
+        # 메모리 캐시 폐기 → 디스크 값 fresh 로드. 사용자가 Settings 다이얼로그
+        # 에서 Save 안 누르고 Close 한 변경분 (set_runtime 으로 _cache 에만 반영)
+        # 이 종료 시 자동 저장되는 회귀 fix (사용자 정책 2026-05-01).
+        from core import settings as settings_io
+        settings_io.invalidate_cache()
         s = load_settings()
         if s.get("window_save_enabled", True):
             s.setdefault("window", {})
@@ -160,7 +165,6 @@ class MainWindow(QMainWindow):
                 s["window"]["main"] = [self.width(), self.height()]
                 s["window"]["maximized"] = False
             s["window"]["splitter_sizes"] = list(self._main_splitter.sizes())
-            from core import settings as settings_io
             settings_io.save_settings(s)
         super().closeEvent(event)
 
