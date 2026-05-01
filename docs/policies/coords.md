@@ -111,7 +111,7 @@
 - 기존 라이브러리 마이그레이션: load 시 id=0 entry 들에 created_at 순으로
   smallest-unused 자동 부여.
 
-### 저장 (Visualize 시)
+### 저장 (▶ Run 시)
 - **가족 단위 1회 저장** — 가족이 보유한 좌표 페어 set 별로 entry 1개.
 - 저장 조건:
   - 가족 RECIPE 비어있지 않음

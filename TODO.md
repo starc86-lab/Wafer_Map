@@ -279,8 +279,8 @@ gl_view.paintGL = patched
   2. `_on_visualize` 시작부에서 전제조건 검사 실패 시 `QMessageBox.warning` + early return
   3. 경고 메시지는 구체적 이유 명시 (입력 없음 / VALUE 미선택 / 좌표 미선택 등)
 
-### 4.3 Copy Graph 개선
-- [ ] 우클릭 메뉴에 "Copy Graph (HiRes)" 옵션 추가 — 화면 캡처 대신 2x/3x 렌더 옵션 (시나리오 A 구현 후)
+### 4.3 Copy Image 개선
+- [ ] 우클릭 메뉴에 "Copy Image (HiRes)" 옵션 추가 — 화면 캡처 대신 2x/3x 렌더 옵션 (시나리오 A 구현 후)
 
 ### 4.4 좌표 프리셋
 - [ ] 이름 수동 편집 시 자동 생성 suffix `(2)` 충돌 처리

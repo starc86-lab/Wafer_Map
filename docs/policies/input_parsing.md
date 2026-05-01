@@ -7,7 +7,7 @@
 ## 워크플로 원칙
 
 - **클립보드 우선** — Ctrl+V 가 제1 입력 방법. 파일 I/O 최소화.
-- **출력도 클립보드** — Copy Graph (이미지) / Copy Table (HTML+TSV 듀얼) / Copy Data (TSV) PPT paste 호환.
+- **출력도 클립보드** — Copy Image (RGB32 + PNG/DIB 듀얼) / Copy Table (HTML+TSV 듀얼) / Copy Data (TSV) PPT/Excel paste 호환.
 
 ## 파싱 원칙
 

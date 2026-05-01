@@ -5,6 +5,58 @@ Wafer Map 버전 이력. SemVer(Major.Minor.Patch) 기준.
 - **Minor**: 기능 추가 / UI 변경
 - **Patch**: 버그 수정
 
+## [0.5.0] — 2026-05-01
+
+핵심 — (1) Excel paste 호환 (alpha 채널 fix) + (2) Cell 우클릭 메뉴 통합 + Copy Image 명칭 + (3) Table Style 11종 카탈로그 + (4) UI 해상도 모드 (FHD/QHD/UHD) + deadlock fix + (5) Settings 다이얼로그 안정화 + Scope 3-5 누적 cleanup.
+
+### Copy 기능 — Excel 호환 + 명칭 통일
+
+- **Excel paste 좌우 비대칭 fix (F95)** — `QPixmap.toImage()` 의 `ARGB32_Premultiplied` alpha 가 Excel PNG paste 에서 background 합성으로 비대칭 그려지던 회귀. 신규 `_set_clipboard_pixmap` helper 가 alpha 제거 (RGB32 변환) + `setImageData` (CF_DIB) + `setData("image/png")` 듀얼 MIME → PPT / Excel 둘 다 정상.
+- **"Copy Graph" → "Copy Image"** — 실제로 cell 전체 (차트 + 컬러바 + 1D + Summary 표) 합성 이미지라 의미상 정확. 메뉴 라벨 + 문서 + 주석 일괄 통일.
+- **Cell 우클릭 메뉴 통합 (F95)** — 차트 / 표 / 1D / colorbar / 빈 영역 어디서 우클릭하든 동일 메뉴 (Reset / Copy Image / Copy Data / Copy Table). `_show_cell_menu` 단일 핸들러 + 자식 widget 별 `customContextMenu` connect.
+
+### Table Style 카탈로그 (F82-F86)
+
+`widgets/summary/` 패키지 — 11 style + base + factory.
+
+- **`_TableSummary` 베이스** (F83) — `QTableWidget(rows=2, cols=3)` 기반 3 style (`ppt_basic` / `dark_neon` / `vertical_stack`) 의 80 라인 boilerplate 제거. delegate paint 매번 `FONT_SIZES` re-read.
+- **자유 layout 7종**: `big_number` / `highlight_lead` / `stat_tiles` / `minimal_underline` / `pill_badge` / `color_footer` / `layered_depth` (Rounded Card). `apply_fonts()` 인터페이스로 stylesheet 박제.
+- **overlay-only 1종** — `no_table`. 표 영역 0, chart 좌상단 `_OutlineLabel` 이 Mean/Range/N.U % 표시 (흰색 외곽선 + #666666 fill, 글로벌 폰트).
+- **font_scale 변경 정책** (F85) — swap 안 하고 `apply_fonts_all` (가벼운 reflow). set_table_style swap ~5ms × N 비용 회피.
+- **Copy Table 자유 layout 지원** (F86) — `copy_table_data()` override 로 자체 row/col 반환.
+- Settings → "Table Style" 콤보로 즉시 변경 (RBF/GL 캐시 유지).
+
+### UI 해상도 모드 (F81 + F96)
+
+`Settings → UI 해상도 (재시작)` 콤보 — `auto` (default, primary monitor 가로 자동 판정) / `FHD` (×0.75) / `QHD` (×1.0) / `UHD` (×1.3).
+
+- `app.py::_apply_ui_scale()` 이 모듈 top-level (QApplication 인스턴스 전) 에서 `QT_SCALE_FACTOR` 환경변수 set.
+- `auto` 분기 — tkinter 로 primary monitor 가로 측정 (Qt 미가용 시점이라 우회).
+- **deadlock fix** (F96) — 작은 모니터 + 큰 scale 조합 (FHD 모니터 + UHD 1.5) 에서 윈도우가 화면 밖으로 나가 Settings 버튼 클릭 불가 회피:
+  1. `widgets/__init__.py::clamp_to_screen(widget)` helper — 모든 dialog + main_window 가 size 를 `availableGeometry` 안으로 clamp.
+  2. UHD scale 1.5 → 1.3 — control bar 의 logical minimum width (~1280) 가 FHD 모니터 logical avail 와 정확히 fit 되어 frame border 가 화면 밖으로 나가던 문제.
+
+### no_table chart overlay 진화 (F69-F77, F95)
+
+- 라벨 진화 `NU` → `N.U%` (Mean 폭 매칭) → `N.U %` (단위 표기 통일)
+- 위치 / 폰트 / 정렬 / 배경 미세 조정 (F70-F77)
+- F95 에서 `_OutlineLabel(QLabel)` 로 최종화 — `paintEvent` + `QPainterPath.addText` 로 흰 외곽선 stroke + 검정 fill. fontMetrics 두 column align. HTML/table 의존 제거, 글로벌 폰트 follow, transparent 배경.
+
+### Settings 다이얼로그 안정화 (F80, F95-F96 Scope 3-4)
+
+- **closeEvent 캐시 폐기 정책 정합** (F80) — `MainWindow.closeEvent` 가 `invalidate_cache` 호출 (Save 안 하고 Close 한 변경분이 디스크 저장되던 회귀 fix). `SettingsDialog._on_close` 는 invalidate 안 함 (세션 메모리 유지).
+- **monospace 폰트 옵션** (F78), **SVG spinbox 화살표** (F79).
+- **Scope 3 cleanup** (F95) — `setMainWindow` / `_main_window` / `revert_on_cancel` / `_initial_presets` / `UiSettingsCard.reload` / `_limit_width` alias 제거. `_initial = copy.deepcopy(settings)` 강화. 좌표 미리보기 버튼 제거 (좌표 수정에서 동등 기능).
+- **Scope 4 cleanup** (F96) — `app.py` 의 inline import / `_step_pg` 잉여 wrapper / `pyi_splash` except 확장 / `primaryScreen()` None guard / `QT_SCALE_FACTOR` 1.0 분기 unset / prefetch 중복 제거.
+- **라벨 변경**: "표 스타일" → "Table Style", "UI 모드" → "UI 해상도".
+
+### 누적 정합성 정리 (Scope 5)
+
+- **Default 값 동기** — `themes.py::DEFAULT_SETTINGS` 가 진실값으로 확정 (camera_distance=620, elevation=40, azimuth=-90). 모든 fallback / 문서 / Reset 복원 값 동기.
+- **CLAUDE.md 갱신** — Summary 카탈로그 섹션 신규, UI 해상도 섹션 신규, settings.json 스키마 표에 `ui_mode` / `table.style` 추가, Copy Image 라벨 일괄 치환.
+- **docstring stale fix** — `WaferCell` (4행×2열 → 2행×3열), `SettingsDialog` (Apply/OK/Cancel → Save/Close), `CombinedItem` 위치 (main_window → core/combine.py).
+- **사용자 가이드 / 정책 문서** — "Visualize" → "▶ Run", ZIP 이름 동적, 휠 zoom 활성 표기 정정.
+
 ## [0.4.0] — 2026-04-29
 
 핵심 — (1) PARA 조합 기능 확장 (sum + concat recursive + 임의 깊이 중첩) + (2) 데이터 모델 단일 진실원 리팩토링 (`CombinedState` / `CombinedItem`) + (3) UI 마이너 개선 (Settings 높이·Default 정책·ReasonBar 테마/라벨/✓·Z-Margin 정밀화).

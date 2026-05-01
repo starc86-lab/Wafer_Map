@@ -1,13 +1,20 @@
 """
-Settings 다이얼로그 — 디자인 설정 / 좌표 라이브러리 두 탭.
+Settings 다이얼로그 — 디자인 설정 / 좌표 라이브러리 두 탭. non-modal.
 
 디자인 설정 탭:
-  - UI 설정 카드: 테마 / 글꼴 / 크기
-  - Graph 설정 카드: 2D MAP · 3D MAP 서브그룹 (각종 렌더 옵션)
-좌표 라이브러리 탭: 프리셋 목록·정렬·편집·삭제·수동추가·자동정리
+  - UI 설정 카드: 테마 / 글꼴 / 크기 / Table Style / UI 해상도 (재시작)
+  - Graph 설정 카드: MAP 공통 / 1D Radial / 2D / 3D 서브그룹
 
-Apply = 즉시 반영 (앱 스타일시트 재빌드 + 라이브러리 저장).
-OK = Apply + 닫기.  Cancel = 원복 후 닫기.
+좌표 라이브러리 탭: 프리셋 목록·헤더 정렬·편집·삭제·수동 추가·자동 정리
+
+버튼:
+  - Save = 디스크 영구 저장 + QSS 재빌드. Close 안 함 (사용자가 연속 조정 가능).
+  - Close = 닫기. 미저장 변경분은 세션 메모리 (runtime cache) 에 유지 — 메인
+    종료 시 `MainWindow.closeEvent` 가 invalidate_cache 호출해 디스크 fresh
+    로드 (사용자 정책 2026-04-30, F80).
+
+각 변경은 즉시 런타임 적용 (`set_runtime`) + 차트 재렌더 (RBF/GL 캐시 유지)
+— Save 안 눌러도 화면에 바로 보임. Save = "다음 실행 시에도 유지" 의미.
 """
 from __future__ import annotations
 
@@ -193,7 +200,7 @@ class UiSettingsCard(QGroupBox):
         if idx >= 0:
             self.cb_table_style.setCurrentIndex(idx)
 
-        # UI 모드 (해상도 scale) — 사용자 정책 2026-05-01. 변경 시 재시작 필요.
+        # UI 해상도 (Qt scale_factor) — 사용자 정책 2026-05-01. 변경 시 재시작 필요.
         from core.themes import UI_MODES, UI_MODE_DISPLAY
         self.cb_ui_mode = _fix_width(QComboBox())
         for key in UI_MODES:
@@ -203,7 +210,7 @@ class UiSettingsCard(QGroupBox):
         if idx >= 0:
             self.cb_ui_mode.setCurrentIndex(idx)
 
-        # 좌: [테마, 윈도우 크기 저장, 표 스타일], 우: [글꼴, 글자 크기, UI 모드]
+        # 좌: [테마, 윈도우 크기 저장, Table Style], 우: [글꼴, 글자 크기, UI 해상도]
         _populate_two_columns(self, [
             ("테마", self.cb_theme),
             ("윈도우 크기 저장", self.chk_save_window),
@@ -666,7 +673,7 @@ class Chart3DGroup(QGroupBox):
         self.sp_elevation.setSingleStep(1.0)
         self.sp_elevation.setDecimals(0)
         self.sp_elevation.setSuffix("°")
-        self.sp_elevation.setValue(float(cfg.get("elevation", 28)))
+        self.sp_elevation.setValue(float(cfg.get("elevation", 40)))
 
         # View angle: Azimuth — 수평 회전 (-180~180°). -135=notch 4~5시 방향.
         self.sp_azimuth = _fix_width(QDoubleSpinBox())
@@ -674,7 +681,7 @@ class Chart3DGroup(QGroupBox):
         self.sp_azimuth.setSingleStep(1.0)
         self.sp_azimuth.setDecimals(0)
         self.sp_azimuth.setSuffix("°")
-        self.sp_azimuth.setValue(float(cfg.get("azimuth", -135)))
+        self.sp_azimuth.setValue(float(cfg.get("azimuth", -90)))
 
         # 좌: 스핀(Elevation·Azimuth·Z-Height) / 우: 체크(부드럽게·그리드)
         # half=3 → 좌 3개, 우 2개.
@@ -711,8 +718,8 @@ class Chart3DGroup(QGroupBox):
             cur_z = cfg.get("z_exaggeration", 1.0)
             self.sp_zexag.setValue(1.0 if cur_z is None else float(cur_z))
             self.chk_grid.setChecked(bool(cfg.get("show_grid", True)))
-            self.sp_elevation.setValue(float(cfg.get("elevation", 28)))
-            self.sp_azimuth.setValue(float(cfg.get("azimuth", -135)))
+            self.sp_elevation.setValue(float(cfg.get("elevation", 40)))
+            self.sp_azimuth.setValue(float(cfg.get("azimuth", -90)))
         finally:
             for w in widgets:
                 w.blockSignals(False)
@@ -1060,7 +1067,7 @@ class SettingsDialog(QDialog):
         from widgets import clamp_to_screen
         clamp_to_screen(self)
         self.setModal(False)
-        # FBO 캡처 경로 도입으로 Settings 창이 Copy Graph 에 포함되던 이슈 해결됨.
+        # FBO 캡처 경로 도입으로 Settings 창이 Copy Image 에 포함되던 이슈 해결됨.
         # QDialog 기본 windowFlags (Qt.Dialog + transient owner 관계) 사용.
 
         settings = settings_io.load_settings()

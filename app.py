@@ -12,7 +12,7 @@ import sys
 import threading
 import warnings
 
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 
 # pyqtgraph MeshData.py 의 vertex normal 계산에서 degenerate face (zero-length
 # normal) 로 인한 divide-by-zero RuntimeWarning 억제. radial mesh 의 센터 근처

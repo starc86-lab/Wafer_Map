@@ -4,11 +4,11 @@
 
 ## 빠른 시작
 
-1. `Wafer_Map_0.3.0.zip` 압축 풀기 → 폴더 안의 `Wafer Map.exe` 실행 (무설치).
+1. `Wafer_Map_<버전>.zip` (예: `Wafer_Map_0.5.0.zip`) 압축 풀기 → 폴더 안의 `Wafer Map.exe` 실행 (무설치).
 2. 계측 장비·Excel에서 **long-form CSV** (헤더 포함)를 전체 선택 → Ctrl+C.
 3. 앱의 **Input A** 영역에 Ctrl+V.
 4. VALUE / X / Y 콤보가 자동 선택됨. 필요 시 수동 변경.
-5. **Visualize** 버튼 → 아래 결과 패널에 MAP + Summary 표가 나열됨.
+5. **▶ Run** 버튼 → 아래 결과 패널에 MAP + Summary 표가 나열됨.
 
 ## 주요 워크플로
 
@@ -28,7 +28,7 @@
 
 ## 입력 검증 + ReasonBar (사유 표시)
 
-페이스트 직후·Visualize 직후 **Input 라벨** 과 **ReasonBar** (Control 와 결과 사이 한 줄) 에 검증 결과가 표시됨. 색으로 의미 구분:
+페이스트 직후·Run 직후 **Input 라벨** 과 **ReasonBar** (Control 와 결과 사이 한 줄) 에 검증 결과가 표시됨. 색으로 의미 구분:
 
 | 색 | 의미 | 동작 |
 |---|---|---|
@@ -81,7 +81,7 @@
 VALUE 파싱은 되지만 X/Y 좌표가 입력에 없는 경우 대비.
 
 ### 자동 저장
-- Visualize 시 사용한 (RECIPE, X, Y) 조합이 `coord_library.json`에 자동 등록.
+- ▶ Run 시 사용한 (RECIPE, X, Y) 조합이 `coord_library.json`에 자동 등록.
 - 다음에 같은 RECIPE의 좌표 없는 입력이 들어오면 자동 적용 (타이틀에 📁 아이콘).
 
 ### 수동 추가
@@ -127,11 +127,13 @@ VALUE 파싱은 되지만 X/Y 좌표가 입력에 없는 경우 대비.
 - 좌표 매칭 안 되는 wafer 는 Apply 시 "조합 대상 데이터 없음" 사유 표시 후 추가 안 됨
 - 입력 (페이스트) 변경하면 합성 항목 자동 해제
 
-## Copy 기능 (PPT 호환)
+## Copy 기능 (PPT / Excel 호환)
 
-**그래프 우클릭 메뉴**:
-- **Copy Graph** — 그래프 + Summary 표 전체를 이미지로 Copy. PPT에 Ctrl+V로 사진 붙여넣기.
+**Cell 우클릭 메뉴 (cell 어디서 우클릭하든 동일)**:
+- **Reset** — 3D 회전 / zoom 초기 상태로 복원
+- **Copy Image** — Cell 전체 (차트 + 컬러바 + 1D + Summary 표) 를 이미지로 Copy. PPT / Excel 둘 다 사진으로 붙여넣기.
   - **0.2.0 부터 offscreen 렌더 방식**: 그래프가 다른 창에 가려지거나 스크롤에 숨어 있어도 완전한 이미지가 복사됨. MSAA 4x 로 가장자리도 부드럽게.
+  - **Excel 호환** (2026-05-01 fix): alpha 채널 제거 + PNG/DIB 듀얼 MIME 으로 Excel 의 좌우 비대칭 회귀 차단.
 - **Copy Data** — 측정점 raw 값 (X / Y / VALUE) → TSV. Excel 셀에 바로 붙여넣기.
 - **Copy Table** — Summary 표 → PPT 표로. HTML+TSV dual MIME.
 
@@ -143,7 +145,7 @@ VALUE 파싱은 되지만 X/Y 좌표가 입력에 없는 경우 대비.
 | Ctrl + 드래그 | 선택 그래프만 이동 |
 | **Shift + 좌클릭/드래그** | **전체 그래프 앵글 동기** |
 | **Shift + Ctrl + 드래그** | **전체 그래프 위치 동기** |
-| 휠 | 비활성 (크기 고정) |
+| 휠 | zoom (2D / 3D 모두 활성) |
 | 우클릭 → Reset | 카메라 초기 상태 복원 |
 
 ## Settings

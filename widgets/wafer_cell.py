@@ -580,9 +580,11 @@ class _OutlineLabel(QLabel):
 
 
 class WaferCell(QFrame):
-    """2D heatmap + 4행×2열 Summary 표. 컨테이너 grab → Copy Graph 합성 이미지.
+    """2D/3D heatmap + Summary 표 (`_TableSummary` 베이스 2행×3열, 또는 자유
+    layout 11종 중 선택) + 옵션 1D radial graph + chart overlay (no_table).
 
-    title + chart_box + table 전체가 하나의 패널 (border 박스)로 묶임.
+    title + chart_box + colorbar + 1D + table 전체를 `_capture_container` 한 박스
+    로 묶어 Copy Image 가 합성 이미지 한 장 생성.
     """
 
     # ER Map 변환 Time 변경 — MainWindow 가 연결해서 Z-Scale 모드에 맞춰 재렌더 결정.
@@ -607,12 +609,12 @@ class WaferCell(QFrame):
         self._is_master = is_master
 
         # outer — border 없는 투명 컨테이너. er_row(캡처 밖) + _capture_container(캡처 대상)
-        # 를 세로로 묶음. Copy Graph 는 _capture_container 만 crop 대상.
+        # 를 세로로 묶음. Copy Image 는 _capture_container 만 crop 대상.
         outer_lay = QVBoxLayout(self)
         outer_lay.setContentsMargins(0, 0, 0, 0)
         outer_lay.setSpacing(2)
 
-        # ───── _capture_container (Copy Graph 대상) ─────
+        # ───── _capture_container (Copy Image 대상) ─────
         # 기존 WaferCell 이 갖던 border/배경/내용을 이 컨테이너로 이동.
         self._capture_container = QFrame()
         self._capture_container.setObjectName("waferCell")
@@ -736,8 +738,8 @@ class WaferCell(QFrame):
         _scommon = _sfull.get("chart_common", {})
         _s3d = _sfull.get("chart_3d", {})
         cam_dist = float(_scommon.get("camera_distance", 620))
-        elev_3d = float(_s3d.get("elevation", 28))
-        azim_3d = float(_s3d.get("azimuth", -135))
+        elev_3d = float(_s3d.get("elevation", 40))
+        azim_3d = float(_s3d.get("azimuth", -90))
 
         # 2D top-view (radial) — plain GLViewWidget (Shift 동기 없음, 2D 는 의미 X).
         # 카메라는 3D 와 동일 파라미터 (distance, fov) — elevation 만 90 (top-down),
@@ -802,8 +804,11 @@ class WaferCell(QFrame):
         self._chart_overlay_2d = _make_overlay(self._gl_2d)
         self._chart_overlay_3d = _make_overlay(self._gl_3d)
 
-        # Overlay registry — _copy_graph 의 hardcoded list 회피. 새 overlay
-        # 추가 시 여기 한 줄만 추가 (사용자 정책 2026-05-01, scope 2 review #3).
+        # Compose-time overlay list — _copy_graph 의 FBO 합성에서 z-order 복원
+        # 위해 visible 한 widget 만 grab + drawPixmap. 새 overlay 추가 시:
+        #   (1) 여기 append
+        #   (2) `_show_cell_menu` 의 widget 별 customContextMenu connect 도 같이 등록
+        # (사용자 정책 2026-05-01).
         self._overlays: list[QWidget] = [
             self._title,
             self._colorbar,
@@ -867,7 +872,7 @@ class WaferCell(QFrame):
         from widgets.summary import build_summary
         _table_style = settings_io.load_settings().get("table", {}).get("style", "ppt_basic")
         self._summary = build_summary(_table_style, parent=self)
-        # 기존 코드 호환 — _table 별칭 (Copy Graph .grab(), context menu 등 유지).
+        # 기존 코드 호환 — _table 별칭 (Copy Image .grab(), context menu 등 유지).
         # ppt_basic 의 _table 속성 우선, 없으면 _summary 자체.
         self._table = getattr(self._summary, "_table", self._summary)
         # 우클릭 메뉴 — cell 어디서 우클릭하든 동일 메뉴 (Reset / Copy Image /
@@ -1437,8 +1442,8 @@ class WaferCell(QFrame):
             self._applied_cam_dist = dist
             self._gl_3d.update()
 
-        elev_3d = float(chart3d.get("elevation", 28))
-        azim_3d = float(chart3d.get("azimuth", -135))
+        elev_3d = float(chart3d.get("elevation", 40))
+        azim_3d = float(chart3d.get("azimuth", -90))
         if elev_3d != self._applied_elev_3d or azim_3d != self._applied_azim_3d:
             self._gl_3d.setCameraPosition(elevation=elev_3d, azimuth=azim_3d)
             self._applied_elev_3d = elev_3d
@@ -1831,8 +1836,8 @@ class WaferCell(QFrame):
         scom = sall.get("chart_common", {})
         s3d = sall.get("chart_3d", {})
         dist = float(scom.get("camera_distance", 620))
-        elev_3d = float(s3d.get("elevation", 28))
-        azim_3d = float(s3d.get("azimuth", -135))
+        elev_3d = float(s3d.get("elevation", 40))
+        azim_3d = float(s3d.get("azimuth", -90))
         from pyqtgraph import Vector
         if chart is self._gl_2d:
             chart.setCameraPosition(
@@ -1925,7 +1930,7 @@ class WaferCell(QFrame):
         self._set_clipboard_pixmap(pm)
 
     def _set_clipboard_pixmap(self, pm) -> None:
-        """Copy Graph clipboard 적재 — PNG + DIB 듀얼 MIME.
+        """Copy Image clipboard 적재 — PNG + DIB 듀얼 MIME.
 
         Excel / PPT 모두 PNG 픽킹해 픽셀 그대로 붙여넣게 하는 패턴
         (Copy Table TSV+HTML 듀얼 MIME 과 동일 발상, 사용자 정책 2026-05-01).

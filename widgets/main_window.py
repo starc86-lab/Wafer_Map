@@ -1,11 +1,10 @@
 """
 메인 윈도우 — 3-패널 세로 스택 (Input / Control / Result).
 
-뼈대 단계:
-- Input: A/B PasteArea (가로 1:1 고정)
-- Control: VALUE/X/Y 콤보, View(2D/3D) 콤보, Z 스케일, Visualize 버튼
-- Result: placeholder (Visualize 연결은 후속)
-- 우상단 ⚙ Settings 버튼 (현재는 알림만)
+- Input: A/B PasteArea (가로 1:1 고정), Ctrl+V 타겟 + 단일 입력 검증 라벨
+- Control: VALUE/X/Y 콤보, View(2D/3D) 콤보, Z 스케일, ▶ Run 버튼
+- Result: cell 가로 나열 (cell 당 차트 + 컬러바 + 1D + Summary 표 합성)
+- 우상단 ⚙ Settings 버튼 — non-modal 다이얼로그 (Save / Close)
 """
 from __future__ import annotations
 
@@ -1922,7 +1921,7 @@ class MainWindow(QMainWindow):
     def _open_settings(self) -> None:
         from widgets.settings_dialog import SettingsDialog
         # 논모달 + parent=self — FBO 캡처 경로로 전환되어 Settings 창이 위에 떠있어도
-        # Copy Graph 에 포함되지 않음. transient owner 우회 제거, 표준 Dialog 관계 복원.
+        # Copy Image 에 포함되지 않음. transient owner 우회 제거, 표준 Dialog 관계 복원.
         dlg = getattr(self, "_settings_dialog", None)
         if dlg is None or not dlg.isVisible():
             dlg = SettingsDialog(parent=self)

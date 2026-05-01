@@ -251,7 +251,7 @@ suffix 자동 매칭 (X↔Y, X_1000↔Y_1000).</p>
     <td><b>Map Size</b></td>
     <td>3D 카메라 거리 ↑ → 그래프 작게 보임</td>
     <td>거리 ↓ → 크게 보임</td>
-    <td>550</td>
+    <td>620</td>
   </tr>
   <tr>
     <td><b>1D Scan 폭 (mm)</b></td>
@@ -429,13 +429,13 @@ suffix 자동 매칭 (X↔Y, X_1000↔Y_1000).</p>
     <td><b>Elevation (°)</b></td>
     <td>위에서 내려다봄. <b>+90°</b> = top-down (2D 모드와 유사)</td>
     <td>옆에서 봄. <b>0°</b> = horizontal, <b>-90°</b> = bottom-up</td>
-    <td>28</td>
+    <td>40</td>
   </tr>
   <tr>
     <td><b>Azimuth (°)</b></td>
     <td>시계방향 회전</td>
     <td>반시계방향 회전</td>
-    <td>-135</td>
+    <td>-90</td>
   </tr>
 </table>
 
@@ -443,8 +443,8 @@ suffix 자동 매칭 (X↔Y, X_1000↔Y_1000).</p>
 <table border="1" cellpadding="6" cellspacing="0" width="100%">
   <tr style="background:#f0f0f0;"><th>각도</th><th>notch 위치</th></tr>
   <tr><td>0°</td><td>3시</td></tr>
-  <tr><td>-90°</td><td>6시</td></tr>
-  <tr><td><b>-135°</b> (기본)</td><td>4~5시 (radial mesh 시각적 균형)</td></tr>
+  <tr><td><b>-90°</b> (기본)</td><td>6시 (notch 화면 하단)</td></tr>
+  <tr><td>-135°</td><td>4~5시</td></tr>
   <tr><td>180° (= -180°)</td><td>9시</td></tr>
 </table>
 
