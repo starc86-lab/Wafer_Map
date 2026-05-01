@@ -11,10 +11,12 @@ import numpy as np
 
 import pyqtgraph as pg
 import pyqtgraph.opengl as gl
-from PySide6.QtCore import QMimeData, QPoint, QRect, QSize, Qt, Signal
+from PySide6.QtCore import (
+    QBuffer, QByteArray, QIODevice, QMimeData, QPoint, QRect, QSize, Qt, Signal,
+)
 from PySide6.QtGui import (
     QColor, QDoubleValidator, QFont, QFontMetrics, QImage, QLinearGradient,
-    QPainter, QPen,
+    QPainter, QPainterPath, QPen,
 )
 from PySide6.QtOpenGL import (
     QOpenGLFramebufferObject, QOpenGLFramebufferObjectFormat,
@@ -514,33 +516,67 @@ def _dynamic_decimals(vmin: float, vmax: float, n_ticks: int = 5) -> int:
     return min(max(needed, bucket), 3)
 
 
-class _CaptureFrame(QFrame):
-    """Copy Graph capture container — paintEvent 직접 흰 배경 + 1px border.
+class _OutlineLabel(QLabel):
+    """No Table chart overlay 용 — 흰색 외곽선 + 검정 fill 텍스트.
 
-    fractional DPR (Windows 125%/150% 등) 환경에서 logical px integer 좌표가
-    device pixel 의 fractional center 로 매핑되어 좌측 antialias 두꺼움 /
-    우측 잘림 회귀. Cosmetic pen + QRectF(0.5, 0.5, w-1, h-1) 로 pixel-center
-    align — Qt 표준 1px border 패턴 (사용자 정책 2026-05-01).
+    그래프 진한 색(turbo 빨강/파랑) 위에서도 가독성 보장. 두 column
+    (라벨 / 값) 을 fontMetrics 로 col align — HTML/table 의존 없이
+    plain rows + paintEvent 직접 그리기 (사용자 정책 2026-05-01).
     """
 
-    _BORDER = QColor("#bfbfbf")
-    _BG = QColor("#ffffff")
+    _LABEL_VALUE_GAP = 10
+    _STROKE_W = 3
+    _FILL = QColor("#666666")
+    _STROKE = QColor("#ffffff")
 
-    def paintEvent(self, event):
-        from PySide6.QtCore import QRectF
-        painter = QPainter(self)
-        # AA off — 정수 device pixel 강제, dpr fractional 영향 차단
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-        rect = self.rect()
-        painter.fillRect(rect, self._BG)
-        # cosmetic pen — dpr 무관 1 device px stroke
-        pen = QPen(self._BORDER, 1)
-        pen.setCosmetic(True)
-        painter.setPen(pen)
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        # QRectF + 0.5 offset — stroke center 가 device pixel 중심 (Qt 표준 trick)
-        painter.drawRect(QRectF(rect).adjusted(0.5, 0.5, -0.5, -0.5))
-        painter.end()
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._rows: list[tuple[str, str]] = []
+        # transparent 배경 — 그래프 오버랩 시 배경 그대로 노출
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+
+    def set_rows(self, rows: list[tuple[str, str]]) -> None:
+        self._rows = list(rows)
+        self.updateGeometry()
+        self.update()
+
+    def sizeHint(self) -> QSize:
+        if not self._rows:
+            return QSize(0, 0)
+        fm = self.fontMetrics()
+        label_w = max(fm.horizontalAdvance(lbl) for lbl, _ in self._rows)
+        value_w = max(fm.horizontalAdvance(val) for _, val in self._rows)
+        line_h = fm.lineSpacing()
+        # stroke 두께 보정 + 1px 여유
+        pad = self._STROKE_W
+        return QSize(
+            label_w + self._LABEL_VALUE_GAP + value_w + 2 * pad,
+            line_h * len(self._rows) + 2 * pad,
+        )
+
+    def paintEvent(self, event) -> None:  # noqa: ARG002
+        if not self._rows:
+            return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        fm = self.fontMetrics()
+        label_w = max(fm.horizontalAdvance(lbl) for lbl, _ in self._rows)
+        line_h = fm.lineSpacing()
+        ascent = fm.ascent()
+        pad = self._STROKE_W
+        path = QPainterPath()
+        for i, (lbl, val) in enumerate(self._rows):
+            y = pad + i * line_h + ascent
+            path.addText(pad, y, self.font(), lbl)
+            path.addText(pad + label_w + self._LABEL_VALUE_GAP, y, self.font(), val)
+        # outline (흰색 stroke) → fill (검정) 순서로 두 번
+        p.setPen(QPen(
+            self._STROKE, self._STROKE_W,
+            Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin,
+        ))
+        p.drawPath(path)
+        p.fillPath(path, self._FILL)
+        p.end()
 
 
 class WaferCell(QFrame):
@@ -577,11 +613,12 @@ class WaferCell(QFrame):
         outer_lay.setSpacing(2)
 
         # ───── _capture_container (Copy Graph 대상) ─────
-        # QSS border 가 grab 시 좌우 비대칭 (좌측 두꺼움 / 우측 라인 없음) 회귀 →
-        # _CaptureFrame.paintEvent 에서 흰 배경 + 1px border 직접 그림 (사용자
-        # 정책 2026-05-01).
-        self._capture_container = _CaptureFrame()
+        # 기존 WaferCell 이 갖던 border/배경/내용을 이 컨테이너로 이동.
+        self._capture_container = QFrame()
         self._capture_container.setObjectName("waferCell")
+        self._capture_container.setStyleSheet(
+            "#waferCell { background-color: white; border: 1px solid #bfbfbf; }"
+        )
         outer_lay.addWidget(self._capture_container)
 
         # ───── er_row (캡처 영역 밖, 셀 하단) — 2 row ─────
@@ -711,7 +748,7 @@ class WaferCell(QFrame):
         self._gl_2d.setCameraPosition(distance=cam_dist, elevation=90, azimuth=-90)
         self._gl_2d.opts["fov"] = 45
         self._gl_2d.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self._gl_2d.customContextMenuRequested.connect(self._show_plot_menu)
+        self._gl_2d.customContextMenuRequested.connect(self._show_cell_menu)
         self._chart_box_layout.addWidget(self._gl_2d)    # index 0
 
         # 3D radial view
@@ -720,7 +757,7 @@ class WaferCell(QFrame):
         self._gl_3d.setCameraPosition(distance=cam_dist, elevation=elev_3d, azimuth=azim_3d)
         self._gl_3d.opts["fov"] = 45
         self._gl_3d.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self._gl_3d.customContextMenuRequested.connect(self._show_plot_menu)
+        self._gl_3d.customContextMenuRequested.connect(self._show_cell_menu)
         self._chart_box_layout.addWidget(self._gl_3d)    # index 1
 
         # 마지막으로 settings 에서 적용한 값 — Settings 변경 감지용 tracker.
@@ -754,16 +791,12 @@ class WaferCell(QFrame):
         self._badge_3d = _make_badge(self._gl_3d)
 
         # No Table style 용 chart overlay (Mean / Range / N.U) — GL widget 자식
-        # multi-line QLabel 한 쌍씩 (2D / 3D). monospace 폰트로 라벨/값 col align
-        # (사용자 정책 2026-05-01, 3행 표시).
-        def _make_overlay(parent: QWidget) -> QLabel:
-            o = QLabel("", parent)
+        # _OutlineLabel 한 쌍씩 (2D / 3D). 흰 외곽선 + 검정 fill 로 그래프 진한 색
+        # 위 가독성 보장 (사용자 정책 2026-05-01).
+        def _make_overlay(parent: QWidget) -> "_OutlineLabel":
+            o = _OutlineLabel(parent)
             # font-size 는 _apply_chart_size 에서 FONT_SIZES 기반으로 매번 set
-            # (font_scale 연동, 사용자 정책 2026-05-01).
-            o.setStyleSheet(
-                "color: #111111; font-weight: bold;"
-                " font-family: Consolas, 'Courier New', monospace;"
-            )
+            # (font_scale 연동). 폰트 family 는 글로벌 inherit.
             o.hide()
             return o
         self._chart_overlay_2d = _make_overlay(self._gl_2d)
@@ -837,12 +870,18 @@ class WaferCell(QFrame):
         # 기존 코드 호환 — _table 별칭 (Copy Graph .grab(), context menu 등 유지).
         # ppt_basic 의 _table 속성 우선, 없으면 _summary 자체.
         self._table = getattr(self._summary, "_table", self._summary)
-        # 우클릭 메뉴 — style 의 context_menu_target 우선, 없으면 _summary 자체
+        # 우클릭 메뉴 — cell 어디서 우클릭하든 동일 메뉴 (Reset / Copy Image /
+        # Copy Data / Copy Table). 자식 widget 별로 customContextMenu connect
+        # — Qt 우클릭 propagation 이 GLViewWidget / PlotWidget 같은 자식에서
+        # 막히기 때문 (사용자 정책 2026-05-01).
         ctx_target = (self._summary.context_menu_target()
                       if hasattr(self._summary, "context_menu_target")
                       else self._summary)
-        ctx_target.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        ctx_target.customContextMenuRequested.connect(self._show_table_menu)
+        for w in (ctx_target, self._capture_container, self._radial_graph, self._colorbar):
+            if w is None:
+                continue
+            w.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            w.customContextMenuRequested.connect(self._show_cell_menu)
         # Table — 폭은 _apply_chart_size 에서 cell 기준으로 설정, layout 에서 가운데 정렬
         lay.addWidget(self._summary, alignment=Qt.AlignmentFlag.AlignHCenter)
 
@@ -987,30 +1026,26 @@ class WaferCell(QFrame):
             ov.setVisible(is_overlay_only)
         if is_overlay_only:
             avg_s, range_s, nu_s = self._summary.overlay_texts()
-            # nu 값에서 trailing '%' 제거 — 라벨 'N.U%' 에 단위 표시 (사용자
-            # 정책 2026-05-01).
+            # nu 값에서 trailing '%' 제거 — 라벨 'N.U %' 에 단위 표시.
             nu_clean = nu_s.rstrip("%") if isinstance(nu_s, str) else nu_s
-            # 라벨 + space 모두 6 char (Mean→2sp / Range→1sp / N.U%→2sp).
-            # monospace 라 값 시작 col 동일.
-            text = (
-                f"Mean  {avg_s}\n"
-                f"Range {range_s}\n"
-                f"N.U % {nu_clean}"
-            )
+            rows = [
+                ("Mean",  avg_s),
+                ("Range", range_s),
+                ("N.U %", nu_clean),
+            ]
             title_geo = self._title.geometry()
-            overlay_y = title_geo.y() + title_geo.height() + 4
+            overlay_y = title_geo.y() + title_geo.height()
             # font_scale 연동 — FONT_SIZES 매번 읽어 stylesheet 재set
+            # (font-size + bold). 폰트 family 는 글로벌 inherit. 배경 / 색상은
+            # _OutlineLabel.paintEvent 가 직접 그림 (사용자 정책 2026-05-01).
             from core.themes import FONT_SIZES as _FS
-            ov_font_px = max(9, int(_FS.get("body", 14)) - 3)
-            ov_ss = (
-                f"color: #111111; font-weight: bold; font-size: {ov_font_px}px;"
-                " font-family: Consolas, 'Courier New', monospace;"
-            )
+            ov_font_px = max(9, int(_FS.get("body", 14)))
+            ov_ss = f"font-weight: bold; font-size: {ov_font_px}px;"
             for ov in (self._chart_overlay_2d, self._chart_overlay_3d):
                 ov.setStyleSheet(ov_ss)
-                ov.setText(text)
+                ov.set_rows(rows)
                 ov.adjustSize()
-                ov.move(8, overlay_y)
+                ov.move(0, overlay_y)
                 ov.raise_()
         table_h = SUMMARY_RESERVED_H
         cap_w = w + bar_w + 6 * 2              # inner margin 6+6
@@ -1733,7 +1768,7 @@ class WaferCell(QFrame):
             old_ctx = (old.context_menu_target()
                        if hasattr(old, "context_menu_target") else old)
             try:
-                old_ctx.customContextMenuRequested.disconnect(self._show_table_menu)
+                old_ctx.customContextMenuRequested.disconnect(self._show_cell_menu)
             except (TypeError, RuntimeError):
                 pass
             parent_layout.removeWidget(old)
@@ -1745,7 +1780,7 @@ class WaferCell(QFrame):
                       if hasattr(self._summary, "context_menu_target")
                       else self._summary)
         ctx_target.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        ctx_target.customContextMenuRequested.connect(self._show_table_menu)
+        ctx_target.customContextMenuRequested.connect(self._show_cell_menu)
         if idx >= 0:
             parent_layout.insertWidget(
                 idx, self._summary,
@@ -1764,51 +1799,58 @@ class WaferCell(QFrame):
             self._apply_chart_size(settings_io.load_settings().get("chart_common", {}))
 
     # ── 우클릭 메뉴 ────────────────────────────────
-    def _show_plot_menu(self, pos: QPoint) -> None:
-        chart = self._chart_widget
-        if chart is None:
-            return
+    def _show_cell_menu(self, pos: QPoint) -> None:
+        """Cell 어디서 우클릭하든 동일 메뉴 — Reset / Copy Image / Copy Data /
+        Copy Table (사용자 정책 2026-05-01).
+
+        sender 는 차트(gl_2d/gl_3d), summary, _capture_container, _radial_graph,
+        _colorbar 중 하나. `mapToGlobal(pos)` 로 메뉴 위치 변환.
+        """
+        sender = self.sender() or self._capture_container
         menu = QMenu(self)
         a_reset = menu.addAction("Reset")
-        a_graph = menu.addAction("Copy Graph")
+        a_image = menu.addAction("Copy Image")
         a_data = menu.addAction("Copy Data")
-        chosen = menu.exec(chart.mapToGlobal(pos))
+        a_table = menu.addAction("Copy Table")
+        chosen = menu.exec(sender.mapToGlobal(pos))
         if chosen is a_reset:
-            sall = settings_io.load_settings()
-            scom = sall.get("chart_common", {})
-            s3d = sall.get("chart_3d", {})
-            dist = float(scom.get("camera_distance", 620))
-            elev_3d = float(s3d.get("elevation", 28))
-            azim_3d = float(s3d.get("azimuth", -135))
-            from pyqtgraph import Vector
-            if chart is self._gl_2d:
-                chart.setCameraPosition(
-                    pos=Vector(0, 0, 0),
-                    distance=dist, elevation=90, azimuth=-90,
-                )
-            else:  # _gl_3d
-                chart.setCameraPosition(
-                    pos=Vector(0, 0, 0),
-                    distance=dist, elevation=elev_3d, azimuth=azim_3d,
-                )
-            chart.opts["fov"] = 45
-            chart.update()
-            # Reset 시 applied 값도 동기 — 이후 render 에서 또 리셋 안 걸리게.
-            self._applied_cam_dist = dist
-            if chart is self._gl_3d:
-                self._applied_elev_3d = elev_3d
-                self._applied_azim_3d = azim_3d
-        elif chosen is a_graph:
+            self._reset_view()
+        elif chosen is a_image:
             self._copy_graph()
         elif chosen is a_data:
             self._copy_data()
-
-    def _show_table_menu(self, pos: QPoint) -> None:
-        menu = QMenu(self)
-        a_table = menu.addAction("Copy Table")
-        chosen = menu.exec(self._table.mapToGlobal(pos))
-        if chosen is a_table:
+        elif chosen is a_table:
             self._copy_table()
+
+    def _reset_view(self) -> None:
+        """현재 활성 차트 카메라를 Settings 기본값으로 복원."""
+        chart = self._chart_widget
+        if chart is None:
+            return
+        sall = settings_io.load_settings()
+        scom = sall.get("chart_common", {})
+        s3d = sall.get("chart_3d", {})
+        dist = float(scom.get("camera_distance", 620))
+        elev_3d = float(s3d.get("elevation", 28))
+        azim_3d = float(s3d.get("azimuth", -135))
+        from pyqtgraph import Vector
+        if chart is self._gl_2d:
+            chart.setCameraPosition(
+                pos=Vector(0, 0, 0),
+                distance=dist, elevation=90, azimuth=-90,
+            )
+        else:  # _gl_3d
+            chart.setCameraPosition(
+                pos=Vector(0, 0, 0),
+                distance=dist, elevation=elev_3d, azimuth=azim_3d,
+            )
+        chart.opts["fov"] = 45
+        chart.update()
+        # Reset 시 applied 값도 동기 — 이후 render 에서 또 리셋 안 걸리게.
+        self._applied_cam_dist = dist
+        if chart is self._gl_3d:
+            self._applied_elev_3d = elev_3d
+            self._applied_azim_3d = azim_3d
 
     # ── Copy ──────────────────────────────────────
     def _copy_graph(self) -> None:
@@ -1834,27 +1876,7 @@ class WaferCell(QFrame):
         #    아래에서 FBO 이미지로 덮어씀. title/colorbar/badge 도 여기서 찍힘 (z-order)
         #    이지만 drawImage 로 GL 영역 덮을 때 overlap 된 overlay 가 함께 지워지므로
         #    마지막에 재그림.
-        # 명시 rect — PySide6 의 grab() 기본 인자가 일부 빌드에서 contentsRect
-        # 를 사용하는 회귀 가능 (사용자 정책 2026-05-01, 좌우 비대칭 fix).
-        pm = cap.grab(QRect(0, 0, cap.width(), cap.height()))
-
-        # 임시 진단 — Copy Graph 좌우 비대칭 추적 (사용자 정책 2026-05-01)
-        import os, sys
-        if os.environ.get("WAFERMAP_BENCH"):
-            sys.stderr.write(
-                f"[bench grab] cap.size=({cap.width()},{cap.height()})  "
-                f"pm.size=({pm.width()},{pm.height()})  "
-                f"dpr={cap.devicePixelRatioF():.3f}  "
-                f"pm.dpr={pm.devicePixelRatio():.3f}\n"
-            )
-            try:
-                from pathlib import Path as _P
-                _dbg = _P(__file__).resolve().parent.parent / "debug"
-                _dbg.mkdir(exist_ok=True)
-                pm.save(str(_dbg / "cap_grab.png"))
-                sys.stderr.write(f"  saved: {_dbg / 'cap_grab.png'}\n")
-            except Exception as _e:
-                sys.stderr.write(f"  save failed: {_e}\n")
+        pm = cap.grab()
 
         # 2. GL widget FBO offscreen 렌더 (MSAA 4x, scale=1)
         chart = self._chart_widget
@@ -1864,7 +1886,7 @@ class WaferCell(QFrame):
             # FBO 실패 — 기존 화면 캡처 방식 폴백
             screen = self.screen() or QApplication.primaryScreen()
             if screen is None:
-                QApplication.clipboard().setPixmap(pm)
+                self._set_clipboard_pixmap(pm)
                 return
             full_pm = screen.grabWindow(0)
             dpr2 = full_pm.devicePixelRatio()
@@ -1876,7 +1898,7 @@ class WaferCell(QFrame):
             h = int(cap.height() * dpr2)
             cropped = full_pm.copy(x, y, w, h)
             cropped.setDevicePixelRatio(dpr2)
-            QApplication.clipboard().setPixmap(cropped)
+            self._set_clipboard_pixmap(cropped)
             return
 
         # 3. GL 이미지를 chart 위치에 덮음 (chart_area 크기 = title 영역 포함 overlap)
@@ -1886,16 +1908,6 @@ class WaferCell(QFrame):
             QPoint(int(gl_pos.x() * dpr), int(gl_pos.y() * dpr)),
             gl_img,
         )
-        # 진단 — GL drawImage 후 PNG 저장 (사용자 정책 2026-05-01)
-        if os.environ.get("WAFERMAP_BENCH"):
-            try:
-                pm.save(str(_dbg / "cap_after_gl.png"))
-                sys.stderr.write(
-                    f"[bench gl] gl_pos=({gl_pos.x()},{gl_pos.y()})  "
-                    f"gl_img=({gl_img.width()},{gl_img.height()})\n"
-                )
-            except Exception:
-                pass
 
         # 4. Overlay 복원 — GL 이미지에 덮여 사라진 title/colorbar/badge/chart_overlay
         #    를 self._overlays 에서 visible 만 다시 그림 (z-order 보존).
@@ -1910,16 +1922,31 @@ class WaferCell(QFrame):
             )
 
         painter.end()
-        # 진단 — overlay 복원 후 (clipboard 직전) PNG 저장
-        if os.environ.get("WAFERMAP_BENCH"):
-            try:
-                pm.save(str(_dbg / "cap_final.png"))
-                sys.stderr.write(
-                    f"[bench overlays] count={sum(1 for w in self._overlays if w and w.isVisible())}\n"
-                )
-            except Exception:
-                pass
-        QApplication.clipboard().setPixmap(pm)
+        self._set_clipboard_pixmap(pm)
+
+    def _set_clipboard_pixmap(self, pm) -> None:
+        """Copy Graph clipboard 적재 — PNG + DIB 듀얼 MIME.
+
+        Excel / PPT 모두 PNG 픽킹해 픽셀 그대로 붙여넣게 하는 패턴
+        (Copy Table TSV+HTML 듀얼 MIME 과 동일 발상, 사용자 정책 2026-05-01).
+
+        alpha 채널 제거 (Format_RGB32) — ARGB32_Premultiplied 그대로 PNG
+        저장 시 외곽 anti-alias 픽셀의 alpha<255 가 Excel 에서 background
+        합성되며 좌/우 테두리 비대칭으로 보이는 이슈 회피. PPT 는 alpha
+        우선 처리라 영향 없음 (사용자 정책 2026-05-01, Excel paste fix).
+        """
+        img = pm.toImage()
+        if img.hasAlphaChannel():
+            img = img.convertToFormat(QImage.Format.Format_RGB32)
+        ba = QByteArray()
+        buf = QBuffer(ba)
+        buf.open(QIODevice.OpenModeFlag.WriteOnly)
+        img.save(buf, "PNG")
+        buf.close()
+        mime = QMimeData()
+        mime.setImageData(img)         # CF_DIB — PNG 못 읽는 앱 호환
+        mime.setData("image/png", ba)  # PPT / Excel 우선 픽킹
+        QApplication.clipboard().setMimeData(mime)
 
     def _copy_data(self) -> None:
         lines = [f"X\tY\t{self._value_name}"]

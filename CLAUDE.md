@@ -51,13 +51,13 @@ Wafer Map은 회사 업무의 반도체 측정 데이터 시각화 프로젝트.
 
 | 기능 | 동작 | Profile Vision 참고 구현 |
 |---|---|---|
-| **Copy Graph** | 차트(2D/3D) → 클립보드 **이미지**. PPT에 그대로 Paste | `result/result_window.py::_copy_chart` — `plot_widget.grab()` → `clipboard.setPixmap()` |
+| **Copy Image** | Cell 전체 (차트+컬러바+1D+Summary 표) → 클립보드 **이미지**. PPT/Excel 둘 다 그대로 Paste | `widgets/wafer_cell.py::_copy_graph` — FBO 합성 + alpha 제거(RGB32) + PNG/DIB 듀얼 MIME |
 | **Copy Table** | 측정값 Summary 표 → **PPT 표**로 Paste (Excel에선 셀로) | `result/result_window.py::_copy_table` — `QMimeData`에 `setText(tsv)` + `setHtml(html_table)` **듀얼 MIME** |
 | **Copy Data** | 차트의 raw 측정값 → TSV (Excel 붙여넣기용) | `result/result_window.py::_copy_chart_data` — `clipboard.setText()` |
 
-**핵심**: Copy Table은 **TSV 단독으로는 PPT 표가 안 된다.** `QMimeData`에 HTML을 함께 넣어야 PPT가 `<table>`로 인식하고 셀로 붙여넣음. 단일 MIME(TSV만)이면 PPT는 텍스트박스 + 탭 문자열로만 붙임.
+**핵심**: Copy Table은 **TSV 단독으로는 PPT 표가 안 된다.** `QMimeData`에 HTML을 함께 넣어야 PPT가 `<table>`로 인식하고 셀로 붙여넣음. 단일 MIME(TSV만)이면 PPT는 텍스트박스 + 탭 문자열로만 붙임. **Copy Image 도 동일 패턴** — alpha 채널 살린 PNG 만 넣으면 Excel 이 좌우 비대칭으로 그리는 quirk → RGB32 변환 + setImageData(CF_DIB) + setData("image/png") 듀얼 MIME 으로 PPT/Excel 모두 정상 ([memory](.claude/projects/.../project_clipboard_excel_alpha_pitfall.md)).
 
-차트 우클릭 메뉴 표준: `Reset Zoom` / `Copy Graph` / `Copy Data` — Profile Vision 규약 일치.
+Cell 우클릭 메뉴 표준 (cell 어디든): `Reset` / `Copy Image` / `Copy Data` / `Copy Table` — 통합 핸들러 `_show_cell_menu` 가 자식 widget 별 `customContextMenuRequested` 받음 (GLViewWidget / PlotWidget 이 우클릭 propagate 차단하므로 자식별 connect 필요).
 
 ### 확정 기능 요구사항 — Summary 표
 
@@ -103,7 +103,7 @@ Wafer Map은 회사 업무의 반도체 측정 데이터 시각화 프로젝트.
 - 우상단 **`⚙ Settings` 버튼 하나만** (`QToolBar`). 메뉴바·Help 없음 — 최대한 직관적
 - `Settings` 다이얼로그: `Appearance` 탭 (테마·폰트) + `Coord Library` 탭 (프리셋 목록 + 삭제)
 - **2D / 3D는 탭이 아니라 Control 패널의 콤보/토글로 즉시 전환** (결과 영역은 하나, 내용만 바뀜)
-- 차트 상호작용: 우클릭 `Reset Zoom` / `Copy Graph` / `Copy Data` (툴바 아님)
+- Cell 상호작용: cell 어디서든 우클릭 → `Reset` / `Copy Image` / `Copy Data` / `Copy Table` (툴바 아님)
 
 ### 확정 기능 요구사항 — 입력 창 & DELTA 시각화
 
@@ -146,12 +146,12 @@ Wafer Map은 회사 업무의 반도체 측정 데이터 시각화 프로젝트.
 - **개별 스케일 모드** (`z_individual`): 각 웨이퍼 자체 최적 → 서로 비교하지 않는 독립 데이터용
 - UI 토글로 즉시 전환
 
-**Copy Graph — MAP + 표 합성 이미지 (기술적으로 가능, PySide6 표준 패턴)**
+**Copy Image — MAP + 표 합성 이미지 (PySide6 FBO 합성 + 듀얼 MIME)**
 - 결과 패널은 `QWidget` 컨테이너 안에 (MAP 위젯 + Summary 테이블 위젯)을 `QVBoxLayout`으로 수직 배치
 - 다중 웨이퍼: (MAP+Table 열)을 가로로 나열한 전체 컨테이너 하나
-- **Copy Graph 액션**: `container.grab()` → `QPixmap` → `clipboard.setPixmap(pixmap)` → PPT에 **하나의 사진으로** Paste
-- **3D 시 주의**: `GLViewWidget.grab()`은 OpenGL 프레임버퍼라 일반 widget과 다름 → `QPainter` + `drawImage(glview.grabFramebuffer())` + table widget `render()` 결합 필요. 구현 시 검증 항목
-- **Copy Table** (표만 PPT 표로 = HTML+TSV 듀얼 MIME)과 **Copy Graph** (합성 이미지)는 **별개 액션**으로 유지
+- **Copy Image 액션**: `_capture_container.grab()` (non-GL 부분) + `_capture_gl_offscreen()` FBO (GL 부분) 합성 → `QPixmap` → **alpha 제거 (RGB32) + setImageData(CF_DIB) + setData("image/png") 듀얼 MIME** → `clipboard.setMimeData(mime)`
+- **3D**: `GLViewWidget.grab()`은 OpenGL 프레임버퍼라 일반 widget과 다름 → `QOpenGLFramebufferObject(MSAA=4)` offscreen 렌더 후 `drawImage` 합성 (`_capture_gl_offscreen`)
+- **Copy Table** (표만 PPT 표로 = HTML+TSV 듀얼 MIME)과 **Copy Image** (합성 이미지)는 **별개 액션**으로 유지
 
 ### 확정 기능 요구사항 — 좌표 프리셋 라이브러리
 
@@ -301,7 +301,7 @@ Wafer Map은 회사 업무의 반도체 측정 데이터 시각화 프로젝트.
   - `200 < |max| ≤ 200000` → μm 또는 ×1000 표기로 판정 → `/1000` 환산하여 mm
   - 그 외 → 사용자 수동 오버라이드 요청
 - (VALUE/X/Y) 실제 DATA 개수가 서로 다르면 경고 팝업 + 시각화 차단
-- 출력: 2D heatmap / 3D surface, 우클릭 메뉴 `Reset Zoom` / `Copy Graph` / `Copy Data`, Summary 6종, Copy Table
+- 출력: 2D heatmap / 3D surface, cell 어디든 우클릭 → `Reset` / `Copy Image` / `Copy Data` / `Copy Table`, Summary 6종
 
 ## 설계 원칙
 - 웨이퍼 직경 300mm 고정 — 반경 150mm **밖**의 측정점은 경고 팝업 후 제외 (실제 데이터엔 드물지만 안전장치)
@@ -381,7 +381,7 @@ Wafer Map/
 │   ├── para_combine_dialog.py   ← Para 조합 다이얼로그 — mode 자동 판정 (좌표 동일 → sum) + recursive flatten + composites 콤보 노출 (state 기반)
 │   ├── paste_area.py            ← Ctrl+V 타겟 (Text/Table 토글 + Clear). 단일 입력 검증 라벨 (severity 색)
 │   ├── wafer_cell.py            ← WaferDisplay/WaferCell — 2D pyqtgraph + 3D GLSurfacePlotItem 동적 swap
-│   ├── result_panel.py          ← (MAP+Summary) 쌍을 가로 나열, 합성 Copy Graph용 컨테이너
+│   ├── result_panel.py          ← (MAP+Summary) 쌍을 가로 나열, 합성 Copy Image용 컨테이너
 │   ├── settings_dialog.py       ← non-modal Save/Close/Default. Save는 저장만 (close 안 함) — 사용자가 연속 조정 가능. Close 누르면 미저장
 │   ├── preset_dialog.py         ← 좌표 프리셋 선택 (n_points 필터 + recipe_similarity 정렬 + group_by_coords 병합)
 │   └── preset_add_dialog.py     ← 수동 프리셋 추가
@@ -593,7 +593,7 @@ Wafer Map/
 - 디자인 설정 탭: `Default` 버튼 **탭 내부 좌측 하단 sticky** (다른 탭엔 안 보임)
 - 좌표 라이브러리 탭: 정렬 콤보 삭제 (헤더 클릭 정렬). `Default` 없음
 - 공통 하단 버튼: Save / Close만. Save는 저장만 (close 안 함)
-- **SettingsDialog(parent=self)** — 0.2.0 FBO Copy Graph 전환으로 tech debt 해결. 이전엔 Settings 창이 위에 뜨면 화면 캡처에 포함되어 `parent=None + Qt.Window` 로 transient owner 끊었으나, FBO 는 화면 독립이라 원복. `_main_window` / `setMainWindow` 필드는 호환성 위해 유지하되 `parent()` fallback 만 동작.
+- **SettingsDialog(parent=self)** — 0.2.0 FBO Copy Image 전환으로 tech debt 해결. 이전엔 Settings 창이 위에 뜨면 화면 캡처에 포함되어 `parent=None + Qt.Window` 로 transient owner 끊었었으나, FBO 는 화면 독립이라 원복. `_main_window`/`setMainWindow` 호환성 fallback 도 dead 라 제거됨 (2026-05-01) — `self.parent()` 직접 사용.
 
 **렌더링 최적화 전반**
 상세 이력·측정 결과·실패·롤백 사례·pyqtgraph 내부 의존성은 **[docs/rendering_optimizations.md](docs/rendering_optimizations.md)** 참고 필수. 새 최적화 시도 전 "실패·롤백" 섹션부터 확인 — 같은 실수 반복 금지.
@@ -648,7 +648,7 @@ Wafer Map/
 
 **차트 사이즈 / 셀 통합**
 - `chart_common.chart_width × chart_height` 고정. 비율 360:280 (대 432×336 / 중 360×280 / 소 288×224).
-- `WaferCell(QFrame)` `setObjectName("waferCell")` + `border: 1px solid #bfbfbf` 통합 패널. 제목 + 차트 + 컬러바 + Summary 표를 한 박스로 묶어 Copy Graph가 합성 이미지 한 장.
+- `WaferCell(QFrame)` 의 `_capture_container` `setObjectName("waferCell")` + `border: 1px solid #bfbfbf` 통합 패널. 제목 + 차트 + 컬러바 + Summary 표를 한 박스로 묶어 Copy Image 가 합성 이미지 한 장.
 - `_chart_box = QStackedLayout(2D pyqtgraph / 3D _LockedGLView)` — `setCurrentIndex`로 즉시 토글. 2D/3D 모두 휠 zoom 활성.
 
 **웨이퍼 notch 표시**

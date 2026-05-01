@@ -11,6 +11,7 @@ OK = Apply + 닫기.  Cancel = 원복 후 닫기.
 """
 from __future__ import annotations
 
+import copy
 from typing import Any
 
 from PySide6.QtCore import QEvent, QObject, Qt, Signal
@@ -129,10 +130,6 @@ def _fix_width(widget: QWidget, px: int = FIELD_WIDTH) -> QWidget:
     return widget
 
 
-# 하위 호환 alias
-_limit_width = _fix_width
-
-
 # ────────────────────────────────────────────────────────
 # UI 설정 카드
 # ────────────────────────────────────────────────────────
@@ -155,7 +152,7 @@ class UiSettingsCard(QGroupBox):
         default_theme = _DEF.get("theme", "Light")
         default_font = _DEF.get("font", "Segoe UI")
 
-        self.cb_theme = _limit_width(QComboBox())
+        self.cb_theme = _fix_width(QComboBox())
         for name in sorted(THEMES.keys()):
             label = f"{name} (기본)" if name == default_theme else name
             self.cb_theme.addItem(label, name)
@@ -163,7 +160,7 @@ class UiSettingsCard(QGroupBox):
         if idx >= 0:
             self.cb_theme.setCurrentIndex(idx)
 
-        self.cb_font = _limit_width(QComboBox())
+        self.cb_font = _fix_width(QComboBox())
         for name in FONTS:
             label = f"{name} (기본)" if name == default_font else name
             self.cb_font.addItem(label, name)
@@ -171,7 +168,7 @@ class UiSettingsCard(QGroupBox):
         if idx >= 0:
             self.cb_font.setCurrentIndex(idx)
 
-        self.cb_scale = _limit_width(QComboBox())
+        self.cb_scale = _fix_width(QComboBox())
         current_scale = float(settings.get("font_scale", 1.0) or 1.0)
         nearest_idx = 1
         best_diff = abs(current_scale - FONT_SCALE_CHOICES[1][1])
@@ -188,7 +185,7 @@ class UiSettingsCard(QGroupBox):
         # Summary 표 스타일 — 카탈로그 lazy enumerate. STYLES dict 등록된 항목만
         # 노출 (phase 별 점진 추가, 사용자 정책 2026-04-30).
         from widgets.summary import available_styles
-        self.cb_table_style = _limit_width(QComboBox())
+        self.cb_table_style = _fix_width(QComboBox())
         for key, display in available_styles():
             self.cb_table_style.addItem(display, key)
         cur_style = settings.get("table", {}).get("style", "ppt_basic")
@@ -198,7 +195,7 @@ class UiSettingsCard(QGroupBox):
 
         # UI 모드 (해상도 scale) — 사용자 정책 2026-05-01. 변경 시 재시작 필요.
         from core.themes import UI_MODES, UI_MODE_DISPLAY
-        self.cb_ui_mode = _limit_width(QComboBox())
+        self.cb_ui_mode = _fix_width(QComboBox())
         for key in UI_MODES:
             self.cb_ui_mode.addItem(UI_MODE_DISPLAY.get(key, key), key)
         cur_mode = settings.get("ui_mode", "auto")
@@ -210,10 +207,10 @@ class UiSettingsCard(QGroupBox):
         _populate_two_columns(self, [
             ("테마", self.cb_theme),
             ("윈도우 크기 저장", self.chk_save_window),
-            ("표 스타일", self.cb_table_style),
+            ("Table Style", self.cb_table_style),
             ("글꼴", self.cb_font),
             ("글자 크기", self.cb_scale),
-            ("UI 모드 (재시작)", self.cb_ui_mode),
+            ("UI 해상도 (재시작)", self.cb_ui_mode),
         ])
 
         # 즉시 적용
@@ -237,31 +234,6 @@ class UiSettingsCard(QGroupBox):
             "table": {"style": self.cb_table_style.currentData()},
             "ui_mode": self.cb_ui_mode.currentData(),
         }
-
-    def reload(self, settings: dict[str, Any]) -> None:
-        """위젯 값을 settings로 갱신. 마지막에 changed 한 번만 emit."""
-        widgets = (self.cb_theme, self.cb_font, self.cb_scale, self.chk_save_window)
-        for w in widgets:
-            w.blockSignals(True)
-        try:
-            idx = self.cb_theme.findData(settings.get("theme", "Light"))
-            if idx >= 0:
-                self.cb_theme.setCurrentIndex(idx)
-            idx = self.cb_font.findData(settings.get("font", "Segoe UI"))
-            if idx >= 0:
-                self.cb_font.setCurrentIndex(idx)
-            target_scale = float(settings.get("font_scale", 1.0) or 1.0)
-            best_i, best_d = 0, float("inf")
-            for i in range(self.cb_scale.count()):
-                d = abs(target_scale - float(self.cb_scale.itemData(i)))
-                if d < best_d:
-                    best_d, best_i = d, i
-            self.cb_scale.setCurrentIndex(best_i)
-            self.chk_save_window.setChecked(bool(settings.get("window_save_enabled", True)))
-        finally:
-            for w in widgets:
-                w.blockSignals(False)
-        self.changed.emit()
 
 
 # ────────────────────────────────────────────────────────
@@ -298,19 +270,19 @@ class ChartCommonGroup(QGroupBox):
         # 돌려주기 위한 원본 snapshot. reload() 시에도 갱신.
         self._cfg_snapshot: dict[str, Any] = dict(cfg)
 
-        self.cb_cmap = _limit_width(QComboBox())
+        self.cb_cmap = _fix_width(QComboBox())
         self.cb_cmap.addItems(HEATMAP_COLORMAPS)
         idx = self.cb_cmap.findText(cfg.get("colormap", "Turbo"))
         if idx >= 0:
             self.cb_cmap.setCurrentIndex(idx)
 
-        self.cb_interp = _limit_width(QComboBox())
+        self.cb_interp = _fix_width(QComboBox())
         self.cb_interp.addItems(INTERP_METHODS)
         idx = self.cb_interp.findText(cfg.get("interp_method", "RBF-ThinPlate"))
         if idx >= 0:
             self.cb_interp.setCurrentIndex(idx)
 
-        self.cb_decimals = _limit_width(QComboBox())
+        self.cb_decimals = _fix_width(QComboBox())
         for v in (0, 1, 2, 3):
             self.cb_decimals.addItem(str(v), v)
         idx = self.cb_decimals.findData(int(cfg.get("decimals", 2)))
@@ -323,10 +295,10 @@ class ChartCommonGroup(QGroupBox):
         self.sb_edge_cut.setDecimals(1)
         self.sb_edge_cut.setSuffix(" mm")
         self.sb_edge_cut.setValue(float(cfg.get("edge_cut_mm", 0.0)))
-        _limit_width(self.sb_edge_cut)
+        _fix_width(self.sb_edge_cut)
 
         # 그래프 크기 — 9:7 비율 고정 (360:280 기준)
-        self.cb_chart_size = _limit_width(QComboBox())
+        self.cb_chart_size = _fix_width(QComboBox())
         for w, h in (
             (288, 224), (324, 252), (360, 280), (432, 336), (504, 392), (576, 448),
         ):
@@ -343,18 +315,18 @@ class ChartCommonGroup(QGroupBox):
 
         # Map Size — 카메라 거리 (작을수록 확대). 2D top view / 3D 공통 적용.
         # 사용자 관점에서 "Map 크기" 가 직관적이라 라벨을 이렇게 표기.
-        self.sp_cam_dist = _limit_width(QSpinBox())
+        self.sp_cam_dist = _fix_width(QSpinBox())
         self.sp_cam_dist.setRange(400, 800)
         self.sp_cam_dist.setSingleStep(10)
         self.sp_cam_dist.setValue(int(cfg.get("camera_distance", 620)))
 
         # radial mesh 밀도 (2D·3D 공통)
-        self.sp_rings = _limit_width(QSpinBox())
+        self.sp_rings = _fix_width(QSpinBox())
         self.sp_rings.setRange(5, 60)
         self.sp_rings.setSingleStep(5)
         self.sp_rings.setValue(int(cfg.get("radial_rings", 20)))
 
-        self.sp_rseg = _limit_width(QSpinBox())
+        self.sp_rseg = _fix_width(QSpinBox())
         self.sp_rseg.setRange(60, 720)
         self.sp_rseg.setSingleStep(60)
         self.sp_rseg.setValue(int(cfg.get("radial_seg", 180)))
@@ -449,34 +421,34 @@ class Chart1DRadialGroup(QGroupBox):
         self.chk_1d_radial = _fix_width(QCheckBox())
         self.chk_1d_radial.setChecked(bool(cfg.get("show_1d_radial", False)))
 
-        self.cb_radial_method = _limit_width(QComboBox())
+        self.cb_radial_method = _fix_width(QComboBox())
         self.cb_radial_method.addItems(RADIAL_METHODS)
         idx = self.cb_radial_method.findText(cfg.get("radial_method", "Univariate Spline"))
         self.cb_radial_method.setCurrentIndex(idx if idx >= 0 else 0)
 
-        self.sp_radial_smooth = _limit_width(QDoubleSpinBox())
+        self.sp_radial_smooth = _fix_width(QDoubleSpinBox())
         self.sp_radial_smooth.setRange(0.0, 15.0)
         self.sp_radial_smooth.setSingleStep(0.1)
         self.sp_radial_smooth.setDecimals(1)
         self.sp_radial_smooth.setValue(float(cfg.get("radial_smoothing_factor", 5.0)))
 
-        self.sp_savgol_win = _limit_width(QSpinBox())
+        self.sp_savgol_win = _fix_width(QSpinBox())
         self.sp_savgol_win.setRange(3, 101)
         self.sp_savgol_win.setSingleStep(2)
         self.sp_savgol_win.setValue(int(cfg.get("savgol_window", 11)))
 
-        self.sp_savgol_poly = _limit_width(QSpinBox())
+        self.sp_savgol_poly = _fix_width(QSpinBox())
         self.sp_savgol_poly.setRange(1, 5)
         self.sp_savgol_poly.setSingleStep(1)
         self.sp_savgol_poly.setValue(int(cfg.get("savgol_polyorder", 3)))
 
-        self.sp_lowess_frac = _limit_width(QDoubleSpinBox())
+        self.sp_lowess_frac = _fix_width(QDoubleSpinBox())
         self.sp_lowess_frac.setRange(0.05, 1.0)
         self.sp_lowess_frac.setSingleStep(0.05)
         self.sp_lowess_frac.setDecimals(2)
         self.sp_lowess_frac.setValue(float(cfg.get("lowess_frac", 0.3)))
 
-        self.sp_polyfit_deg = _limit_width(QSpinBox())
+        self.sp_polyfit_deg = _fix_width(QSpinBox())
         self.sp_polyfit_deg.setRange(1, 6)
         self.sp_polyfit_deg.setSingleStep(1)
         self.sp_polyfit_deg.setValue(int(cfg.get("polyfit_degree", 3)))
@@ -485,7 +457,7 @@ class Chart1DRadialGroup(QGroupBox):
         # 0 = 비활성, 1~25 mm. exact 보간 3종 (Cubic/PCHIP/Akima) + Univariate
         # Spline 에서만 활성. SavGol/LOWESS 는 내부가 이미 sliding 이라 중복,
         # Polynomial 은 전역 fit 이라 효과 미미 → 비활성 처리.
-        self.sp_bin_size = _limit_width(QSpinBox())
+        self.sp_bin_size = _fix_width(QSpinBox())
         self.sp_bin_size.setRange(0, 25)
         self.sp_bin_size.setSingleStep(1)
         self.sp_bin_size.setSuffix(" mm")
@@ -600,7 +572,7 @@ class Chart2DGroup(QGroupBox):
         self.chk_points = _fix_width(QCheckBox())
         self.chk_points.setChecked(bool(cfg.get("show_points", True)))
 
-        self.cb_point = _limit_width(QComboBox())
+        self.cb_point = _fix_width(QComboBox())
         for v in (1, 2, 3, 4, 6, 8, 10, 12):
             self.cb_point.addItem(str(v), v)
         idx = self.cb_point.findData(int(cfg.get("point_size", 4)))
@@ -610,8 +582,8 @@ class Chart2DGroup(QGroupBox):
         self.chk_value_labels.setChecked(bool(cfg.get("show_value_labels", False)))
 
         # 라벨 폰트 크기 — 작게 / 보통 / 크게
-        self.cb_label_scale = _limit_width(QComboBox())
-        for label, val in (("작게 (85%)", 0.85), ("보통 (100%)", 1.00), ("크게 (115%)", 1.15)):
+        self.cb_label_scale = _fix_width(QComboBox())
+        for label, val in FONT_SCALE_CHOICES:
             self.cb_label_scale.addItem(label, val)
         cur_scale = float(cfg.get("label_font_scale", 0.85))
         best_i, best_d = 0, float("inf")
@@ -676,8 +648,8 @@ class Chart3DGroup(QGroupBox):
         self.chk_smooth = _fix_width(QCheckBox())
         self.chk_smooth.setChecked(bool(cfg.get("smooth", True)))
 
-        # Z-Height (배율) — DoubleSpinBox, 0.5~3.0, step 0.1, 소수 1자리
-        self.sp_zexag = _limit_width(QDoubleSpinBox())
+        # Z-Height (배율) — DoubleSpinBox, 0.1~3.0, step 0.1, 소수 1자리
+        self.sp_zexag = _fix_width(QDoubleSpinBox())
         self.sp_zexag.setRange(0.1, 3.0)
         self.sp_zexag.setSingleStep(0.1)
         self.sp_zexag.setDecimals(1)
@@ -689,7 +661,7 @@ class Chart3DGroup(QGroupBox):
         self.chk_grid.setChecked(bool(cfg.get("show_grid", True)))
 
         # View angle: Elevation — 수직 시점각 (-90~90°). 0=수평, 90=정면위.
-        self.sp_elevation = _limit_width(QDoubleSpinBox())
+        self.sp_elevation = _fix_width(QDoubleSpinBox())
         self.sp_elevation.setRange(-90.0, 90.0)
         self.sp_elevation.setSingleStep(1.0)
         self.sp_elevation.setDecimals(0)
@@ -697,7 +669,7 @@ class Chart3DGroup(QGroupBox):
         self.sp_elevation.setValue(float(cfg.get("elevation", 28)))
 
         # View angle: Azimuth — 수평 회전 (-180~180°). -135=notch 4~5시 방향.
-        self.sp_azimuth = _limit_width(QDoubleSpinBox())
+        self.sp_azimuth = _fix_width(QDoubleSpinBox())
         self.sp_azimuth.setRange(-180.0, 180.0)
         self.sp_azimuth.setSingleStep(1.0)
         self.sp_azimuth.setDecimals(0)
@@ -840,7 +812,6 @@ class CoordLibraryTab(QWidget):
     def __init__(self, settings: dict[str, Any], parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._library = CoordLibrary()
-        self._initial_presets = list(self._library.presets)
 
         lay = QVBoxLayout(self)
 
@@ -871,23 +842,18 @@ class CoordLibraryTab(QWidget):
         btn_row = QHBoxLayout()
         self.btn_add = QPushButton("수동 추가")
         self.btn_edit = QPushButton("좌표 수정")
-        self.btn_preview = QPushButton("미리보기")
         self.btn_delete = QPushButton("삭제")
         self.btn_delete.setProperty("class", "danger")
-        for b in (self.btn_add, self.btn_edit, self.btn_preview, self.btn_delete):
+        for b in (self.btn_add, self.btn_edit, self.btn_delete):
             btn_row.addWidget(b)
         btn_row.addStretch(1)
         lay.addLayout(btn_row)
 
         self.btn_add.clicked.connect(self._on_add)
         self.btn_edit.clicked.connect(self._on_edit)
-        self.btn_preview.clicked.connect(self._on_preview)
         self.btn_delete.clicked.connect(self._on_delete)
         # 행 더블클릭 → 좌표 수정 (RECIPE + 좌표값 통합 편집, 사용자 정책 2026-04-30)
         self._table.doubleClicked.connect(self._on_row_dbl_click)
-        # 우클릭 → 컨텍스트 메뉴 (좌표 미리보기)
-        self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self._table.customContextMenuRequested.connect(self._on_table_context_menu)
 
         limits_box = QGroupBox("자동 정리")
         limits_form = QFormLayout(limits_box)
@@ -992,46 +958,13 @@ class CoordLibraryTab(QWidget):
         return out
 
     def _on_row_dbl_click(self, index) -> None:
-        """행 더블클릭 → 좌표 수정 (RECIPE + 좌표값 통합 편집, 사용자 정책 2026-04-30).
-
-        미리보기는 우클릭 메뉴 또는 '미리보기' 버튼으로.
-        """
+        """행 더블클릭 → 좌표 수정 (RECIPE + 좌표값 통합 편집, 사용자 정책 2026-04-30)."""
         row = index.row() if index is not None else -1
         if row < 0:
             return
         # 단일 선택 보장 — 더블클릭한 행만 선택
         self._table.selectRow(row)
         self._on_edit()
-
-    def _on_table_context_menu(self, pos) -> None:
-        """우클릭 → 컨텍스트 메뉴 (좌표 미리보기)."""
-        from PySide6.QtGui import QAction
-        from PySide6.QtWidgets import QMenu
-        idx = self._table.indexAt(pos)
-        if idx.row() < 0:
-            return
-        # 우클릭 시 해당 행 자동 선택 (기존 다중 선택 유지)
-        if not self._table.item(idx.row(), 0).isSelected():
-            self._table.selectRow(idx.row())
-        menu = QMenu(self._table)
-        act_preview = QAction("좌표 미리보기", menu)
-        act_preview.triggered.connect(self._on_preview)
-        menu.addAction(act_preview)
-        menu.exec(self._table.viewport().mapToGlobal(pos))
-
-    def _on_preview(self) -> None:
-        """선택된 첫 행의 좌표를 별도 다이얼로그에 표시."""
-        presets = self._selected_presets()
-        if not presets:
-            return
-        p = presets[0]
-        from widgets.coord_preview_dialog import CoordPreviewDialog
-        dlg = CoordPreviewDialog(
-            p.x_mm, p.y_mm,
-            title=f"{p.recipe} · {p.x_name}/{p.y_name} · {p.n_points}pt",
-            parent=self,
-        )
-        dlg.exec()
 
     def _on_add(self) -> None:
         from widgets.preset_add_dialog import PresetAddDialog
@@ -1108,10 +1041,6 @@ class CoordLibraryTab(QWidget):
             self._refresh_table()
         return {"coord_library": {"max_count": mc, "max_days": md}}
 
-    def revert_on_cancel(self) -> None:
-        self._library.presets = list(self._initial_presets)
-        self._library.save()
-
 
 # ────────────────────────────────────────────────────────
 # Settings 다이얼로그
@@ -1131,10 +1060,11 @@ class SettingsDialog(QDialog):
         self.setModal(False)
         # FBO 캡처 경로 도입으로 Settings 창이 Copy Graph 에 포함되던 이슈 해결됨.
         # QDialog 기본 windowFlags (Qt.Dialog + transient owner 관계) 사용.
-        self._main_window: QWidget | None = None  # setMainWindow 호환성용 (현재 parent() 사용)
 
         settings = settings_io.load_settings()
-        self._initial = dict(settings)
+        # deepcopy — _initial 의 nested dict 가 cache 와 같은 객체를 공유하면
+        # set_runtime 이후 _initial in-place 수정 시 silent stale read 위험.
+        self._initial = copy.deepcopy(settings)
 
         self._tabs = QTabWidget()
         self._design = DesignTab(settings)
@@ -1205,7 +1135,7 @@ class SettingsDialog(QDialog):
         if app is not None:
             apply_global_style(app, merged)
         # 가벼운 폰트 갱신 — swap 비용 회피
-        main = self._main_window or self.parent()
+        main = self.parent()
         if main is not None:
             rp = getattr(main, "_result_panel", None)
             if rp is not None and hasattr(rp, "apply_fonts_all"):
@@ -1219,7 +1149,7 @@ class SettingsDialog(QDialog):
         """
         merged = self._collect()
         settings_io.set_runtime(merged)
-        main = self._main_window or self.parent()
+        main = self.parent()
         if main is not None and hasattr(main, "refresh_graph"):
             main.refresh_graph()
 
@@ -1229,21 +1159,16 @@ class SettingsDialog(QDialog):
         """
         merged = self._collect()
         settings_io.set_runtime(merged)
-        main = self._main_window or self.parent()
+        main = self.parent()
         if main is None:
             return
         rp = getattr(main, "_result_panel", None)
         if rp is not None and hasattr(rp, "set_table_style"):
             rp.set_table_style(style)
 
-    def setMainWindow(self, w: QWidget) -> None:
-        """parent=None 으로 생성된 경우에도 메인 윈도우 참조 유지."""
-        self._main_window = w
-
     # ── Enter 키로 dialog가 닫히지 않게 (QSpinBox 등 자식 입력란용) ──
     def keyPressEvent(self, event) -> None:
-        from PySide6.QtCore import Qt as _Qt
-        if event.key() in (_Qt.Key.Key_Return, _Qt.Key.Key_Enter):
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             event.accept()
             return
         super().keyPressEvent(event)
@@ -1259,5 +1184,13 @@ class SettingsDialog(QDialog):
             apply_global_style(app, merged)
 
     def _on_close(self) -> None:
-        """메모리 변경은 유지(현재 앱에 이미 반영됨). 파일 저장은 안 함."""
+        """메모리 변경은 유지(현재 앱에 이미 반영됨). 파일 저장은 안 함.
+
+        주의: 여기서 `settings_io.invalidate_cache()` 를 호출하면 안 됨.
+        runtime cache 는 `_apply_*_runtime` 들이 set_runtime 으로 이미 갱신해
+        둔 미저장 변경분을 들고 있고, dialog Close 후에도 메인 화면이 그 값으로
+        계속 그려져야 한다 (사용자 정책 2026-04-30 — Save 안 누르고 Close =
+        파일 미저장이지만 세션 메모리는 유지). 디스크 fresh 로드는 앱 종료
+        시점 (`MainWindow.closeEvent`) 에서만 일어남.
+        """
         self.reject()

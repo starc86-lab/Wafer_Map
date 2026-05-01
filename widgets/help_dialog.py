@@ -153,7 +153,7 @@ suffix 자동 매칭 (X↔Y, X_1000↔Y_1000).</p>
 
 <hr/>
 
-<h2>그래프 우클릭 메뉴 (Copy 기능, PPT 호환)</h2>
+<h2>Cell 우클릭 메뉴 (어디서 우클릭하든 동일, PPT/Excel 호환)</h2>
 
 <table border="1" cellpadding="6" cellspacing="0" width="100%">
   <tr style="background:#f0f0f0;"><th>메뉴</th><th>동작</th><th>붙여넣기 결과</th></tr>
@@ -163,9 +163,9 @@ suffix 자동 매칭 (X↔Y, X_1000↔Y_1000).</p>
     <td>—</td>
   </tr>
   <tr>
-    <td><b>Copy Graph</b></td>
-    <td>차트 + Summary 표를 하나의 이미지로 복사. 다른 창에 가려져도 깨끗하게 캡처</td>
-    <td>PPT 에 <b>사진</b> 으로 paste</td>
+    <td><b>Copy Image</b></td>
+    <td>Cell 전체 (차트 + 컬러바 + 1D + Summary 표) 를 하나의 이미지로 복사</td>
+    <td>PPT / Excel 에 <b>사진</b> 으로 paste</td>
   </tr>
   <tr>
     <td><b>Copy Data</b></td>
