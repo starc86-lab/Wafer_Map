@@ -972,12 +972,15 @@ class WaferCell(QFrame):
             ov.setVisible(is_overlay_only)
         if is_overlay_only:
             avg_s, range_s, nu_s = self._summary.overlay_texts()
-            # 라벨 width 5 (max "Range") fit. Mean/Range/N.U 동일 column 에서
-            # 값 시작. monospace 폰트라 char 폭 동일.
+            # nu 값에서 trailing '%' 제거 — 라벨 'N.U%' 에 단위 표시 (사용자
+            # 정책 2026-05-01).
+            nu_clean = nu_s.rstrip("%") if isinstance(nu_s, str) else nu_s
+            # 라벨 + space 모두 6 char (Mean→2sp / Range→1sp / N.U%→2sp).
+            # monospace 라 값 시작 col 동일.
             text = (
                 f"Mean  {avg_s}\n"
                 f"Range {range_s}\n"
-                f"N.U   {nu_s}"
+                f"N.U%  {nu_clean}"
             )
             title_geo = self._title.geometry()
             overlay_y = title_geo.y() + title_geo.height() + 4
