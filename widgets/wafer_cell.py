@@ -757,8 +757,6 @@ class WaferCell(QFrame):
             o = QLabel("", parent)
             o.setStyleSheet(
                 "color: #111111; font-size: 11px; font-weight: bold;"
-                " background-color: rgba(255, 255, 255, 200);"
-                " padding-left: 4px; padding-right: 4px;"
             )
             o.hide()
             return o
