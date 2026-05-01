@@ -50,8 +50,7 @@ class SummaryMinimalUnderline(SummaryWidget):
             ul = QFrame()
             ul.setFixedHeight(2)
             ul.setStyleSheet(
-                f"QFrame {{ background-color: {self.ACCENT};"
-                " border: none; }}"
+                f"background-color: {self.ACCENT}; border: none;"
             )
             col.addWidget(lbl)
             col.addWidget(val)

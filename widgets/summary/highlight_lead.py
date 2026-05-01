@@ -35,7 +35,7 @@ class SummaryHighlightLead(SummaryWidget):
         # 좌측 색 띠
         strip = QFrame()
         strip.setFixedWidth(3)
-        strip.setStyleSheet("QFrame { background-color: #e63946; }")
+        strip.setStyleSheet("background-color: #e63946;")
         outer.addWidget(strip)
 
         # Mean 영역 (좌측, 큰 폰트)
@@ -61,7 +61,7 @@ class SummaryHighlightLead(SummaryWidget):
         sep.setFrameShadow(QFrame.Shadow.Plain)
         sep.setLineWidth(1)
         sep.setFixedWidth(1)
-        sep.setStyleSheet("QFrame { color: #dee2e6; background-color: #dee2e6; }")
+        sep.setStyleSheet("background-color: #dee2e6;")
         outer.addWidget(sep)
 
         # 우측 보조 (Range, NU)

@@ -71,7 +71,7 @@ class SummaryBigNumber(SummaryWidget):
                 sep.setFrameShadow(QFrame.Shadow.Plain)
                 sep.setLineWidth(1)
                 sep.setStyleSheet(
-                    "QFrame { color: #dee2e6; background-color: #dee2e6; }"
+                    "background-color: #dee2e6;"
                 )
                 sep.setFixedWidth(1)
                 outer.addWidget(sep)

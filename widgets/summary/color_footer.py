@@ -51,7 +51,7 @@ class SummaryColorFooter(SummaryWidget):
             footer = QFrame()
             footer.setFixedHeight(3)
             footer.setStyleSheet(
-                f"QFrame {{ background-color: {_FOOTER_COLORS[i]}; border: none; }}"
+                f"background-color: {_FOOTER_COLORS[i]}; border: none;"
             )
             col.addWidget(val)
             col.addWidget(lbl)
@@ -66,7 +66,7 @@ class SummaryColorFooter(SummaryWidget):
                 sep.setLineWidth(1)
                 sep.setFixedWidth(1)
                 sep.setStyleSheet(
-                    "QFrame { color: #dee2e6; background-color: #dee2e6; }"
+                    "background-color: #dee2e6;"
                 )
                 outer.addWidget(sep)
 

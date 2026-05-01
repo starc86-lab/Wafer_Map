@@ -33,7 +33,7 @@ class SummaryStatTiles(SummaryWidget):
         for h in self.HEADERS:
             tile = QFrame()
             tile.setStyleSheet(
-                "QFrame { background-color: #f1f3f5; border-radius: 4px; }"
+                "background-color: #f1f3f5; border-radius: 4px;"
             )
             v = QVBoxLayout(tile)
             v.setContentsMargins(2, 1, 2, 1)
