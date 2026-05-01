@@ -299,6 +299,31 @@ QScrollBar::right-arrow:horizontal {{
     image: url({arrow_files['right']});
     width: 8px; height: 8px;
 }}
+/* QSpinBox / QDoubleSpinBox — 화살표 SVG 통일 (스크롤바와 동일 자산).
+   사용자 정책 2026-05-01 — 사내 환경 default arrow 안 보이는 회귀 fix. */
+QSpinBox::up-button, QDoubleSpinBox::up-button {{
+    subcontrol-origin: border;
+    subcontrol-position: top right;
+    width: 16px;
+    background: {t['surface_alt']};
+    border-left: 1px solid {t['border']};
+    border-bottom: 1px solid {t['border']};
+}}
+QSpinBox::down-button, QDoubleSpinBox::down-button {{
+    subcontrol-origin: border;
+    subcontrol-position: bottom right;
+    width: 16px;
+    background: {t['surface_alt']};
+    border-left: 1px solid {t['border']};
+}}
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
+    image: url({arrow_files['up']});
+    width: 8px; height: 8px;
+}}
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
+    image: url({arrow_files['down']});
+    width: 8px; height: 8px;
+}}
 QStatusBar {{ background-color: {t['surface_alt']}; color: {t['text_sub']}; }}
 QToolTip {{
     background-color: {t['surface']};
