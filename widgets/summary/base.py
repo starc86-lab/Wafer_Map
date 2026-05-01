@@ -22,7 +22,7 @@ STYLE_DISPLAY_NAMES: dict[str, str] = {
     "vertical_stack":    "Vertical Stack",
     "color_footer":      "Color Footer",
     "big_number":        "Big Number",
-    "layered_depth":     "Layered Depth",
+    "layered_depth":     "Rounded Card",
     "no_table":          "No Table",
 }
 

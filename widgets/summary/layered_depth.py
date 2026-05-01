@@ -69,9 +69,9 @@ class SummaryLayeredDepth(SummaryWidget):
         painter.setBrush(QBrush(self._CARD))
         painter.setPen(QPen(self._BORDER, 0.8))
         painter.drawRoundedRect(rect, self._RADIUS, self._RADIUS)
-        # 컬럼 sep — 세로 80% 길이 (위/아래 10% 빈 공간), 사용자 정책 2026-05-01
+        # 컬럼 sep — 세로 70% 길이 (위/아래 15% 빈 공간), 사용자 정책 2026-05-01
         painter.setPen(QPen(QColor("#dee2e6"), 1))
-        margin_v = rect.height() * 0.1
+        margin_v = rect.height() * 0.15
         y0 = rect.top() + margin_v
         y1 = rect.bottom() - margin_v
         for k in (1, 2):
