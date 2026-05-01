@@ -1,29 +1,23 @@
 """
 Dark Neon style — 검정 배경 + 민트 강조 (옵션 F).
 
-QTableWidget(2, 3) 베이스, 색만 변경. 다른 style 과 동일한 layout / 크기 정책 →
-cell align 변동 0 보장 (사용자 정책 2026-04-30).
+_TableSummary 베이스 사용. 색만 다름 (delegate + stylesheet).
 """
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPen
-from PySide6.QtWidgets import (
-    QAbstractItemView, QFrame, QHeaderView, QStyledItemDelegate,
-    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
-)
+from PySide6.QtWidgets import QStyledItemDelegate, QWidget
 
-from widgets.summary.base import SummaryWidget, format_metrics
+from widgets.summary.base import _TableSummary
 
 
 class _DarkNeonDelegate(QStyledItemDelegate):
-    # 사용자 정책 2026-04-30 — 추가 +20% 라이트닝 + 라벨 글자 더 흰색 톤.
-    # BG: #1f262e → #404a55 / 헤더 #4a5460. 라벨 #9aa3ad → #d8dde3.
     BG_HEADER = QColor("#4a5460")
     BG_VALUE = QColor("#404a55")
     BORDER = QColor("#5a6470")
     TEXT_LABEL = QColor("#d8dde3")
-    TEXT_VALUE = QColor("#00d9a3")  # 민트 accent
+    TEXT_VALUE = QColor("#00d9a3")
 
     def paint(self, painter, option, index) -> None:
         bg = self.BG_HEADER if index.row() == 0 else self.BG_VALUE
@@ -32,69 +26,29 @@ class _DarkNeonDelegate(QStyledItemDelegate):
         if text is not None:
             from PySide6.QtGui import QFont
             from core.themes import FONT_SIZES
-            # 매 cell 마다 절대값 set — painter.font() sticky 누적 회피
             font = QFont(painter.font())
             font.setPixelSize(max(8, int(FONT_SIZES.get("body", 14)) - 1))
             painter.setFont(font)
             painter.setPen(self.TEXT_LABEL if index.row() == 0 else self.TEXT_VALUE)
             painter.drawText(option.rect, Qt.AlignmentFlag.AlignCenter, str(text))
-        # 세퍼레이터 (cell 사이 verticalline 만, 마지막 col 제외)
         if index.column() < 2:
             painter.setPen(QPen(self.BORDER, 1))
             r = option.rect
             painter.drawLine(r.right(), r.top() + 4, r.right(), r.bottom() - 4)
 
 
-class SummaryDarkNeon(SummaryWidget):
-    HEADERS = ("Mean", "Range", "Non Unif.")
+class SummaryDarkNeon(_TableSummary):
+    TABLE_STYLESHEET = (
+        "QTableWidget { background-color: #404a55;"
+        " border: 1px solid #5a6470; }"
+    )
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
 
-        self._table = QTableWidget(2, 3)
-        self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self._table.horizontalHeader().hide()
-        self._table.verticalHeader().hide()
-        self._table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.Stretch,
-        )
-        self._table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._table.setFrameShape(QFrame.Shape.NoFrame)
-        self._table.setShowGrid(False)
-        self._table.setStyleSheet(
-            "QTableWidget { background-color: #404a55;"
-            " border: 1px solid #5a6470; }"
-        )
-        self._table.setItemDelegate(_DarkNeonDelegate(self._table))
-        layout.addWidget(self._table)
+    def _make_delegate(self):
+        return _DarkNeonDelegate(self._table)
 
-        for c, lbl in enumerate(self.HEADERS):
-            self._set_cell(0, c, lbl)
-
-    def _set_cell(self, row: int, col: int, text: str) -> None:
-        item = QTableWidgetItem(text)
-        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._table.setItem(row, col, item)
-
-    def update_metrics(self, metrics, decimals, percent_suffix=True):
-        avg_s, range_s, nu_s = format_metrics(metrics, decimals, percent_suffix)
-        self._set_cell(1, 0, avg_s)
-        self._set_cell(1, 1, range_s)
-        self._set_cell(1, 2, nu_s)
-        self._table.resizeRowsToContents()
-        total_h = sum(self._table.rowHeight(r) for r in range(self._table.rowCount()))
-        frame = 2 * self._table.frameWidth()
-        h = total_h + frame
-        self._table.setFixedHeight(h)
-        self.setFixedHeight(h)
-
-    def set_target_width(self, w: int) -> None:
-        self.setFixedWidth(w)
-        self._table.setFixedWidth(w)
-
-    def context_menu_target(self) -> QWidget:
-        return self._table
+    def _fill_values(self, values: tuple[str, str, str]) -> None:
+        for c, val in enumerate(values):
+            self._set_cell(1, c, val)

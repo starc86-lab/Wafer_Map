@@ -1,25 +1,21 @@
 """
-PPT Style (기본) — 기존 wafer_cell 의 QTableWidget(2행 × 3열) 그대로 이전.
+PPT Style (기본) — 기존 wafer_cell 의 QTableWidget(2행 × 3열) 그대로.
 
-회귀 0 보장: 기존 코드와 1:1 동일. 사용자 정책 2026-04-30 — 모든 다른
-style 이 이 베이스의 동일 크기를 따라 cell 전체 width/height 불변.
+_TableSummary 베이스 사용 (사용자 정책 2026-05-01, scope 1 review #2).
+시각 결과 동등성 보장 — 헤더 / 값 / delegate / stylesheet 모두 phase 1 이전과 동일.
 """
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPen
-from PySide6.QtWidgets import (
-    QAbstractItemView, QFrame, QHeaderView, QStyledItemDelegate,
-    QTableWidget, QTableWidgetItem, QWidget,
-)
+from PySide6.QtWidgets import QStyledItemDelegate, QWidget
 
-from widgets.summary.base import SummaryWidget, format_metrics
+from widgets.summary.base import _TableSummary
 
 
 class _PPTSummaryDelegate(QStyledItemDelegate):
-    """Summary 표 cell painting 전담 — QSS stylesheet 이 setBackground() 를
-    override 하는 Qt 버그 우회. row 별 bg + 1px 테두리 + 텍스트 직접 그림.
-    """
+    """Summary 표 cell painting — QSS background override 우회."""
+
     BG_HEADER = QColor("#f7f7f7")
     BG_VALUE = QColor("#ffffff")
     BORDER = QColor("#888888")
@@ -33,7 +29,6 @@ class _PPTSummaryDelegate(QStyledItemDelegate):
             from PySide6.QtGui import QFont
             from core.themes import FONT_SIZES
             # 매 cell 마다 절대값 set — painter.font() sticky 누적 회피
-            # (사용자 정책 2026-05-01, 폰트 -1px).
             font = QFont(painter.font())
             font.setPixelSize(max(8, int(FONT_SIZES.get("body", 14)) - 1))
             painter.setFont(font)
@@ -45,69 +40,21 @@ class _PPTSummaryDelegate(QStyledItemDelegate):
         painter.drawLine(r.left(), r.bottom(), r.right(), r.bottom())
 
 
-class SummaryPPTBasic(SummaryWidget):
-    """기존 PPT 기본 스타일 — QTableWidget 2행 × 3열 (header / values).
+class SummaryPPTBasic(_TableSummary):
+    """PPT 기본 — 2행×3열, 첫 행 헤더 / 둘째 행 값."""
 
-    헤더: Mean / Range / Non Unif.
-    값: format_metrics 결과
-    """
-
-    HEADERS = ("Mean", "Range", "Non Unif.")
+    TABLE_STYLESHEET = (
+        "QTableWidget { background-color: white;"
+        " border-top: 1px solid #888888; border-left: 1px solid #888888;"
+        " border-right: none; border-bottom: none; }"
+    )
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        from PySide6.QtWidgets import QVBoxLayout
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
 
-        self._table = QTableWidget(2, 3)
-        self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self._table.horizontalHeader().hide()
-        self._table.verticalHeader().hide()
-        self._table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.Stretch,
-        )
-        self._table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._table.setFrameShape(QFrame.Shape.NoFrame)
-        self._table.setShowGrid(False)
-        self._table.setStyleSheet(
-            "QTableWidget { background-color: white;"
-            " border-top: 1px solid #888888; border-left: 1px solid #888888;"
-            " border-right: none; border-bottom: none; }"
-        )
-        self._table.setItemDelegate(_PPTSummaryDelegate(self._table))
-        layout.addWidget(self._table)
+    def _make_delegate(self):
+        return _PPTSummaryDelegate(self._table)
 
-        # 헤더 1회 set
-        for c, lbl in enumerate(self.HEADERS):
-            self._set_cell(0, c, lbl)
-
-    def _set_cell(self, row: int, col: int, text: str) -> None:
-        item = QTableWidgetItem(text)
-        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._table.setItem(row, col, item)
-
-    def update_metrics(
-        self, metrics: dict, decimals: int, percent_suffix: bool = True,
-    ) -> None:
-        avg_s, range_s, nu_s = format_metrics(metrics, decimals, percent_suffix)
-        self._set_cell(1, 0, avg_s)
-        self._set_cell(1, 1, range_s)
-        self._set_cell(1, 2, nu_s)
-        # content 기반 높이 자동 계산
-        self._table.resizeRowsToContents()
-        total_h = sum(self._table.rowHeight(r) for r in range(self._table.rowCount()))
-        frame = 2 * self._table.frameWidth()
-        h = total_h + frame
-        self._table.setFixedHeight(h)
-        self.setFixedHeight(h)
-
-    def set_target_width(self, w: int) -> None:
-        self.setFixedWidth(w)
-        self._table.setFixedWidth(w)
-
-    def context_menu_target(self) -> QWidget:
-        """우클릭 메뉴 연결 대상 — wafer_cell 이 customContextMenuRequested 연결."""
-        return self._table
+    def _fill_values(self, values: tuple[str, str, str]) -> None:
+        for c, val in enumerate(values):
+            self._set_cell(1, c, val)

@@ -138,3 +138,101 @@ class SummaryWidget(QWidget):
     def overlay_texts(self) -> tuple[str, str, str]:
         """is_chart_overlay_only True 인 style 만 의미. (Mean, Range, NU) 문자열."""
         return "—", "—", "—"
+
+
+# ────────────────────────────────────────────────────────────────
+# QTableWidget 베이스 — ppt_basic / dark_neon / vertical_stack 공통.
+# 사용자 정책 2026-05-01 (scope 1 review #2): 3 delegate style 의 init 셋업
+# / update_metrics 의 height 자동 계산 / set_target_width / context_menu_target
+# 중복 ~80 줄 제거. 외부 시각 결과 동등성 보장 (visual byte-equal 검증).
+# ────────────────────────────────────────────────────────────────
+class _TableSummary(SummaryWidget):
+    """QTableWidget 베이스 — table 셋업 + cell setter + 자동 height.
+
+    하위는 다음 override:
+      - ROWS / COLS / HEADERS — table shape
+      - TABLE_STYLESHEET — 외곽 stylesheet (선택)
+      - _make_delegate() — 자체 delegate 인스턴스 (선택)
+      - _populate_headers() — 헤더/라벨 1회 set (default 첫 행)
+      - _fill_values(values) — 3 metric 값 위치 (필수)
+    """
+
+    ROWS: int = 2
+    COLS: int = 3
+    HEADERS: tuple[str, ...] = ("Mean", "Range", "Non Unif.")
+    TABLE_STYLESHEET: str = ""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        # lazy import — base 모듈 자체 가벼움 유지
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import (
+            QAbstractItemView, QFrame, QHeaderView,
+            QTableWidget, QTableWidgetItem, QVBoxLayout,
+        )
+        # 모듈 attr 로 보관 — _set_cell 에서 재사용
+        self._QTableWidgetItem = QTableWidgetItem
+        self._Qt = Qt
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self._table = QTableWidget(self.ROWS, self.COLS)
+        self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._table.horizontalHeader().hide()
+        self._table.verticalHeader().hide()
+        self._table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch,
+        )
+        self._table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._table.setFrameShape(QFrame.Shape.NoFrame)
+        self._table.setShowGrid(False)
+        if self.TABLE_STYLESHEET:
+            self._table.setStyleSheet(self.TABLE_STYLESHEET)
+        delegate = self._make_delegate()
+        if delegate is not None:
+            self._table.setItemDelegate(delegate)
+        layout.addWidget(self._table)
+        self._populate_headers()
+
+    def _make_delegate(self):
+        """Subclass override — return delegate instance or None."""
+        return None
+
+    def _populate_headers(self) -> None:
+        """default: 첫 행에 HEADERS 채움. vertical_stack 처럼 다른 위치면 override."""
+        for c, lbl in enumerate(self.HEADERS):
+            self._set_cell(0, c, lbl)
+
+    def _set_cell(self, row: int, col: int, text: str) -> None:
+        item = self._QTableWidgetItem(text)
+        item.setTextAlignment(self._Qt.AlignmentFlag.AlignCenter)
+        self._table.setItem(row, col, item)
+
+    def _fill_values(self, values: tuple[str, str, str]) -> None:
+        """3 metric 값을 적절 위치에 set. 하위 override 필수."""
+        raise NotImplementedError
+
+    def update_metrics(
+        self, metrics: dict, decimals: int, percent_suffix: bool = True,
+    ) -> None:
+        avg_s, range_s, nu_s = format_metrics(metrics, decimals, percent_suffix)
+        self._fill_values((avg_s, range_s, nu_s))
+        # content 기반 높이 자동 계산
+        self._table.resizeRowsToContents()
+        total_h = sum(
+            self._table.rowHeight(r) for r in range(self._table.rowCount())
+        )
+        frame = 2 * self._table.frameWidth()
+        h = total_h + frame
+        self._table.setFixedHeight(h)
+        self.setFixedHeight(h)
+
+    def set_target_width(self, w: int) -> None:
+        self.setFixedWidth(w)
+        self._table.setFixedWidth(w)
+
+    def context_menu_target(self) -> "QWidget":
+        return self._table

@@ -1,19 +1,16 @@
 """
 Vertical Stack style — 세로 list (라벨 좌 / 값 우, 옵션 G).
 
-기존 PPT 기본 테이블과 **동일 높이/폭** 보장 (사용자 정책 2026-04-30, align).
-3 행 표시이지만 작은 폰트 (10px) + 행간 0 으로 우겨넣어 ~50px 안에 fit.
+_TableSummary 베이스 (3 row × 2 col 변형). 가로폭 0.87 inset, fit_to_height
+로 행 높이 균등 재분배.
 """
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPen
-from PySide6.QtWidgets import (
-    QAbstractItemView, QFrame, QHeaderView, QStyledItemDelegate,
-    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
-)
+from PySide6.QtWidgets import QStyledItemDelegate, QTableWidgetItem, QWidget
 
-from widgets.summary.base import SummaryWidget, format_metrics
+from widgets.summary.base import _TableSummary
 
 
 class _VerticalDelegate(QStyledItemDelegate):
@@ -28,7 +25,6 @@ class _VerticalDelegate(QStyledItemDelegate):
         if text is not None:
             from PySide6.QtGui import QFont
             from core.themes import FONT_SIZES
-            # painter.font() sticky 회피 — 매 cell 마다 절대값 set.
             font = QFont(painter.font())
             font.setBold(index.column() == 1)
             font.setPixelSize(max(8, int(FONT_SIZES.get("body", 14)) - 1))
@@ -45,55 +41,44 @@ class _VerticalDelegate(QStyledItemDelegate):
             painter.drawLine(r.left() + 4, r.bottom(), r.right() - 4, r.bottom())
 
 
-class SummaryVerticalStack(SummaryWidget):
+class SummaryVerticalStack(_TableSummary):
+    """3행×2열 — col 0 = 라벨, col 1 = 값. 가로 0.87 inset."""
+
+    ROWS = 3
+    COLS = 2
     LABELS = ("Mean", "Range", "Non Unif.")
+    TABLE_STYLESHEET = (
+        "QTableWidget { background-color: white;"
+        " border: 1px solid #888888; }"
+    )
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
 
-        self._table = QTableWidget(3, 2)
-        self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self._table.horizontalHeader().hide()
-        self._table.verticalHeader().hide()
-        self._table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.Stretch,
-        )
-        self._table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._table.setFrameShape(QFrame.Shape.NoFrame)
-        self._table.setShowGrid(False)
-        self._table.setStyleSheet(
-            "QTableWidget { background-color: white;"
-            " border: 1px solid #888888; }"
-        )
-        self._table.setItemDelegate(_VerticalDelegate(self._table))
-        # 행 높이는 wafer_cell._apply_chart_size 가 setFixedHeight 으로 강제하면
-        # _table 도 그 안에 fit. cell 의 SUMMARY_RESERVED_H (font 반영) 따라감.
-        layout.addWidget(self._table)
+    def _make_delegate(self):
+        return _VerticalDelegate(self._table)
 
-        # 라벨 1회 set
+    def _populate_headers(self) -> None:
+        # col 0 라벨 + col 1 placeholder
         for r, lbl in enumerate(self.LABELS):
-            it = QTableWidgetItem(lbl)
-            self._table.setItem(r, 0, it)
+            self._table.setItem(r, 0, QTableWidgetItem(lbl))
             self._table.setItem(r, 1, QTableWidgetItem("—"))
 
-    def update_metrics(self, metrics, decimals, percent_suffix=True):
-        avg_s, range_s, nu_s = format_metrics(metrics, decimals, percent_suffix)
-        for r, val in enumerate((avg_s, range_s, nu_s)):
+    def _fill_values(self, values: tuple[str, str, str]) -> None:
+        for r, val in enumerate(values):
             it = self._table.item(r, 1)
             if it is None:
                 self._table.setItem(r, 1, QTableWidgetItem(val))
             else:
                 it.setText(val)
-        # 자연 row height — fit_to_height 가 cell 강제 height 받아 재배분.
+
+    def set_target_width(self, w: int) -> None:
+        # vertical_stack 만 가로 0.87 — 그래프 x축 (웨이퍼 직경) 매칭
+        target = int(w * 0.87)
+        super().set_target_width(target)
 
     def fit_to_height(self, h: int) -> None:
-        """3 행을 reserved 안에 균등 분배. ppt_basic 자연 height (≈34) 기준이라
-        각 행 약 11px. font_scale 클 때도 자동 비례 (사용자 정책 2026-04-30).
-        """
+        """3 행을 reserved 안에 균등 분배. font_scale 자동 비례."""
         if h <= 0:
             return
         frame = 2 * self._table.frameWidth()
@@ -102,15 +87,3 @@ class SummaryVerticalStack(SummaryWidget):
         for r in range(3):
             self._table.setRowHeight(r, per_row)
         self._table.setFixedHeight(h)
-
-    def set_target_width(self, w: int) -> None:
-        # vertical_stack 만 가로 좁게 — 그래프 x축 (웨이퍼 직경 ~300mm /
-        # ViewBox ±170 = 88%) 에 맞춤. cell w 는 chart_area 보다 약간 큼
-        # (컬러바 영역 포함) 이라 0.85 적용 시 wafer 직경 폭 근접.
-        # cell layout 의 AlignHCenter 로 가운데 정렬됨 (사용자 정책 2026-04-30).
-        target = int(w * 0.87)
-        self.setFixedWidth(target)
-        self._table.setFixedWidth(target)
-
-    def context_menu_target(self) -> QWidget:
-        return self._table
