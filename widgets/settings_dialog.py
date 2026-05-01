@@ -1198,17 +1198,34 @@ class SettingsDialog(QDialog):
         만 재 set (가벼움). 이전 set_table_style swap 은 _summary 위젯 재 init
         이라 무거웠음 (사용자 정책 2026-05-01, scope 2 fix #2).
         """
+        import os, time
+        bench = bool(os.environ.get("WAFERMAP_BENCH"))
+        t0 = time.perf_counter() if bench else 0.0
+
         merged = self._collect()
+        if bench:
+            t1 = time.perf_counter()
         settings_io.set_runtime(merged)
         app = QApplication.instance()
         if app is not None:
             apply_global_style(app, merged)
+        if bench:
+            t2 = time.perf_counter()
         # 가벼운 폰트 갱신 — swap 비용 회피
         main = self._main_window or self.parent()
         if main is not None:
             rp = getattr(main, "_result_panel", None)
             if rp is not None and hasattr(rp, "apply_fonts_all"):
                 rp.apply_fonts_all()
+        if bench:
+            t3 = time.perf_counter()
+            import sys
+            sys.stderr.write(
+                f"[bench ui] collect={1000*(t1-t0):.1f}ms  "
+                f"apply_global_style={1000*(t2-t1):.1f}ms  "
+                f"apply_fonts_all={1000*(t3-t2):.1f}ms  "
+                f"total={1000*(t3-t0):.1f}ms\n"
+            )
 
     def _apply_graph_runtime(self) -> None:
         """Graph(2D/3D) 설정 변경 → 런타임 캐시 + MainWindow 재렌더 (cell 재생성 없이).
