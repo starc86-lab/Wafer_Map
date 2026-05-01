@@ -755,8 +755,10 @@ class WaferCell(QFrame):
         # (사용자 정책 2026-05-01, 3행 표시).
         def _make_overlay(parent: QWidget) -> QLabel:
             o = QLabel("", parent)
+            # font-size 는 _apply_chart_size 에서 FONT_SIZES 기반으로 매번 set
+            # (font_scale 연동, 사용자 정책 2026-05-01).
             o.setStyleSheet(
-                "color: #111111; font-size: 11px; font-weight: bold;"
+                "color: #111111; font-weight: bold;"
                 " font-family: Consolas, 'Courier New', monospace;"
             )
             o.hide()
@@ -984,7 +986,15 @@ class WaferCell(QFrame):
             )
             title_geo = self._title.geometry()
             overlay_y = title_geo.y() + title_geo.height() + 4
+            # font_scale 연동 — FONT_SIZES 매번 읽어 stylesheet 재set
+            from core.themes import FONT_SIZES as _FS
+            ov_font_px = max(9, int(_FS.get("body", 14)) - 3)
+            ov_ss = (
+                f"color: #111111; font-weight: bold; font-size: {ov_font_px}px;"
+                " font-family: Consolas, 'Courier New', monospace;"
+            )
             for ov in (self._chart_overlay_2d, self._chart_overlay_3d):
+                ov.setStyleSheet(ov_ss)
                 ov.setText(text)
                 ov.adjustSize()
                 ov.move(8, overlay_y)
