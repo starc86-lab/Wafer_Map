@@ -577,7 +577,7 @@ class WaferCell(QFrame):
         self._capture_container = QFrame()
         self._capture_container.setObjectName("waferCell")
         self._capture_container.setStyleSheet(
-            "#waferCell { background: white; border: 1px solid #bfbfbf; }"
+            "#waferCell { background-color: white; border: 1px solid #bfbfbf; }"
         )
         outer_lay.addWidget(self._capture_container)
 
@@ -628,7 +628,7 @@ class WaferCell(QFrame):
         if is_master:
             self.lbl_desc = QLabel("*입력 시 ΔTHK/Time 값으로 변환 (ER, RR 계산용도).")
             self.lbl_desc.setStyleSheet(
-                f"color: #888; font-size: {_small_px}px;"
+                f"color: #888888; font-size: {_small_px}px;"
             )
         else:
             self.lbl_desc = QLabel(" ")  # placeholder — Row 2 높이 유지
@@ -1044,7 +1044,7 @@ class WaferCell(QFrame):
         if self.lbl_desc is not None:
             if self._is_master:
                 self.lbl_desc.setStyleSheet(
-                    f"color: #888; font-size: {_small_px}px;"
+                    f"color: #888888; font-size: {_small_px}px;"
                 )
             else:
                 self.lbl_desc.setStyleSheet(f"font-size: {_small_px}px;")

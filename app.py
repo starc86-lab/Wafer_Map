@@ -22,9 +22,25 @@ warnings.filterwarnings(
     module=r"pyqtgraph\.opengl\.MeshData",
 )
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, qInstallMessageHandler, QtMsgType
 from PySide6.QtGui import QGuiApplication, QSurfaceFormat
 from PySide6.QtWidgets import QApplication
+
+
+# 임시 진단 — 'Could not parse stylesheet' 메시지 추적용. 메시지 발생 시
+# stack trace 출력 → 어느 setStyleSheet 호출이 fail 인지 확인.
+def _qt_message_handler(mode, ctx, msg):
+    import sys, traceback
+    if "Could not parse stylesheet" in msg:
+        sys.stderr.write(f"[QT] {msg}\n")
+        sys.stderr.write("".join(traceback.format_stack()[-6:-1]))
+        sys.stderr.write("---\n")
+    elif mode == QtMsgType.QtWarningMsg:
+        sys.stderr.write(f"[QT-WARN] {msg}\n")
+    elif mode == QtMsgType.QtCriticalMsg:
+        sys.stderr.write(f"[QT-CRIT] {msg}\n")
+
+qInstallMessageHandler(_qt_message_handler)
 
 from core import runtime
 from core import settings as settings_io
