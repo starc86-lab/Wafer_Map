@@ -694,20 +694,16 @@ class WaferCell(QFrame):
         # 다른 style 에서는 hidden. parent=chart_area 로 chart 위에 floating.
         self._chart_overlay_avg = QLabel(self._chart_area)
         self._chart_overlay_avg.setStyleSheet(
-            "QLabel { color: #111111; font-size: 11px; font-weight: bold;"
+            "color: #111111; font-size: 11px; font-weight: bold;"
             " background-color: rgba(255, 255, 255, 200);"
-            " border: 1px solid #aaaaaa; border-radius: 3px;"
-            " padding-top: 1px; padding-bottom: 1px;"
-            " padding-left: 5px; padding-right: 5px; }"
+            " padding-left: 4px; padding-right: 4px;"
         )
         self._chart_overlay_avg.setVisible(False)
         self._chart_overlay_nu = QLabel(self._chart_area)
         self._chart_overlay_nu.setStyleSheet(
-            "QLabel { color: #111111; font-size: 11px; font-weight: bold;"
+            "color: #111111; font-size: 11px; font-weight: bold;"
             " background-color: rgba(255, 255, 255, 200);"
-            " border: 1px solid #aaaaaa; border-radius: 3px;"
-            " padding-top: 1px; padding-bottom: 1px;"
-            " padding-left: 5px; padding-right: 5px; }"
+            " padding-left: 4px; padding-right: 4px;"
         )
         self._chart_overlay_nu.setVisible(False)
 
@@ -978,14 +974,18 @@ class WaferCell(QFrame):
         self._chart_overlay_nu.setVisible(is_overlay_only)
         if is_overlay_only:
             avg_s, nu_s = self._summary.overlay_texts()
-            self._chart_overlay_avg.setText(f"Mean: {avg_s}")
-            self._chart_overlay_nu.setText(f"N.U%: {nu_s}")
-            # 좌상단 8,8 / 8,28 (위/아래 두 라벨)
+            # ":" 제거, N.U% 의 nu 값에서 trailing % 제거 (라벨이 이미 % 단위)
+            nu_clean = nu_s.rstrip("%") if isinstance(nu_s, str) else nu_s
+            self._chart_overlay_avg.setText(f"Mean {avg_s}")
+            self._chart_overlay_nu.setText(f"N.U% {nu_clean}")
             self._chart_overlay_avg.adjustSize()
             self._chart_overlay_nu.adjustSize()
-            self._chart_overlay_avg.move(8, 8)
+            # title 아래로 이동 — 차트 제목과 침범 회피 (사용자 정책 2026-05-01)
+            title_geo = self._title.geometry()
+            overlay_y = title_geo.y() + title_geo.height() + 4
+            self._chart_overlay_avg.move(8, overlay_y)
             self._chart_overlay_nu.move(
-                8, 8 + self._chart_overlay_avg.height() + 2,
+                8, overlay_y + self._chart_overlay_avg.height() + 2,
             )
             self._chart_overlay_avg.raise_()
             self._chart_overlay_nu.raise_()
@@ -1865,6 +1865,11 @@ class WaferCell(QFrame):
             b = getattr(self, badge_attr, None)
             if b is not None and b.isVisible():
                 overlays.append(b)
+        # No Table style 의 chart 좌상단 Mean / N.U% 라벨 (사용자 정책 2026-05-01)
+        for ov_attr in ("_chart_overlay_avg", "_chart_overlay_nu"):
+            ov = getattr(self, ov_attr, None)
+            if ov is not None and ov.isVisible():
+                overlays.append(ov)
 
         for w in overlays:
             if not w.isVisible():
