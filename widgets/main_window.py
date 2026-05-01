@@ -356,15 +356,22 @@ class MainWindow(QMainWindow):
         # — historical naming. settings 키는 `z_margin_pct_*` 가 진실. callsite
         # 다수라 보존, 의미는 z_margin (matplotlib margins() 관례).
         self.lbl_z_range = QLabel("Z-Margin:")
-        # 1% 단위 step + 사용자 직접 입력 시 소수 1자리까지 허용 (사용자 정책 2026-04-29)
-        self.sp_z_range = QDoubleSpinBox()
+        # 5% 단위 step + 사용자 직접 입력 시 소수 1자리까지 허용. step 1→5 변경
+        # (사용자 정책 2026-05-02, 미세 조정보다 큰 단위 빠른 변경이 유용)
+        # FlexDoubleSpinBox — range 외 입력 자유 (예: 999 입력 후 Enter 시 200 clamp)
+        from widgets.spinbox import FlexDoubleSpinBox
+        self.sp_z_range = FlexDoubleSpinBox()
         self.sp_z_range.setRange(0.0, 200.0)
-        self.sp_z_range.setSingleStep(1.0)
+        self.sp_z_range.setSingleStep(5.0)
         self.sp_z_range.setDecimals(1)
         self.sp_z_range.setSuffix("%")
         # invalid 입력 → 가장 가까운 boundary 로 clamp (사용자 정책 2026-05-01).
         from PySide6.QtWidgets import QAbstractSpinBox as _ASB
         self.sp_z_range.setCorrectionMode(_ASB.CorrectionMode.CorrectToNearestValue)
+        # keyboardTracking=False — 키보드 입력 중 매 자릿수 마다 valueChanged emit
+        # 안 함. Enter / focus out / spin button 클릭 시 확정. "150" 입력 시
+        # 1, 15, 150 매번 reapply 되던 회귀 fix (사용자 정책 2026-05-02).
+        self.sp_z_range.setKeyboardTracking(False)
         _init_pct = (self._z_margin_pct_common if self._last_zscale_mode == "공통"
                      else self._z_margin_pct_indiv)
         self.sp_z_range.setValue(float(_init_pct))
@@ -1946,7 +1953,13 @@ class MainWindow(QMainWindow):
         from core.coords import WAFER_RADIUS_MM
         from core.settings import load_settings as _ls
         R = float(WAFER_RADIUS_MM)
-        cfg = _ls().get("chart_common", {})
+        _all = _ls()
+        cfg = _all.get("chart_common", {})
+        # r_symmetry_mode 는 root 키 (wafer_cell render 경로와 일치).
+        # 이전엔 cfg.get("r_symmetry_mode") 로 chart_common 안에서 읽어 항상 False
+        # → cell 은 RadialInterp 로 그리는데 z_range 만 RBF 기준 → colorbar stale
+        # (사용자 보고 2026-05-02, r-symmetry 토글 시 컬러스케일 자동 갱신 안됨 fix).
+        r_sym = bool(_all.get("r_symmetry_mode", False))
         method = str(cfg.get("interp_method", "RBF-ThinPlate"))
         radial_width = float(cfg.get("radial_line_width_mm", 45.0))
         radial_method = str(cfg.get("radial_method", "Univariate Spline"))
@@ -1999,7 +2012,7 @@ class MainWindow(QMainWindow):
                     lowess_frac=lowess_f,
                     polyfit_degree=polyfit_d,
                     radial_bin_size_mm=bin_size_mm,
-                    force_radial=bool(cfg.get("r_symmetry_mode", False)),
+                    force_radial=r_sym,
                 )
                 z = rbf(sample_pts)
                 zf = z[np.isfinite(z)]

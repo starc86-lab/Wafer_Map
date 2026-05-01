@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 )
 
 from core import settings as settings_io
+from widgets.spinbox import FlexDoubleSpinBox, FlexSpinBox
 from core.coord_library import CoordLibrary, CoordPreset, format_dt_display
 from core.stylesheet import build_stylesheet
 from core.themes import BASE_FONT_SIZES, FONTS, FONT_SIZES, HEATMAP_COLORMAPS, THEMES
@@ -133,9 +134,12 @@ def apply_global_style(app: QApplication, settings: dict[str, Any]) -> None:
 def _fix_width(widget: QWidget, px: int = FIELD_WIDTH) -> QWidget:
     """모든 입력 위젯의 폭·높이를 고정 — 시작·끝·행 높이 모두 동일.
 
-    spinbox 의 경우 추가로 `CorrectToNearestValue` 모드 적용 — invalid 입력
-    (range 외) 시 이전 값 복귀가 아닌 가장 가까운 boundary 로 clamp (사용자
-    정책 2026-05-01, "min 미만 → min / max 초과 → max").
+    spinbox 의 경우 추가:
+    - `CorrectToNearestValue` 모드 — invalid 입력 (range 외) 시 이전 값 복귀가
+      아닌 가장 가까운 boundary 로 clamp (사용자 정책 2026-05-01).
+    - `setKeyboardTracking(False)` — 키보드 입력 중 매 자릿수 마다 valueChanged
+      emit 안 함. Enter / focus out / spin button 클릭 시점에만 확정 발화.
+      "150" 입력 시 1, 15, 150 매번 reapply 되던 회귀 fix (사용자 정책 2026-05-02).
     """
     widget.setFixedWidth(px)
     widget.setFixedHeight(FIELD_HEIGHT)
@@ -144,6 +148,7 @@ def _fix_width(widget: QWidget, px: int = FIELD_WIDTH) -> QWidget:
         widget.setCorrectionMode(
             QAbstractSpinBox.CorrectionMode.CorrectToNearestValue,
         )
+        widget.setKeyboardTracking(False)
     return widget
 
 
@@ -220,14 +225,17 @@ class UiSettingsCard(QGroupBox):
         if idx >= 0:
             self.cb_ui_mode.setCurrentIndex(idx)
 
-        # 좌: [테마, 윈도우 크기 저장, Table Style], 우: [글꼴, 글자 크기, UI 해상도]
+        # 사용자 정책 2026-05-02 — 행별로 의미 grouping:
+        #   1행: 테마 / Table Style          (시각 디자인)
+        #   2행: 글꼴 / 글자 크기            (텍스트)
+        #   3행: UI 해상도 / 윈도우 크기 저장 (실행 환경)
         _populate_two_columns(self, [
             ("테마", self.cb_theme),
-            ("윈도우 크기 저장", self.chk_save_window),
-            ("Table Style", self.cb_table_style),
             ("글꼴", self.cb_font),
-            ("글자 크기", self.cb_font_scale),
             ("UI 해상도 (재시작)", self.cb_ui_mode),
+            ("Table Style", self.cb_table_style),
+            ("글자 크기", self.cb_font_scale),
+            ("윈도우 크기 저장", self.chk_save_window),
         ])
 
         # 즉시 적용
@@ -306,7 +314,7 @@ class ChartCommonGroup(QGroupBox):
         self.cb_decimals.setCurrentIndex(idx if idx >= 0 else 2)
 
         # Edge cut — 웨이퍼 경계에서 안쪽으로 cut. 0=cut 없음. radial/RBF 양쪽 공통
-        self.sp_edge_cut = QDoubleSpinBox()
+        self.sp_edge_cut = FlexDoubleSpinBox()
         self.sp_edge_cut.setRange(0.0, 10.0)
         self.sp_edge_cut.setSingleStep(0.5)
         self.sp_edge_cut.setDecimals(1)
@@ -333,18 +341,18 @@ class ChartCommonGroup(QGroupBox):
         # Map Size — 사용자 직관 값 (값 ↑ → 맵 ↑). 내부적으로 camera_distance
         # 는 반대 (거리 ↑ → 맵 ↓) 라 `1200 - display` 변환 (사용자 정책 2026-05-01).
         # 변수명 `sp_cam_dist` historical — settings 키 `camera_distance` 가 진실.
-        self.sp_cam_dist = _fix_width(QSpinBox())
+        self.sp_cam_dist = _fix_width(FlexSpinBox())
         self.sp_cam_dist.setRange(400, 800)
         self.sp_cam_dist.setSingleStep(10)
         self.sp_cam_dist.setValue(1200 - int(cfg.get("camera_distance", 620)))
 
         # radial mesh 밀도 (2D·3D 공통)
-        self.sp_rings = _fix_width(QSpinBox())
+        self.sp_rings = _fix_width(FlexSpinBox())
         self.sp_rings.setRange(5, 60)
         self.sp_rings.setSingleStep(5)
         self.sp_rings.setValue(int(cfg.get("radial_rings", 20)))
 
-        self.sp_rseg = _fix_width(QSpinBox())
+        self.sp_rseg = _fix_width(FlexSpinBox())
         self.sp_rseg.setRange(60, 720)
         self.sp_rseg.setSingleStep(60)
         self.sp_rseg.setValue(int(cfg.get("radial_seg", 180)))
@@ -444,29 +452,29 @@ class Chart1DRadialGroup(QGroupBox):
         idx = self.cb_radial_method.findText(cfg.get("radial_method", "Univariate Spline"))
         self.cb_radial_method.setCurrentIndex(idx if idx >= 0 else 0)
 
-        self.sp_radial_smooth = _fix_width(QDoubleSpinBox())
+        self.sp_radial_smooth = _fix_width(FlexDoubleSpinBox())
         self.sp_radial_smooth.setRange(0.0, 15.0)
         self.sp_radial_smooth.setSingleStep(0.1)
         self.sp_radial_smooth.setDecimals(1)
         self.sp_radial_smooth.setValue(float(cfg.get("radial_smoothing_factor", 5.0)))
 
-        self.sp_savgol_win = _fix_width(QSpinBox())
+        self.sp_savgol_win = _fix_width(FlexSpinBox())
         self.sp_savgol_win.setRange(3, 101)
         self.sp_savgol_win.setSingleStep(2)
         self.sp_savgol_win.setValue(int(cfg.get("savgol_window", 11)))
 
-        self.sp_savgol_poly = _fix_width(QSpinBox())
+        self.sp_savgol_poly = _fix_width(FlexSpinBox())
         self.sp_savgol_poly.setRange(1, 5)
         self.sp_savgol_poly.setSingleStep(1)
         self.sp_savgol_poly.setValue(int(cfg.get("savgol_polyorder", 3)))
 
-        self.sp_lowess_frac = _fix_width(QDoubleSpinBox())
+        self.sp_lowess_frac = _fix_width(FlexDoubleSpinBox())
         self.sp_lowess_frac.setRange(0.05, 1.0)
         self.sp_lowess_frac.setSingleStep(0.05)
         self.sp_lowess_frac.setDecimals(2)
         self.sp_lowess_frac.setValue(float(cfg.get("lowess_frac", 0.3)))
 
-        self.sp_polyfit_deg = _fix_width(QSpinBox())
+        self.sp_polyfit_deg = _fix_width(FlexSpinBox())
         self.sp_polyfit_deg.setRange(1, 6)
         self.sp_polyfit_deg.setSingleStep(1)
         self.sp_polyfit_deg.setValue(int(cfg.get("polyfit_degree", 3)))
@@ -475,7 +483,7 @@ class Chart1DRadialGroup(QGroupBox):
         # 0 = 비활성, 1~25 mm. exact 보간 3종 (Cubic/PCHIP/Akima) + Univariate
         # Spline 에서만 활성. SavGol/LOWESS 는 내부가 이미 sliding 이라 중복,
         # Polynomial 은 전역 fit 이라 효과 미미 → 비활성 처리.
-        self.sp_bin_size = _fix_width(QSpinBox())
+        self.sp_bin_size = _fix_width(FlexSpinBox())
         self.sp_bin_size.setRange(0, 25)
         self.sp_bin_size.setSingleStep(1)
         self.sp_bin_size.setSuffix(" mm")
@@ -668,7 +676,7 @@ class Chart3DGroup(QGroupBox):
 
         # Z-Height (배율) — DoubleSpinBox, 0.1~3.0, step 0.1, 소수 1자리.
         # 변수명 `sp_zexag` historical — settings 키 `z_exaggeration` 가 진실.
-        self.sp_zexag = _fix_width(QDoubleSpinBox())
+        self.sp_zexag = _fix_width(FlexDoubleSpinBox())
         self.sp_zexag.setRange(0.1, 3.0)
         self.sp_zexag.setSingleStep(0.1)
         self.sp_zexag.setDecimals(1)
@@ -680,7 +688,7 @@ class Chart3DGroup(QGroupBox):
         self.chk_grid.setChecked(bool(cfg.get("show_grid", True)))
 
         # View angle: Elevation — 수직 시점각 (-90~90°). 0=수평, 90=정면위.
-        self.sp_elevation = _fix_width(QDoubleSpinBox())
+        self.sp_elevation = _fix_width(FlexDoubleSpinBox())
         self.sp_elevation.setRange(-90.0, 90.0)
         self.sp_elevation.setSingleStep(1.0)
         self.sp_elevation.setDecimals(0)
@@ -688,7 +696,7 @@ class Chart3DGroup(QGroupBox):
         self.sp_elevation.setValue(float(cfg.get("elevation", 40)))
 
         # View angle: Azimuth — 수평 회전 (-180~180°). -135=notch 4~5시 방향.
-        self.sp_azimuth = _fix_width(QDoubleSpinBox())
+        self.sp_azimuth = _fix_width(FlexDoubleSpinBox())
         self.sp_azimuth.setRange(-180.0, 180.0)
         self.sp_azimuth.setSingleStep(1.0)
         self.sp_azimuth.setDecimals(0)
@@ -878,21 +886,41 @@ class CoordLibraryTab(QWidget):
         limits_form = QFormLayout(limits_box)
         cl_settings = settings.get("coord_library", {}) or {}
 
-        self._sb_max_count = _fix_width(QSpinBox())
+        self._sb_max_count = _fix_width(FlexSpinBox())
         self._sb_max_count.setRange(0, 100_000)
         self._sb_max_count.setSpecialValueText("무제한")
-        self._sb_max_count.setValue(int(cl_settings.get("max_count", 1000)))
+        # default 1000 → 5000 (사용자 정책 2026-05-02)
+        self._sb_max_count.setValue(int(cl_settings.get("max_count", 5000)))
 
-        self._sb_max_days = _fix_width(QSpinBox())
+        self._sb_max_days = _fix_width(FlexSpinBox())
         self._sb_max_days.setRange(0, 3650)
         self._sb_max_days.setSpecialValueText("무제한")
-        self._sb_max_days.setValue(int(cl_settings.get("max_days", 1000)))
+        # default 1000 → 0 (무제한, 사용자 정책 2026-05-02)
+        self._sb_max_days.setValue(int(cl_settings.get("max_days", 0)))
 
-        limits_form.addRow("최대 저장 개수", self._sb_max_count)
+        # "최대 저장 개수" 옆에 0=무제한 안내 한 번만 (max_days 옆엔 중복 안 함)
+        _hint = QLabel("0 입력 시 무제한")
+        _hint.setStyleSheet("color: #888888;")
+        _row_count = QHBoxLayout()
+        _row_count.setContentsMargins(0, 0, 0, 0)
+        _row_count.setSpacing(8)
+        _row_count.addWidget(self._sb_max_count)
+        _row_count.addWidget(_hint)
+        _row_count.addStretch(1)
+        _row_count_w = QWidget()
+        _row_count_w.setLayout(_row_count)
+        limits_form.addRow("최대 저장 개수", _row_count_w)
         limits_form.addRow("최대 보관일", self._sb_max_days)
         lay.addWidget(limits_box)
 
+        # 첫 진입 시 # 컬럼 1번 cell 자동 focus 제거 (사용자 정책 2026-05-02)
+        # — 마우스 클릭으로는 row select 정상 동작
+        from PySide6.QtCore import Qt as _Qt
+        self._table.setFocusPolicy(_Qt.FocusPolicy.ClickFocus)
+
         self._refresh_table()
+        self._table.clearSelection()
+        self._table.setCurrentCell(-1, -1)
 
     def _refresh_table(self) -> None:
         """레코드 개별 행 표시 — (RECIPE, X/Y) 조합이 키라 같은 RECIPE 여러 행 가능.

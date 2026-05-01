@@ -30,10 +30,20 @@ class _VerticalDelegate(QStyledItemDelegate):
             font.setPixelSize(max(8, int(FONT_SIZES.get("body", 14)) - 1))
             painter.setFont(font)
             painter.setPen(self.TEXT_LABEL if index.column() == 0 else self.TEXT_VALUE)
-            r = option.rect.adjusted(8, 0, -8, 0)
-            align = (Qt.AlignmentFlag.AlignLeft if index.column() == 0
-                     else Qt.AlignmentFlag.AlignRight) | Qt.AlignmentFlag.AlignVCenter
-            painter.drawText(r, align, str(text))
+            # 명시 baseline 계산 — AlignVCenter flag 가 일부 환경에서 하단 정렬되어
+            # 보이는 회귀 fix (사용자 정책 2026-05-02). fontMetrics 의 ascent/descent
+            # 으로 cell rect 정중앙에 텍스트 중앙선 위치.
+            fm = painter.fontMetrics()
+            r = option.rect
+            text_str = str(text)
+            text_w = fm.horizontalAdvance(text_str)
+            # 세로 정중앙: top + (height - ascent - descent) / 2 + ascent
+            y_baseline = r.y() + (r.height() + fm.ascent() - fm.descent()) // 2
+            if index.column() == 0:
+                x = r.x() + 8
+            else:
+                x = r.right() - 8 - text_w
+            painter.drawText(x, y_baseline, text_str)
         # 행 사이 옅은 구분선 (마지막 행 제외)
         if index.row() < 2:
             painter.setPen(QPen(self.BORDER, 1))

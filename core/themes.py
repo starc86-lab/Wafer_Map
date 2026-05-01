@@ -415,8 +415,8 @@ DEFAULT_SETTINGS = {
 
     # 좌표 라이브러리 자동 정리
     "coord_library": {
-        "max_count": 1000,       # 0 = 무제한
-        "max_days":  1000,       # 0 = 무제한 (created_at 기준)
+        "max_count": 5000,       # 0 = 무제한 (사용자 정책 2026-05-02, 1000 → 5000)
+        "max_days":  0,          # 0 = 무제한 (default 변경 — 보관일 제한 기본 off)
     },
 }
 

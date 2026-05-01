@@ -46,173 +46,60 @@ Wafer Map은 회사 업무의 반도체 측정 데이터 시각화 프로젝트.
    - 예: (ETCH 전 두께) − (ETCH 후 두께) = DELTA
 3. **다중 웨이퍼**: 입력은 1장일 수도, 여러 장일 수도 있음
 
-### 확정 기능 요구사항 — 클립보드 출력 (PPT 워크플로우)
-입력이 클립보드라면 **출력도 클립보드**. 모든 시각화 산출물은 PPT에 바로 Paste 가능해야 함. Profile Vision의 구현 패턴을 그대로 재사용한다.
+### 확정 기능 요구사항 (개발자 invariant)
 
-| 기능 | 동작 | Profile Vision 참고 구현 |
-|---|---|---|
-| **Copy Image** | Cell 전체 (차트+컬러바+1D+Summary 표) → 클립보드 **이미지**. PPT/Excel 둘 다 그대로 Paste | `widgets/wafer_cell.py::_copy_graph` — FBO 합성 + alpha 제거(RGB32) + PNG/DIB 듀얼 MIME |
-| **Copy Table** | 측정값 Summary 표 → **PPT 표**로 Paste (Excel에선 셀로) | `result/result_window.py::_copy_table` — `QMimeData`에 `setText(tsv)` + `setHtml(html_table)` **듀얼 MIME** |
-| **Copy Data** | 차트의 raw 측정값 → TSV (Excel 붙여넣기용) | `result/result_window.py::_copy_chart_data` — `clipboard.setText()` |
+> 사용자 시점 절차·UI 동작·메시지 카탈로그·단축키는 [`USER_GUIDE.md`](USER_GUIDE.md). 본 섹션은 **변경 시 반드시 협의** 영역.
 
-**핵심**: Copy Table은 **TSV 단독으로는 PPT 표가 안 된다.** `QMimeData`에 HTML을 함께 넣어야 PPT가 `<table>`로 인식하고 셀로 붙여넣음. 단일 MIME(TSV만)이면 PPT는 텍스트박스 + 탭 문자열로만 붙임. **Copy Image 도 동일 패턴** — alpha 채널 살린 PNG 만 넣으면 Excel 이 좌우 비대칭으로 그리는 quirk → RGB32 변환 + setImageData(CF_DIB) + setData("image/png") 듀얼 MIME 으로 PPT/Excel 모두 정상 ([memory](.claude/projects/.../project_clipboard_excel_alpha_pitfall.md)).
+**클립보드 출력 (Copy 패턴)**
+- Cell 우클릭 메뉴 4종 (`Reset` / `Copy Image` / `Copy Data` / `Copy Table`). 통합 핸들러 `_show_cell_menu` 가 자식 widget 별 `customContextMenuRequested` 받음 (`GLViewWidget` / `PlotWidget` 이 우클릭 propagate 차단 → 자식별 connect 필요).
+- **듀얼 MIME 패턴 (불변)**:
+  - Copy Image: alpha 제거 RGB32 + `setImageData(CF_DIB)` + `setData("image/png")` — Excel 좌우 비대칭 quirk 우회 ([memory](C:/Users/JHPark/.claude/projects/c--Users-JHPark-Wafer-Map/memory/project_clipboard_excel_alpha_pitfall.md))
+  - Copy Table: `setText(tsv)` + `setHtml(html_table)` — TSV 단독 시 PPT 가 텍스트박스로만 받음
+  - Copy Data: `setText(tsv)` 단독
+- **Copy Image FBO 합성**: `_capture_container.grab()` (non-GL) + `_capture_gl_offscreen()` (GL, MSAA 4x) 합성 → 듀얼 MIME. 화면 표시 상태 독립 (스크롤·다른 창 가림 무관).
 
-Cell 우클릭 메뉴 표준 (cell 어디든): `Reset` / `Copy Image` / `Copy Data` / `Copy Table` — 통합 핸들러 `_show_cell_menu` 가 자식 widget 별 `customContextMenuRequested` 받음 (GLViewWidget / PlotWidget 이 우클릭 propagate 차단하므로 자식별 connect 필요).
+**Summary 표 정책**
+- 6 메트릭 정의는 USER_GUIDE 참조. 자릿수 = `chart_common.decimals` (전역).
+- DELTA 양쪽 병기: LOT/SLOT 칸 `A_LOT.A_SLOT ← B_LOT.B_SLOT` 화살표는 `A − B` 방향.
+- 다중 wafer: (MAP + 표) 한 쌍 가로 나열 (`QScrollArea`).
 
-### 확정 기능 요구사항 — Summary 표
-
-**메트릭 6종 (계산 정의)**
-| 메트릭 | 정의 |
-|---|---|
-| **AVG (Mean)** | 측정점 VALUE의 산술 평균 |
-| **MAX** | 최댓값 |
-| **MIN** | 최솟값 |
-| **RANGE** | MAX − MIN |
-| **3SIG** | 3 × 표준편차 (표본 기준, ddof=1) |
-| **NU%** | `(MAX − MIN) / (2 × Mean) × 100` (반도체 half-range 방식) |
-
-**표 레이아웃 (한 웨이퍼 단위, 4행 × 2열)**
-| Label | Value (예시) |
-|---|---|
-| `LOT ID / SLOT` | `RK2A001 / 10` |
-| `AVG / NU` | `663.7 / 1.69%` |
-| `MIN ~ MAX` | `640 ~ 680` |
-| `RANGE / 3SIG` | `40 / 38.3` |
-
-- 다중 웨이퍼: 각 웨이퍼마다 (MAP + 이 표) 한 쌍을 **가로로 나열**
-- 소수점 자릿수는 `settings.json`으로 조정 (기본값 구현 시 확정)
-- DELTA 시각화도 동일 레이아웃 (LOT/SLOT 칸에 `A_LOT / A_SLOT ← B_LOT / B_SLOT`로 양쪽 병기)
-
-### 확정 기능 요구사항 — 메인 윈도우 레이아웃 (3-패널 세로 스택)
-
-```
-┌─ Wafer Map ────────────────────────────── [⚙ Settings] ─┐
-│  [ Panel 1: Input ]   A | B  (QSplitter, Ctrl+V 타겟)   │
-├─────────────────────────────────────────────────────────┤
-│  [ Panel 2: Control ]                                   │
-│    VALUE ▼  X ▼  Y ▼  [저장된 좌표 불러오기]            │
-│    View: 2D/3D ▼   Z 스케일: 공통/개별                   │
-│                                           [▶ Run]      │
-├─────────────────────────────────────────────────────────┤
-│  [ Panel 3: Result ]   MAP + Summary 표 쌍을 가로 나열  │
-│    (QScrollArea, 다중 웨이퍼 대비)                      │
-└─────────────────────────────────────────────────────────┘
-```
-
-- 세로 분할: `QSplitter(Vertical)` — 사용자가 핸들 드래그로 높이 조정
+**메인 윈도우 정책**
 - 우상단 **`⚙ Settings` 버튼 하나만** (`QToolBar`). 메뉴바·Help 없음 — 최대한 직관적
-- `Settings` 다이얼로그: `Appearance` 탭 (테마·폰트) + `Coord Library` 탭 (프리셋 목록 + 삭제)
-- **2D / 3D는 탭이 아니라 Control 패널의 콤보/토글로 즉시 전환** (결과 영역은 하나, 내용만 바뀜)
-- Cell 상호작용: cell 어디서든 우클릭 → `Reset` / `Copy Image` / `Copy Data` / `Copy Table` (툴바 아님)
+- **2D / 3D 는 탭이 아니라** Control 패널 콤보/토글로 즉시 전환 (결과 영역 하나)
 
-### 확정 기능 요구사항 — 입력 창 & DELTA 시각화
+**DELTA 매칭 룰 (불변)**
 
-**메인 윈도우는 2-pane 입력 구조.** 좌/우(또는 A/B)에 각각 독립 Ctrl+V 타겟을 둔다.
-
-| 입력 상태 | 동작 |
+| 항목 | 규칙 |
 |---|---|
-| 한쪽만 입력 | **단일 시각화** — 해당 입력 파싱 → VALUE/X/Y 사용자 선택 → MAP + Summary 출력. 표시 메타는 해당 입력의 **현재** `LOT ID` / `SLOTID` |
-| 양쪽 모두 입력 | **DELTA 시각화** — VALUE/X/Y 선택은 공통. 두 입력을 `WAFERID`로 매칭해 VALUE 차이 계산 |
+| Wafer 매칭 키 | `WAFERID` 만 (LOT/SLOT 변동 무관 — 영구 불변 ID) |
+| 점 매칭 | 좌표 합집합 + tolerance 1mm. 양쪽 매칭 → dv=va−vb / A only → dv=va / B only → dv=−vb |
+| 부호 | **`A − B` 고정** (UI 토글 없음) |
+| 차단 사유 | WAFERID 교집합 0 또는 좌표 결정 실패 → ReasonBar error + Run 비활성 |
+| Δ-Interp | 체크 시 한쪽 only 점에 RBF 보간 → 정상 delta. 비활성 시 NaN 룰 |
+| 다중 wafer | A 10 / B 4 허용. 교집합만 처리, 미매칭 wafer 조용히 skip + ReasonBar 개수 안내 |
 
-**DELTA 매칭 규칙**
-1. **웨이퍼 매칭: `WAFERID`(영구 불변 키) 일치**. `LOT ID` / `SLOTID` 불일치는 허용 (상태값이라 재할당·이동 가능)
-2. **웨이퍼 수 불일치 허용**: A에 10장, B에 4장이 들어와도 `WAFERID` 교집합 웨이퍼만 DELTA 계산·출력. 교집합에 없는 웨이퍼는 **조용히 미출력** (경고 팝업 X). 상단에 `"매칭 4 / A 10 vs B 4"` 요약 한 줄로 개수 안내
-3. **점 매칭: 같은 WAFERID 내에서 선택된 `(X, Y)` 좌표가 완전 일치**하는 측정점만 사용. 보간 없음. 좌표 부분 일치도 교집합만
-4. **DELTA 부호**: **`A − B` 고정** (UI 토글 없음)
-5. 완전 불일치(웨이퍼 교집합 0 or 좌표 교집합 0): 경고 팝업 + DELTA 차트 비활성화
-6. 좌표 비교 tolerance (부동소수 오차 대비): 구현 시 확정 (예: 1e-6 mm)
+**다중 Wafer Z 스케일**
+- `z_scale_mode`: `common` (기본) / `individual` 토글, 즉시 전환
+- **Z-Margin** (공통 모드 전용): `range × (1 + pct/100)`, midpoint 고정. matplotlib `ax.margins()` 관례. 개별 모드에선 disable + 값 0 회색.
 
-**DELTA 출력 표시 규칙**
-- `WAFERID`는 영구 매칭 키이므로 **출력 정체성의 중심**
-- 현재 `LOT ID` / `SLOTID`는 두 입력이 다를 수 있음 → **양쪽 다 병기** (예: `RK2A001AC / slot 11  ←  RK2A001 / slot 7`, 화살표는 `A − B` 방향)
-- MAP: DELTA 값의 웨이퍼 heatmap
-- Summary: DELTA 값에 대한 6종 메트릭(AVG/MAX/MIN/RANGE/3SIG/NU%)
-
-### 확정 기능 요구사항 — 다중 웨이퍼 레이아웃 & 출력 합성 이미지
-
-**다중 웨이퍼 배치**: (MAP + Summary 표) 한 쌍을 한 열로 묶어 **가로로 나열**.
-
-```
-┌──────────┬──────────┬──────────┐
-│  MAP 1   │  MAP 2   │  MAP 3   │
-├──────────┼──────────┼──────────┤
-│ Table 1  │ Table 2  │ Table 3  │
-└──────────┴──────────┴──────────┘
-```
-
-**3D Z 스케일 모드 (다중 웨이퍼)**
-- **기본**: 값 범위 기반 자동 + 사용자 수동 오버라이드
-- **공통 스케일 모드** (`z_common`): 모든 웨이퍼가 동일 Z 범위 → 직관적 비교용 (기본 권장)
-- **개별 스케일 모드** (`z_individual`): 각 웨이퍼 자체 최적 → 서로 비교하지 않는 독립 데이터용
-- UI 토글로 즉시 전환
-
-**Copy Image — MAP + 표 합성 이미지 (PySide6 FBO 합성 + 듀얼 MIME)**
-- 결과 패널은 `QWidget` 컨테이너 안에 (MAP 위젯 + Summary 테이블 위젯)을 `QVBoxLayout`으로 수직 배치
-- 다중 웨이퍼: (MAP+Table 열)을 가로로 나열한 전체 컨테이너 하나
-- **Copy Image 액션**: `_capture_container.grab()` (non-GL 부분) + `_capture_gl_offscreen()` FBO (GL 부분) 합성 → `QPixmap` → **alpha 제거 (RGB32) + setImageData(CF_DIB) + setData("image/png") 듀얼 MIME** → `clipboard.setMimeData(mime)`
-- **3D**: `GLViewWidget.grab()`은 OpenGL 프레임버퍼라 일반 widget과 다름 → `QOpenGLFramebufferObject(MSAA=4)` offscreen 렌더 후 `drawImage` 합성 (`_capture_gl_offscreen`)
-- **Copy Table** (표만 PPT 표로 = HTML+TSV 듀얼 MIME)과 **Copy Image** (합성 이미지)는 **별개 액션**으로 유지
-
-### 확정 기능 요구사항 — 좌표 프리셋 라이브러리
-
-입력 데이터의 PARAMETER 리스트에 **X/Y 좌표 행이 없이 측정값(`T1`, `THK`, `THK_PRE-POST` 등)만** 있는 경우가 있다. 이를 위해 이전 분석에서 사용한 X/Y 좌표를 저장·재사용하는 기능.
-
-**저장 위치**: `coord_library.json` — **앱 실행 폴더(exe 옆)**. 무설치 포터블 배포 방식이라 앱 전체가 폴더 단위로 이동 가능. settings.json도 동일 폴더.
-
-**저장 스키마**
-```json
-{
-  "presets": [
-    {
-      "name": "49P Polar 5mm",
-      "recipe": "HT_SOC_POLAR_49PT_5mm",
-      "n_points": 49,
-      "x_mm": [0, 10, -10, ...],
-      "y_mm": [0, 0, 0, ...],
-      "created_at": "2026-04-18T14:00:00",
-      "last_used": "2026-04-18T14:00:00"
-    }
-  ]
-}
-```
-
-**저장 시점** — **자동** (사용자 조작 없음)
-- ▶ Run 클릭 시, 입력된 **각 웨이퍼별로** `(recipe, x_mm, y_mm)` 조합을 라이브러리와 비교
-- 셋 다 tolerance(≈1e-3 mm) 내 일치하는 기존 레코드가 있으면 → `last_used`만 갱신
-- 없으면 새 레코드 추가. 이름 자동 생성: `{recipe}_{n_points}P` (중복 허용)
-- **recipe 같아도 좌표 다르면 별도 레코드** (레시피 수정 / 장비별 미세 좌표 차이 케이스)
-- **좌표 같아도 recipe 다르면 별도 레코드** (같은 좌표를 다른 레시피로 재사용)
-- 다중 웨이퍼 입력(헤더 반복 페이스트 포함) → 웨이퍼별 고유 `(recipe, 좌표)` 조합마다 저장
-- DELTA 모드: A/B 각 웨이퍼 모두 독립 저장 (장비 간 좌표 차이 허용)
-- 용량: 1개 ≈ 1~2KB, 1,000개 ≈ 1~2MB — 성능 문제 없음
-- 누적 정리는 **Settings → Coord Library 탭에서 수동 삭제**
-
-**RECIPE 기반 자동 좌표 적용 (좌표 PARAMETER 없는 입력)**
-- 입력에 X/Y PARAMETER 행이 없어 `auto_select` 폴백으로 X/Y 콤보가 VALUE와 같은 이름이 되는 경우 → 좌표 선택 무효
-- 이때 라이브러리에서 **해당 웨이퍼의 RECIPE 와 일치하는 프리셋** 을 조회, `last_used` 최신 레코드의 좌표를 자동 주입
-- 사용자 조작 없음. 불러오기 다이얼로그 생략. 같은 RECIPE의 좌표가 여러 개면 최신 사용 기준
-- 라이브러리에 매칭 레코드 없으면 해당 웨이퍼 시각화 스킵 (또는 사용자가 수동 "저장된 좌표 불러오기")
-- 자동 적용된 셀은 타이틀에 📁 아이콘 표시
-
-**불러오기 UI (Step 2 좌표 경로 B)**
-- Step 2에 항상 `"저장된 좌표 불러오기"` 버튼 제공
-- 클릭 시 프리셋 목록 다이얼로그:
-  - **필터**: 현재 VALUE PARAMETER의 **실제 DATA 개수 N**과 `n_points`가 일치하는 프리셋만
-  - **중복 좌표 병합 표시**: `x_mm`·`y_mm` 배열이 tolerance(예: 1e-3mm) 내 동일한 프리셋들은 **대표 1개 + "외 N"** 으로 묶어 표시 (예: `HT_SOC_POLAR_49PT_5mm 외 3`). 대표는 `last_used` 최신 레코드
-  - **정렬**: RECIPE 일치 우선 (있으면 상단), 그 다음 `last_used` 최근순
-- 프리셋 선택 시 해당 X/Y 배열을 좌표로 주입 → 좌표 PARAMETER 선택 UI는 스킵
-- 선택 후 해당 레코드의 `last_used` 갱신
-
-**편집/삭제 UI**
-- `Settings` 다이얼로그의 `Coord Library` 탭에서 진입 (별도 메인 메뉴 없음)
-- 모든 프리셋을 **병합 없이 전체 목록**으로 표시 (이름·RECIPE·n_points·최근 사용일)
-- 개별 선택 후 **삭제** 가능. 이름·좌표 수정은 미지원 (새로 저장하는 방식)
-
-**DELTA 모드에서의 적용**
-- 양쪽 입력의 좌표는 **무조건 동일**해야 하므로, 프리셋 불러오기 시 **양쪽 pane에 공통 적용**
-- pane별 개별 프리셋 선택 미지원
-
-**좌표 PARAMETER 자동 감지 안 함** — 사용자가 "불러오기" 버튼으로 명시적 진입
+**좌표 프리셋 라이브러리 정책**
+- **저장 위치**: `coord_library.json` — 앱 실행 폴더 (포터블)
+- **저장 스키마**:
+  ```json
+  {"presets": [{"name": "...", "recipe": "...", "n_points": 49,
+                "x_mm": [...], "y_mm": [...],
+                "created_at": "...", "last_used": "..."}]}
+  ```
+- **자동 저장 (▶ Run 시점)**:
+  - 각 wafer 의 `(recipe, x_mm, y_mm)` 조합을 라이브러리와 비교 (tolerance 1e-3 mm)
+  - 일치 시 `last_used` 만 갱신, 없으면 신규 추가 (이름 `{recipe}_{n_points}P`)
+  - **recipe 같아도 좌표 다르면 별도** / **좌표 같아도 recipe 다르면 별도**
+  - 다중 wafer / DELTA → wafer 별 독립 저장
+- **자동 적용 (입력에 X/Y PARAMETER 없을 때)**: 해당 wafer 의 RECIPE 일치 프리셋 → `last_used` 최신 레코드 좌표 주입. 매칭 없으면 wafer skip. 자동 적용 셀 → 📁 아이콘
+- **불러오기 다이얼로그**: 현재 VALUE 의 N 과 `n_points` 일치 프리셋만 필터. 좌표 동일 (tolerance 1e-3 mm) 프리셋은 대표 1개 + "외 N" 병합. 정렬: RECIPE 일치 우선 → `last_used` 최근순
+- **DELTA 모드**: A/B 양쪽 공통 적용 (pane 별 개별 미지원). 좌표 동일이 invariant
+- **편집/삭제**: Settings → 좌표 라이브러리 탭. 이름/좌표 수정 미지원 (새로 저장)
+- **자동 정리**: `coord_library.max_count` / `max_days` (0=무제한, 기본 1000). 기준 = `last_used` 오래된 순
 
 ## 입력 명세
 

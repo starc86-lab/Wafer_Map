@@ -650,13 +650,71 @@ class WaferCell(QFrame):
         self._deferred = defer_render
         self._is_master = is_master
 
-        # outer — border 없는 투명 컨테이너. er_row(캡처 밖) + _capture_container(캡처 대상)
+        # outer — border 없는 투명 컨테이너. er_row(캡처 밖, 상단) + _capture_container(캡처 대상)
         # 를 세로로 묶음. Copy Image 는 _capture_container 만 crop 대상.
+        # er_row 가 capture 위로 올라온 이유 (사용자 정책 2026-05-02):
+        # - 하단에 있을 때 사용자가 기능 인지 못하는 경우 다수
+        # - single 모드에서도 deposition rate 등 계산 필요 → 항상 visible
         outer_lay = QVBoxLayout(self)
         outer_lay.setContentsMargins(0, 0, 0, 0)
         outer_lay.setSpacing(2)
 
-        # ───── _capture_container (Copy Image 대상) ─────
+        # ───── er_row (캡처 영역 밖, 셀 상단) — 1 row (간결화) ─────
+        # `Time: [___] sec  ☑ 전체 적용  dTHK/Time, ER 계산` (master)
+        # slave 는 체크 / 설명 없이 `Time: [___] sec` 만 표시
+        # single + delta 모두 항상 visible (사용자 정책 2026-05-02).
+        from core.themes import FONT_SIZES
+        _body_px = FONT_SIZES.get("body", 14)
+        _small_px = FONT_SIZES.get("small", 12)
+
+        # parent=self 명시 — 미명시 시 잠시 top-level 로 native window 승격 위험
+        self._er_row = QWidget(self)
+        er_outer = QHBoxLayout(self._er_row)
+        er_outer.setContentsMargins(8, 2, 8, 2)
+        er_outer.setSpacing(6)
+
+        self.lbl_time = QLabel("Time:")
+        er_outer.addWidget(self.lbl_time)
+        self.le_time = QLineEdit()
+
+        # 빈 문자열도 Acceptable 로 보는 validator — focus out / Tab 시 editingFinished
+        # 가 발화해 _on_time_edit_finished 가 None 으로 ER mode 해제 (사용자 정책
+        # 2026-05-02). Qt 기본 QDoubleValidator 는 빈 문자열을 Intermediate 로 봐서
+        # editingFinished 미발화 → 미적용 전환이 returnPressed 에서만 동작했던 회귀 fix.
+        from PySide6.QtGui import QValidator as _QV
+        class _OptionalDoubleValidator(QDoubleValidator):
+            def validate(self, text, pos):
+                if not text.strip():
+                    return _QV.State.Acceptable, text, pos
+                return super().validate(text, pos)
+        _v = _OptionalDoubleValidator(0.0, 99999.0, 2)
+        _v.setNotation(QDoubleValidator.Notation.StandardNotation)
+        self.le_time.setValidator(_v)
+        self.le_time.setFixedWidth(60)
+        self.le_time.setPlaceholderText("sec")
+        er_outer.addWidget(self.le_time)
+        if is_master:
+            self.chk_apply_all = QCheckBox("전체 적용 ")  # 끝 space — 다음 라벨 여백
+            self.chk_apply_all.setChecked(True)  # default: 전체 적용 ON
+            self.chk_apply_all.setStyleSheet(
+                f"QCheckBox {{ font-size: {_body_px}px; }}"
+            )
+            er_outer.addWidget(self.chk_apply_all)
+            self.lbl_desc = QLabel("ΔTHK/Time, ER 계산")
+            self.lbl_desc.setStyleSheet(
+                f"color: #888888; font-size: {_small_px}px;"
+            )
+            er_outer.addWidget(self.lbl_desc)
+        else:
+            self.chk_apply_all = None
+            self.lbl_desc = None
+        er_outer.addStretch(1)
+
+        # er_row 를 outer 의 첫 번째 child 로 — capture 보다 위
+        outer_lay.addWidget(self._er_row)
+        # always visible — single 도 deposition rate 계산용도
+
+        # ───── _capture_container (Copy Image 대상, er_row 아래) ─────
         # 기존 WaferCell 이 갖던 border/배경/내용을 이 컨테이너로 이동.
         self._capture_container = QFrame()
         self._capture_container.setObjectName("waferCell")
@@ -664,69 +722,6 @@ class WaferCell(QFrame):
             "#waferCell { background-color: white; border: 1px solid #bfbfbf; }"
         )
         outer_lay.addWidget(self._capture_container)
-
-        # ───── er_row (캡처 영역 밖, 셀 하단) — 2 row ─────
-        # Row 1: Time: [___]  전체 적용 [체크]  (slave 는 체크 없음)
-        # Row 2: *입력 시 ΔTHK/Time 값으로 변환 (ER, RR 계산용도).  (slave 는 빈 placeholder)
-        # 폰트는 전역 QWidget body 상속 (Settings 글자크기 연동). QCheckBox 만 전역
-        # QSS 에서 small 이라 인라인 body 강제 (refresh 시 재적용).
-        from core.themes import FONT_SIZES
-        _body_px = FONT_SIZES.get("body", 14)
-
-        # parent=self 명시 — 미명시 시 잠시 top-level 로 native window 승격 위험
-        self._er_row = QWidget(self)
-        er_outer = QVBoxLayout(self._er_row)
-        er_outer.setContentsMargins(8, 2, 8, 2)
-        er_outer.setSpacing(0)
-
-        # Row 1
-        row1 = QHBoxLayout()
-        row1.setContentsMargins(0, 0, 0, 0)
-        row1.setSpacing(6)
-        self.lbl_time = QLabel("Time:")
-        row1.addWidget(self.lbl_time)
-        self.le_time = QLineEdit()
-        _v = QDoubleValidator(0.0, 99999.0, 2)
-        _v.setNotation(QDoubleValidator.Notation.StandardNotation)
-        self.le_time.setValidator(_v)
-        self.le_time.setFixedWidth(60)
-        self.le_time.setPlaceholderText("sec")
-        row1.addWidget(self.le_time)
-        if is_master:
-            self.chk_apply_all = QCheckBox("전체 적용")
-            self.chk_apply_all.setChecked(True)  # default: 전체 적용 ON
-            self.chk_apply_all.setStyleSheet(
-                f"QCheckBox {{ font-size: {_body_px}px; }}"
-            )
-            row1.addWidget(self.chk_apply_all)
-        else:
-            self.chk_apply_all = None
-        row1.addStretch(1)
-        er_outer.addLayout(row1)
-
-        # Row 2 — master 는 부연설명, slave 는 빈 placeholder (높이 맞춤)
-        row2 = QHBoxLayout()
-        row2.setContentsMargins(0, 0, 0, 0)
-        row2.setSpacing(0)
-        _small_px = FONT_SIZES.get("small", 12)
-        if is_master:
-            self.lbl_desc = QLabel("*입력 시 ΔTHK/Time 값으로 변환 (ER, RR 계산용도).")
-            self.lbl_desc.setStyleSheet(
-                f"color: #888888; font-size: {_small_px}px;"
-            )
-        else:
-            self.lbl_desc = QLabel(" ")  # placeholder — Row 2 높이 유지
-            self.lbl_desc.setStyleSheet(f"font-size: {_small_px}px;")
-        row2.addWidget(self.lbl_desc)
-        row2.addStretch(1)
-        er_outer.addLayout(row2)
-
-        # addWidget 먼저 (parent 확정) → 그 후 setVisible.
-        # 순서 반대면 _er_row 가 잠시 top-level QWidget 으로 native window 표시 →
-        # 팝업 깜빡임 (사용자 보고 2026-04-28). is_delta=True 시 setVisible(True) 가
-        # promotion 트리거.
-        outer_lay.addWidget(self._er_row)
-        self._er_row.setVisible(bool(getattr(display, "is_delta", False)))
 
         # signal 연결 — editingFinished + returnPressed 둘 다 (textChanged 는
         # 모든 키 입력마다 trigger 라 너무 많이 emit). editingFinished 만 쓰면
@@ -1235,13 +1230,10 @@ class WaferCell(QFrame):
             self.chk_apply_all.setStyleSheet(
                 f"QCheckBox {{ font-size: {_body_px}px; }}"
             )
-        if self.lbl_desc is not None:
-            if self._is_master:
-                self.lbl_desc.setStyleSheet(
-                    f"color: #888888; font-size: {_small_px}px;"
-                )
-            else:
-                self.lbl_desc.setStyleSheet(f"font-size: {_small_px}px;")
+        if self.lbl_desc is not None:  # master 만 — slave 는 None
+            self.lbl_desc.setStyleSheet(
+                f"color: #888888; font-size: {_small_px}px;"
+            )
         self._apply_chart_size(settings.get("chart_common", {}))
         # Summary 표 재계산 — v_in 변경 (ER time 적용 등) 반영. 빠뜨리면 map/1D 만
         # 갱신되고 표만 stale.
