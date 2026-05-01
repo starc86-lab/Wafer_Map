@@ -31,9 +31,11 @@ class SummaryLayeredDepth(SummaryWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        # paintEvent 가 흰 배경 + 카드 모두 그림. WA_StyledBackground / stylesheet
-        # 사용 시 QSS 가 paintEvent 결과 위에 덮어써서 카드 효과 소실 →
-        # paintEvent 단독 처리 (사용자 정책 2026-05-01).
+        # WA_StyledBackground + stylesheet 흰 배경 + paintEvent 가 위에 카드 그림.
+        # QSS background 는 paint 의 background pass, paintEvent 는 foreground —
+        # 서로 다른 paint pass 라 동시 사용 가능 (사용자 정책 2026-05-01).
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setStyleSheet("background-color: white;")
         outer = QHBoxLayout(self)
         # 본 카드 영역 안쪽 padding (offset 만큼 우하단 여백 + 카드 내부 padding)
         outer.setContentsMargins(2, 1, 2 + self._OFFSET_2, 1 + self._OFFSET_2)
@@ -92,8 +94,6 @@ class SummaryLayeredDepth(SummaryWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         rect = self.rect()
-        # 흰 배경 직접 fill (테마 차단)
-        painter.fillRect(rect, QColor("white"))
         # 본 카드 — 우하단 offset 만큼 줄어든 영역
         front = QRectF(
             rect.left() + 1,
