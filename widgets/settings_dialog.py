@@ -106,34 +106,20 @@ def _populate_two_columns(group: QGroupBox, items: list[tuple[str, QWidget]]) ->
 
 
 def apply_global_style(app: QApplication, settings: dict[str, Any]) -> None:
-    import os, time
-    bench = bool(os.environ.get("WAFERMAP_BENCH"))
-    t0 = time.perf_counter() if bench else 0.0
-
     theme_name = settings.get("theme", "Light")
     font_name = settings.get("font", "Segoe UI")
     scale = float(settings.get("font_scale", 1.0) or 1.0)
 
     theme = THEMES.get(theme_name, THEMES["Light"])
 
+    # BASE_FONT_SIZES 에서 scale 적용해 FONT_SIZES 영구 갱신 — 이후 FONT_SIZES 를
+    # 읽는 모든 코드 (차트 제목, 컬러바, 1D 축 폰트 등) 가 현재 scale 반영된 값
+    # 을 얻음.
     scaled = {k: max(8, int(round(v * scale))) for k, v in BASE_FONT_SIZES.items()}
     FONT_SIZES.clear()
     FONT_SIZES.update(scaled)
-    if bench:
-        t1 = time.perf_counter()
     qss = build_stylesheet(theme, font_name)
-    if bench:
-        t2 = time.perf_counter()
-
     app.setStyleSheet(qss)
-    if bench:
-        t3 = time.perf_counter()
-        import sys
-        sys.stderr.write(
-            f"  [bench global] FONT_SIZES={1000*(t1-t0):.1f}ms  "
-            f"build_stylesheet={1000*(t2-t1):.1f}ms  "
-            f"setStyleSheet={1000*(t3-t2):.1f}ms\n"
-        )
 
 
 def _fix_width(widget: QWidget, px: int = FIELD_WIDTH) -> QWidget:
@@ -1211,34 +1197,17 @@ class SettingsDialog(QDialog):
         만 재 set (가벼움). 이전 set_table_style swap 은 _summary 위젯 재 init
         이라 무거웠음 (사용자 정책 2026-05-01, scope 2 fix #2).
         """
-        import os, time
-        bench = bool(os.environ.get("WAFERMAP_BENCH"))
-        t0 = time.perf_counter() if bench else 0.0
-
         merged = self._collect()
-        if bench:
-            t1 = time.perf_counter()
         settings_io.set_runtime(merged)
         app = QApplication.instance()
         if app is not None:
             apply_global_style(app, merged)
-        if bench:
-            t2 = time.perf_counter()
         # 가벼운 폰트 갱신 — swap 비용 회피
         main = self._main_window or self.parent()
         if main is not None:
             rp = getattr(main, "_result_panel", None)
             if rp is not None and hasattr(rp, "apply_fonts_all"):
                 rp.apply_fonts_all()
-        if bench:
-            t3 = time.perf_counter()
-            import sys
-            sys.stderr.write(
-                f"[bench ui] collect={1000*(t1-t0):.1f}ms  "
-                f"apply_global_style={1000*(t2-t1):.1f}ms  "
-                f"apply_fonts_all={1000*(t3-t2):.1f}ms  "
-                f"total={1000*(t3-t0):.1f}ms\n"
-            )
 
     def _apply_graph_runtime(self) -> None:
         """Graph(2D/3D) 설정 변경 → 런타임 캐시 + MainWindow 재렌더 (cell 재생성 없이).
