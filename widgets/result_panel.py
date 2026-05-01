@@ -63,6 +63,13 @@ class ResultPanel(QWidget):
         self._layout.addWidget(ph)
 
     def _clear_layout(self) -> None:
+        # WaferCell 은 deleteLater 전에 cleanup() 호출 — GL items/FBO 명시 release
+        # (사용자 정책 2026-05-02, RSS 누수 fix).
+        for c in self._cells:
+            try:
+                c.cleanup()
+            except Exception:
+                pass
         while self._layout.count():
             item = self._layout.takeAt(0)
             w = item.widget()

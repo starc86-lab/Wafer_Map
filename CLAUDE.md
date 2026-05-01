@@ -629,6 +629,14 @@ Wafer Map/
 - **Z-Margin 스핀박스 (메인 컨트롤 패널, cb_zscale 옆)**: 공통 모드 전용. 개별 모드에선 disable + 값 0 회색 (저장값은 별도 보관). matplotlib `ax.margins()` 관례 — `midpoint` 고정, `range × (1 + pct/100)` 로 확장. pct=0 원본, 50% → 1.5배, 100% → 2.0배. 각 wafer 가 palette 더 좁게 써서 시각 대비 부드러워짐. `_apply_z_scale_mode` 끝에서 적용. 즉시 settings.json 저장 + 전 셀 재렌더
 - **첫 Run Analysis 시퀀셜 표시 제거**: `ResultPanel.set_displays`가 `container.hide() → cells 생성·렌더·addWidget → layout.activate() + adjustSize() → container.show()` 순서. activate/adjustSize 빠지면 show() 직후 (0,0) 중첩 → HBoxLayout 펼침이 1프레임 보임
 - **첫 Run lazy init 흡수**: `app.py::_pg_widget_warmup` 이 시작 시 dummy `pg.PlotWidget` + `_bg_warmup` 이 dummy `RBFInterpolator` 1회 호출 — 첫 Run Analysis 가 두번째와 동속
+- **WaferCell.cleanup() — GL VBO/FBO 명시 release (F100, 2026-05-02)**: cell `deleteLater` 직전 `ResultPanel._clear_layout` 이 호출. 각 `_gl_2d`/`_gl_3d` 에 `makeCurrent → clear() → _cached_capture_fbo=None → doneCurrent` + GL slot/큰 array None. cell 자체는 GC 잘 되지만 (`alive=0` 검증), pyqtgraph 가 GLMeshItem destructor 에서 `glDeleteBuffers` 안 호출해 driver memory 잔존 → 명시 cleanup 으로 cycle 잔재 18MB → 9MB 절반.
+
+**Run 연타 차단 + Progress bar + Stress test (F100, 2026-05-02)**
+
+- **`_on_visualize` 직렬화**: `_visualize_in_progress` flag + `btn_visualize.hide()` + `progress_run.show()` + `processEvents(ExcludeUserInputEvents)` (paint 만) + `QTimer.singleShot(0, _do_visualize_and_defer_restore)`. 전체 cycle = button hide → defer work → defer restore. button 이 hidden 이라 OS 큐의 click event 가 button 으로 dispatch 안 됨 (Qt 가 hidden widget 의 mouse event 무시) → 연타 reentrancy 차단.
+- **`progress_run` swap (Run 자리)**: `QProgressBar(0, 100)` `setFormat("처리 중... %p%")`. `_do_visualize` 가 동기 CPU bound 라 paint 안 들어와 indeterminate (0,0) 모드는 멈춤 → determinate 단계별 `_set_progress(5/20/40/60/85/95/100)` + `processEvents(ExcludeUserInputEvents)` 로 paint 강제. mousePressEvent/mouseReleaseEvent `accept()` swallow + `_restore_run_button` 에서 button show 전 `processEvents()` flush 로 progress 클릭이 다음 Run trigger 회귀 방지.
+- **Stress test mode (Ctrl+Shift+T 시작 / Esc 정지)**: `MainWindow._show_stress_dialog → _start_stress(N)` — 입력 다이얼로그로 cycle 수 입력, paste 한 데이터로 자동 N 회 Run. `_restore_run_button` 끝에서 `_stress_log_cycle` chain → `gc.collect()` ×2 + `WaferCell._alive_instances` len + `psutil` RSS 측정 → `debug/stress_log_YYYYMMDD_HHMMSS.csv` append (cycle/timestamp/n_wafers/t_ms/alive/total_created/rss_mb). ReasonBar 우측에 `Stop (N/Total)` 버튼 카운트 실시간. 매 1000 cycle 마다 `gc.collect(2)` full GC.
+- **누적 leak 검증 (1800 wafer 누적, 2026-05-02)**: 100 cycle × 18 WF stress test 결과 — `t_ms` 변동 ±2% (누적 0), `alive=18` 고정 (cell GC 완벽), RSS 가 cycle 60 까지 +85MB 증가 후 cycle 62/72/88 에 OS 가 자체 회수해 cycle 100 에서 시작 +27MB. 단조 증가 아니라 **plateau + oscillation**. 한 달 무중단 사용 시나리오 안전성 검증됨.
 
 **Startup warmup 구조 (0.2.1~)**
 - 이전 `_async_warmups` 단일 콜백이 GUI 스레드 0.5~2s 점유 → 윈도우 응답성 저하

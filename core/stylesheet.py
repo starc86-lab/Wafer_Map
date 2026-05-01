@@ -159,6 +159,18 @@ QPushButton[class="primary"] {{
     font-size: {F['section']}px;
     letter-spacing: 0.5px;
 }}
+/* disabled state — Qt 가 stylesheet 적용 시 native palette disable 효과를
+   무력화 → 명시 :disabled rule 필수. Run 처리 중 회색 표시 (사용자 정책 2026-05-02). */
+QPushButton:disabled {{
+    background-color: {t['surface_alt']};
+    color: {t['text_sub']};
+}}
+QPushButton[class="primary"]:disabled,
+QPushButton[class="secondary"]:disabled,
+QPushButton[class="danger"]:disabled {{
+    background-color: {t['surface_alt']};
+    color: {t['text_sub']};
+}}
 QSplitter::handle {{ background-color: {t['border']}; }}
 QScrollArea {{ background: transparent; border: none; }}
 QDialog {{ background-color: {t['bg']}; color: {t['text']}; }}

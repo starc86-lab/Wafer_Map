@@ -15,8 +15,8 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QGuiApplication, QIcon, QShowEvent
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QGridLayout, QHBoxLayout, QLabel, QMainWindow,
-    QDoubleSpinBox, QPushButton, QSizePolicy, QSpinBox, QSplitter, QToolBar,
-    QToolButton, QVBoxLayout, QWidget,
+    QDoubleSpinBox, QProgressBar, QPushButton, QSizePolicy, QSpinBox, QSplitter,
+    QToolBar, QToolButton, QVBoxLayout, QWidget,
 )
 
 import numpy as np
@@ -117,8 +117,29 @@ class MainWindow(QMainWindow):
         # PARA 합성 누적 상태 — 단일 진실원. sentinel/콤보 라벨/임시 키 모두 여기서.
         self._combined_state = CombinedState()
 
+        # Stress test (사용자 정책 2026-05-02) — 누적 leak 검증용 (한 달 무중단
+        # 사용 시나리오 대비). Ctrl+Shift+T 시작 / Esc 정지. CSV 매 cycle append.
+        self._stress_active: bool = False
+        self._stress_remaining: int = 0
+        self._stress_total: int = 0
+        self._stress_count: int = 0
+        self._stress_csv_file = None
+        self._stress_csv_writer = None
+        self._stress_btn_stop = None
+        self._stress_t0: float = 0.0
+
         self._build_toolbar()
         self._build_central()
+
+        # Stress test 단축키 — Ctrl+Shift+T 시작 / Esc 정지 (정지는 _stop_stress 가
+        # _stress_active 검사 후 noop)
+        from PySide6.QtGui import QKeySequence, QShortcut
+        QShortcut(QKeySequence("Ctrl+Shift+T"), self).activated.connect(
+            self._show_stress_dialog,
+        )
+        QShortcut(QKeySequence("Esc"), self).activated.connect(
+            self._stop_stress,
+        )
 
         # 화면 정중앙 배치 — PyInstaller splash 가 화면 중앙 hardcoded 라
         # 메인 윈도우도 중앙에 위치시켜 splash → main 전환 시 위치 일치.
@@ -146,6 +167,9 @@ class MainWindow(QMainWindow):
         self._main_splitter_restored = True
 
     def closeEvent(self, event) -> None:
+        # Stress test 진행 중이면 정리 (CSV close)
+        if self._stress_active:
+            self._stop_stress()
         # Settings 창이 열려 있으면 함께 종료 (parent=None 으로 독립 창이라 수동 처리)
         dlg = getattr(self, "_settings_dialog", None)
         if dlg is not None:
@@ -263,8 +287,9 @@ class MainWindow(QMainWindow):
         self._reason_bar = ReasonBar()
         cv.addWidget(self._make_control_panel())
         cv.addWidget(self._reason_bar)
-        # ReasonBar 우측에 Run/Clear 추가 (control_panel 빌드 후라 buttons 존재)
+        # ReasonBar 우측에 Run/progress/Clear 추가 (control_panel 빌드 후라 buttons 존재)
         self._reason_bar.add_right_widget(self.btn_visualize)
+        self._reason_bar.add_right_widget(self.progress_run)
         self._reason_bar.add_right_widget(self.btn_clear)
         splitter.addWidget(control_section)
         splitter.addWidget(self._make_result_panel())
@@ -354,11 +379,31 @@ class MainWindow(QMainWindow):
         # naming 유지. callsite 50+ 라 일괄 rename 회귀 위험 vs 이득 미미로 보존.
         self.btn_visualize = QPushButton("▶  Run")
         self.btn_visualize.setProperty("class", "primary")
-        self.btn_visualize.setFixedWidth(
-            HEADER_BUTTON_WIDTH * 2 + HEADER_BUTTON_SPACING,
-        )
+        _run_btn_w = HEADER_BUTTON_WIDTH * 2 + HEADER_BUTTON_SPACING
+        self.btn_visualize.setFixedWidth(_run_btn_w)
         self.btn_visualize.setEnabled(False)
         self.btn_visualize.clicked.connect(self._on_visualize)
+
+        # Run 진행 중 표시 progress bar — 단계별 0~100%. indeterminate (range 0,0)
+        # 은 _do_visualize 동기 block 시 paint 안 들어와 애니메이션 멈춤.
+        # 각 단계마다 _set_progress() helper 가 setValue + processEvents 호출
+        # (사용자 정책 2026-05-02). button 자리에 swap.
+        self.progress_run = QProgressBar()
+        self.progress_run.setRange(0, 100)
+        self.progress_run.setValue(0)
+        self.progress_run.setTextVisible(True)
+        self.progress_run.setFormat("처리 중... %p%")
+        self.progress_run.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.progress_run.setFixedWidth(_run_btn_w)
+        self.progress_run.setFixedHeight(32)
+        self.progress_run.hide()
+        # progress_run 클릭 swallow — 기본 QProgressBar.mousePressEvent 는
+        # ignore() 라 부모로 propagate. progress 위치(=button 위치)에 클릭이
+        # 쌓이면 _restore_run_button 직후 button 에 전달되어 Run 재실행됨.
+        # 명시 accept() 로 propagate 차단 (사용자 정책 2026-05-02).
+        self.progress_run.mousePressEvent = lambda ev: ev.accept()
+        self.progress_run.mouseReleaseEvent = lambda ev: ev.accept()
+        self.progress_run.mouseDoubleClickEvent = lambda ev: ev.accept()
 
         # Clear — 결과 영역 비움
         self.btn_clear = QPushButton("Clear")
@@ -1001,8 +1046,223 @@ class MainWindow(QMainWindow):
             self._added_presets = [preset]
 
     def _on_visualize(self) -> None:
-        # signature skip 정책 폐기 (2026-04-27) — 같은 입력 재클릭 시에도 매번
-        # 새로 시각화. 차단 사유는 모두 ReasonBar 단일 채널.
+        # Run 연타 차단 — 진행 중이면 즉시 무시. 핵심 흐름:
+        #   1) flag set + button disable + visual feedback (text 변경)
+        #   2) processEvents(ExcludeUserInputEvents) — paint 만 처리, 큐 click X
+        #   3) QTimer.singleShot(0, _do_visualize) — work 다음 tick 에 deferred
+        #   4) _on_visualize 즉시 return → event loop spin → 큐 click 들이
+        #      disabled button 에 reject 됨
+        #   5) timer 발화 → _do_visualize 동기 실행 (수 초)
+        #   6) _do_visualize 끝 → finally 에서 _restore_button 도 deferred
+        #      → spin 사이에 _do_visualize 동안 누적된 큐 click 들이 disabled
+        #      button 에 reject → 그 후 button 활성화
+        # 즉시 setEnabled(True) 하면 그 직후 spin 에서 큐 click 처리되어 회귀
+        # (사용자 정책 2026-05-02, Run 연타 메모리 폭증 진짜 fix).
+        if getattr(self, "_visualize_in_progress", False):
+            return
+        self._visualize_in_progress = True
+        # stress mode: cycle timing 측정 시작
+        if self._stress_active:
+            import time as _time
+            self._stress_t0 = _time.perf_counter()
+        # button → progress bar swap (busy 애니메이션). button 은 hide 라
+        # disabled click 큐 누적 방지 (Qt 가 hidden widget 의 mouse event 무시).
+        self.btn_visualize.hide()
+        self.progress_run.show()
+        from PySide6.QtCore import QEventLoop
+        from PySide6.QtWidgets import QApplication
+        # paint 만 동기 처리 — user input 큐 안 건드림
+        QApplication.processEvents(
+            QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents,
+        )
+        QTimer.singleShot(0, self._do_visualize_and_defer_restore)
+
+    def _do_visualize_and_defer_restore(self) -> None:
+        try:
+            self._do_visualize()
+        finally:
+            # button 복원도 deferred — 큐 click 들이 hidden 상태에서 무시될
+            # spin 시간 확보
+            QTimer.singleShot(0, self._restore_run_button)
+
+    def _restore_run_button(self) -> None:
+        # 큐에 쌓인 mouse click 을 progress_run 이 visible 인 동안 flush —
+        # _set_progress 의 ExcludeUserInputEvents 때문에 처리 보류된 click 들이
+        # button 표시 직후 button 에 전달되어 Run 재실행되는 회귀 fix.
+        # 일반 processEvents() 로 input event 까지 처리 → progress_run 이 swallow
+        # (사용자 정책 2026-05-02).
+        from PySide6.QtCore import QCoreApplication, QEvent
+        from PySide6.QtWidgets import QApplication
+        QApplication.processEvents()
+        # 추가 안전장치 — 위 spin 후에도 OS 큐에서 새로 posting 된 mouse event 가
+        # 있을 수 있어 명시 제거 (button hide 상태에서 button 으로 향하는 건 없지만
+        # progress_run 으로 향하는 잔재 정리)
+        QCoreApplication.removePostedEvents(
+            self.progress_run, QEvent.Type.MouseButtonPress,
+        )
+        QCoreApplication.removePostedEvents(
+            self.progress_run, QEvent.Type.MouseButtonRelease,
+        )
+        self.progress_run.hide()
+        self.progress_run.setValue(0)  # 다음 Run 위해 reset
+        self.btn_visualize.show()
+        self._visualize_in_progress = False
+        # stress mode chain — cycle 끝에서 csv append + 다음 cycle trigger
+        if self._stress_active:
+            import time as _time
+            t_ms = (_time.perf_counter() - self._stress_t0) * 1000
+            self._stress_log_cycle(t_ms)
+
+    def _set_progress(self, value: int) -> None:
+        """progress bar 값 갱신 + paint 강제 (user input 큐 안 건드림).
+
+        _do_visualize 가 동기 CPU bound 라 paint event 가 안 처리됨 →
+        명시 processEvents(ExcludeUserInputEvents) 호출 필요.
+        """
+        self.progress_run.setValue(value)
+        from PySide6.QtCore import QEventLoop
+        from PySide6.QtWidgets import QApplication
+        QApplication.processEvents(
+            QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents,
+        )
+
+    # ─────────────────────────────────────────────────────────────
+    # Stress test (사용자 정책 2026-05-02)
+    # 한 달 무중단 사용 시나리오 대비 누적 leak 검증. 사용자가 paste 한 데이터로
+    # N 번 자동 Run 반복 → 매 cycle CSV append (debug/stress_log_*.csv).
+    # ─────────────────────────────────────────────────────────────
+    def _show_stress_dialog(self) -> None:
+        """Ctrl+Shift+T — stress test 시작 다이얼로그."""
+        if self._stress_active:
+            return
+        if not (self._result_a or self._result_b):
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self, "Stress Test", "먼저 데이터를 paste 후 시작하세요.",
+            )
+            return
+        from PySide6.QtWidgets import QInputDialog
+        n, ok = QInputDialog.getInt(
+            self, "Stress Test",
+            "Number of runs?\n(Ctrl+Shift+T 다시 눌러도 무시 / Esc 로 정지)",
+            1000, 1, 1000000, 100,
+        )
+        if not ok or n <= 0:
+            return
+        self._start_stress(n)
+
+    def _start_stress(self, total: int) -> None:
+        """CSV 파일 open + Stop 버튼 표시 + 첫 cycle trigger."""
+        import csv
+        from datetime import datetime
+        debug_dir = Path(__file__).resolve().parent.parent / "debug"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        csv_path = debug_dir / f"stress_log_{stamp}.csv"
+        self._stress_csv_file = open(csv_path, "w", newline="", encoding="utf-8")
+        self._stress_csv_writer = csv.writer(self._stress_csv_file)
+        self._stress_csv_writer.writerow([
+            "cycle", "timestamp", "n_wafers", "t_ms",
+            "alive", "total_created", "rss_mb",
+        ])
+        self._stress_csv_file.flush()
+        sys.stderr.write(f"[stress] started total={total} → {csv_path}\n")
+
+        self._stress_active = True
+        self._stress_total = total
+        self._stress_remaining = total
+        self._stress_count = 0
+
+        # Stop 버튼 — ReasonBar 우측. 종료 시 제거.
+        self._stress_btn_stop = QPushButton(f"Stop (0/{total})")
+        self._stress_btn_stop.setFixedWidth(120)
+        self._stress_btn_stop.setFixedHeight(32)
+        self._stress_btn_stop.clicked.connect(self._stop_stress)
+        self._reason_bar.add_right_widget(self._stress_btn_stop)
+
+        # 첫 cycle 시작
+        QTimer.singleShot(50, self._on_visualize)
+
+    def _stop_stress(self) -> None:
+        """Esc 또는 Stop 버튼 — chain 끊기 + CSV close + 버튼 제거."""
+        if not self._stress_active:
+            return
+        self._stress_active = False
+        if self._stress_csv_file is not None:
+            try:
+                self._stress_csv_file.close()
+            except Exception:
+                pass
+            self._stress_csv_file = None
+            self._stress_csv_writer = None
+        if self._stress_btn_stop is not None:
+            try:
+                self._reason_bar._lay.removeWidget(self._stress_btn_stop)
+                self._stress_btn_stop.deleteLater()
+            except Exception:
+                pass
+            self._stress_btn_stop = None
+        sys.stderr.write(
+            f"[stress] stopped at {self._stress_count}/{self._stress_total}\n"
+        )
+
+    def _stress_log_cycle(self, t_ms: float) -> None:
+        """cycle 끝 — gc.collect + 측정 + CSV append + 다음 cycle trigger."""
+        import gc
+        from datetime import datetime
+        gc.collect()
+        gc.collect()  # cycle 끊기 후 회수까지 보장
+
+        n_wafers = len(self._result_panel.cells)
+        from widgets.wafer_cell import WaferCell
+        alive = len(WaferCell._alive_instances)
+        total_created = WaferCell._total_created
+        try:
+            import psutil
+            rss_mb = psutil.Process().memory_info().rss / (1024 * 1024)
+        except Exception:
+            rss_mb = -1.0
+
+        self._stress_count += 1
+        self._stress_remaining -= 1
+
+        if self._stress_csv_writer is not None:
+            self._stress_csv_writer.writerow([
+                self._stress_count,
+                datetime.now().isoformat(timespec="seconds"),
+                n_wafers,
+                f"{t_ms:.1f}",
+                alive,
+                total_created,
+                f"{rss_mb:.1f}",
+            ])
+            self._stress_csv_file.flush()
+
+        # 매 N/100 회 stderr 진행 상황 (sparse) + Stop 버튼 카운트 갱신
+        log_every = max(1, self._stress_total // 100)
+        if (self._stress_count % log_every == 0 or
+                self._stress_count == self._stress_total):
+            sys.stderr.write(
+                f"[stress {self._stress_count}/{self._stress_total}] "
+                f"n={n_wafers} t={t_ms:.0f}ms alive={alive} "
+                f"rss={rss_mb:.0f}MB\n"
+            )
+        if self._stress_btn_stop is not None:
+            self._stress_btn_stop.setText(
+                f"Stop ({self._stress_count}/{self._stress_total})"
+            )
+
+        # 매 1000 회 full GC (gen 2)
+        if self._stress_count % 1000 == 0:
+            gc.collect(2)
+
+        if self._stress_remaining > 0:
+            QTimer.singleShot(50, self._on_visualize)
+        else:
+            self._stop_stress()
+
+    def _do_visualize(self) -> None:
+        self._set_progress(5)
         a, b = self._result_a, self._result_b
 
         if not (a or b):
@@ -1040,14 +1300,17 @@ class MainWindow(QMainWindow):
                 return
 
         # 렌더링 먼저 → Qt paint 완료 후 n 불일치 경고 (QTimer 한 틱 지연)
+        self._set_progress(20)
         if a and b:
             self._visualize_delta(a, b, v, x, y, lib_id=lib_id)
         elif a or b:
             self._visualize_single(a or b, v, x, y, lib_id=lib_id)
+        self._set_progress(95)
 
         # n_mismatch 검사 — preset_override 강제 1순위 폐지 후 가족 list 의 일반
         # entry 라 정상 검증 (사용자 정책 2026-04-30, F6).
         QTimer.singleShot(0, lambda: self._warn_n_mismatch_once(v, x, y))
+        self._set_progress(100)
 
     def _inject_combined_temp_paras(
         self, a, b, item: CombinedItem,
@@ -1280,8 +1543,11 @@ class MainWindow(QMainWindow):
             )
             return
 
+        self._set_progress(40)
         self._apply_z_scale_mode(displays, view_mode)
+        self._set_progress(60)
         self._result_panel.set_displays(displays, v, view_mode=view_mode)
+        self._set_progress(85)
         # ReasonBar — paste-time baseline (`_delta_warnings`) 은 _on_visualize
         # 시작 시 이미 복원됨. 여기선 일부 wafer 좌표 해결 실패만 추가 warn
         # (cell 수가 줄어든 사유). baseline 덮어쓰지 않고 합쳐서 표시.
@@ -1378,8 +1644,11 @@ class MainWindow(QMainWindow):
                 delta_interp_active=self.chk_delta_interp.isChecked(),
             ))
         view_mode = self.cb_view.currentText() or "2D"
+        self._set_progress(40)
         self._apply_z_scale_mode(displays, view_mode)
+        self._set_progress(60)
         self._result_panel.set_displays(displays, v, view_mode=view_mode)
+        self._set_progress(85)
         # ReasonBar — baseline (`_delta_warnings`) 은 _on_visualize 시작 시 복원됨.
         # 부분 좌표 누락 warn 은 paste 시점 validate_delta 가 이미 baseline 에
         # 포함시킴 (사용자 정책 2026-04-30 — Run 시점 surface 에서 paste 시점으로 이동).

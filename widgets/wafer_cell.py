@@ -623,6 +623,14 @@ class WaferCell(QFrame):
     # "전체 적용" 체크박스 토글 (master 에서만 emit). slave cell enable/disable 용.
     apply_all_toggled = Signal(bool)
 
+    # ───── stress test (사용자 정책 2026-05-02, MainWindow Ctrl+Shift+T) ─────
+    # WeakSet — GC 되면 자동 제거. len() = alive count.
+    # `_stress_log_cycle` 이 매 cycle 후 alive/total 측정해 csv append.
+    # 일반 사용에선 overhead 0 (add 1 회 / 누적 카운터 1 increment).
+    import weakref as _weakref
+    _alive_instances: _weakref.WeakSet = _weakref.WeakSet()
+    _total_created: int = 0
+
     def __init__(
         self,
         display: WaferDisplay,
@@ -633,6 +641,9 @@ class WaferCell(QFrame):
         is_master: bool = False,
     ) -> None:
         super().__init__(parent)
+        # 진단 — alive 등록
+        WaferCell._alive_instances.add(self)
+        WaferCell._total_created += 1
         self._display = display
         self._value_name = value_name
         self._view_mode = view_mode  # "2D" | "3D"
@@ -947,6 +958,52 @@ class WaferCell(QFrame):
         self._load_data()
         if not defer_render:
             self.render_initial()
+
+    def cleanup(self) -> None:
+        """GL items + FBO + 큰 array 명시 release. deleteLater 직전 호출
+        (사용자 정책 2026-05-02, RSS 누수 fix).
+
+        cell GC 만으론 GL driver 의 VBO/texture/FBO 메모리가 안 돌아옴 —
+        `Qt.AA_ShareOpenGLContexts` 로 GL context 가 살아있어도 widget 별
+        VBO 는 pyqtgraph 가 명시 destructor 로 free 안 하기 때문.
+        명시 cleanup 으로 ref 풀고, makeCurrent 후 GLViewWidget.clear() 로
+        items 제거 → context 활성 상태에서 destructor 가 buffer free 시도.
+        """
+        # GL views 의 items 제거 + FBO release
+        for gview in (
+            getattr(self, "_gl_2d", None), getattr(self, "_gl_3d", None),
+        ):
+            if gview is None:
+                continue
+            try:
+                # makeCurrent — GL context 활성화. item destructor 가 이 context 에서
+                # glDeleteBuffers 호출 가능 (pyqtgraph 가 명시 호출하진 않지만,
+                # context 활성 상태가 driver 의 lazy free hint 에 도움)
+                gview.makeCurrent()
+            except Exception:
+                pass
+            try:
+                gview.clear()  # items 리스트 비우기 (각 item ref 풀림)
+            except Exception:
+                pass
+            # F99 K cached FBO 명시 None — GL context 묶인 객체 회수
+            if hasattr(gview, "_cached_capture_fbo"):
+                gview._cached_capture_fbo = None
+            try:
+                gview.doneCurrent()
+            except Exception:
+                pass
+        # slot ref 도 None — cleanup 후에도 cell 인스턴스 살아있는 동안
+        # GL item 강참조 유지 안 하게
+        self._gl_surface = None
+        self._gl_wall = None
+        self._gl_boundary = None
+        self._gl_grid = None
+        # 큰 array — 명시 None (cell GC 시 자동이지만 빠른 회수 + 가시성)
+        self._x_in = None
+        self._y_in = None
+        self._v_in = None
+        self._v_raw = None
 
     def _load_data(self) -> None:
         """display → filter_in_wafer → _x_in/_y_in/_v_in 설정. 가벼움(<1ms)."""
