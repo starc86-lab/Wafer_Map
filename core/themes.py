@@ -11,10 +11,14 @@ Profile Vision의 테마 팔레트를 참고해 UI 일관성을 유지.
 FONTS = [
     # 한글
     "굴림", "궁서", "돋움", "맑은 고딕", "바탕",
-    # 영문
-    "Arial", "Calibri", "Cambria", "Candara", "Consolas",
+    # 한글 monospace
+    "D2Coding", "나눔고딕코딩",
+    # 영문 proportional
+    "Arial", "Calibri", "Cambria", "Candara",
     "Segoe UI", "Tahoma", "Times New Roman", "Trebuchet MS",
     "Yu Gothic UI",
+    # 영문 monospace
+    "Cascadia Mono", "Consolas", "Courier New",
 ]
 
 
