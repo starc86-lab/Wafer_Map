@@ -30,9 +30,12 @@ class _PPTSummaryDelegate(QStyledItemDelegate):
         painter.fillRect(option.rect, bg)
         text = index.data(Qt.ItemDataRole.DisplayRole)
         if text is not None:
-            font = index.data(Qt.ItemDataRole.FontRole)
-            if font is not None:
-                painter.setFont(font)
+            font = index.data(Qt.ItemDataRole.FontRole) or painter.font()
+            # 사용자 정책 2026-05-01 — 폰트 -1px
+            ps = font.pixelSize()
+            if ps > 0:
+                font.setPixelSize(max(8, ps - 1))
+            painter.setFont(font)
             painter.setPen(self.TEXT)
             painter.drawText(option.rect, Qt.AlignmentFlag.AlignCenter, str(text))
         painter.setPen(QPen(self.BORDER, 1))

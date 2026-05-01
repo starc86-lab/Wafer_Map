@@ -19,6 +19,8 @@ class SummaryStatTiles(SummaryWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setStyleSheet("background-color: white;")
         outer = QHBoxLayout(self)
         outer.setContentsMargins(2, 1, 2, 1)
         outer.setSpacing(4)
@@ -32,6 +34,8 @@ class SummaryStatTiles(SummaryWidget):
         self._values: list[QLabel] = []
         for h in self.HEADERS:
             tile = QFrame()
+            tile.setFrameShape(QFrame.Shape.NoFrame)
+            tile.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
             tile.setStyleSheet(
                 "background-color: #f1f3f5; border-radius: 4px;"
             )

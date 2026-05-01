@@ -17,10 +17,11 @@ class SummaryMinimalUnderline(SummaryWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        # 흰색 고정 — 테마 (다크 등) 영향 차단 (사용자 정책 2026-05-01).
+        # 흰색 고정 — 테마 (다크 등) 영향 차단. selector 없는 단순 properties
+        # (background-color 는 cascade 안 되니 child 영향 X).
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(
-            "SummaryMinimalUnderline { background-color: white;"
-            " border: 1px solid #888888; }"
+            "background-color: white; border: 1px solid #888888;"
         )
         outer = QHBoxLayout(self)
         outer.setContentsMargins(2, 1, 2, 1)
@@ -48,10 +49,10 @@ class SummaryMinimalUnderline(SummaryWidget):
                 f"color: #111111; font-size: {val_px}px; font-weight: bold;"
             )
             ul = QFrame()
+            ul.setFrameShape(QFrame.Shape.NoFrame)
             ul.setFixedHeight(2)
-            ul.setStyleSheet(
-                f"background-color: {self.ACCENT}; border: none;"
-            )
+            ul.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+            ul.setStyleSheet(f"background-color: {self.ACCENT};")
             col.addWidget(lbl)
             col.addWidget(val)
             col.addWidget(ul)

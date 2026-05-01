@@ -19,9 +19,9 @@ class SummaryColorFooter(SummaryWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(
-            "SummaryColorFooter { background-color: white;"
-            " border: 1px solid #dee2e6; }"
+            "background-color: white; border: 1px solid #dee2e6;"
         )
         outer = QHBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -49,25 +49,25 @@ class SummaryColorFooter(SummaryWidget):
                 f"color: #666666; font-size: {lbl_px}px;"
             )
             footer = QFrame()
+            footer.setFrameShape(QFrame.Shape.NoFrame)
             footer.setFixedHeight(3)
+            footer.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
             footer.setStyleSheet(
-                f"background-color: {_FOOTER_COLORS[i]}; border: none;"
+                f"background-color: {_FOOTER_COLORS[i]};"
             )
             col.addWidget(val)
             col.addWidget(lbl)
             col.addWidget(footer)
             outer.addWidget(col_w, stretch=1)
             self._values.append(val)
-            # 세퍼레이터 — Plain shadow 로 single line (사용자 정책 2026-05-01 fix)
+            # 세퍼레이터 — VLine 대신 단순 직사각형 QFrame. NoFrame + WA_StyledBackground.
+            # VLine 의 default 검정선이 위에 그려지는 회귀 fix (사용자 정책 2026-05-01).
             if i < len(self.HEADERS) - 1:
                 sep = QFrame()
-                sep.setFrameShape(QFrame.Shape.VLine)
-                sep.setFrameShadow(QFrame.Shadow.Plain)
-                sep.setLineWidth(1)
+                sep.setFrameShape(QFrame.Shape.NoFrame)
                 sep.setFixedWidth(1)
-                sep.setStyleSheet(
-                    "background-color: #dee2e6;"
-                )
+                sep.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+                sep.setStyleSheet("background-color: #dee2e6;")
                 outer.addWidget(sep)
 
     def update_metrics(self, metrics, decimals, percent_suffix=True):

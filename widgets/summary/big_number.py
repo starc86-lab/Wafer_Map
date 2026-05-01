@@ -20,10 +20,10 @@ class SummaryBigNumber(SummaryWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        # 외곽 가는 테두리 — 다른 style 과 시각 통일
+        # 외곽 가는 테두리 + WA_StyledBackground
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(
-            "SummaryBigNumber { background-color: white;"
-            " border: 1px solid #888888; }"
+            "background-color: white; border: 1px solid #888888;"
         )
         outer = QHBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -67,13 +67,10 @@ class SummaryBigNumber(SummaryWidget):
             # 은 이중선 효과 발생, 사용자 정책 2026-04-30 fix).
             if i < len(self.HEADERS) - 1:
                 sep = QFrame()
-                sep.setFrameShape(QFrame.Shape.VLine)
-                sep.setFrameShadow(QFrame.Shadow.Plain)
-                sep.setLineWidth(1)
-                sep.setStyleSheet(
-                    "background-color: #dee2e6;"
-                )
+                sep.setFrameShape(QFrame.Shape.NoFrame)
                 sep.setFixedWidth(1)
+                sep.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+                sep.setStyleSheet("background-color: #dee2e6;")
                 outer.addWidget(sep)
 
     def update_metrics(self, metrics, decimals, percent_suffix=True):

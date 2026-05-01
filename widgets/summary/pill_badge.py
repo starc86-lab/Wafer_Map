@@ -19,10 +19,10 @@ class SummaryPillBadge(SummaryWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        # 흰색 고정 — 테마 (다크 등) 영향 차단 (사용자 정책 2026-05-01).
+        # 흰색 고정 — selector 없는 단순 properties + WA_StyledBackground.
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(
-            "SummaryPillBadge { background-color: white;"
-            " border: 1px solid #888888; }"
+            "background-color: white; border: 1px solid #888888;"
         )
         outer = QHBoxLayout(self)
         outer.setContentsMargins(2, 1, 2, 1)
@@ -40,14 +40,16 @@ class SummaryPillBadge(SummaryWidget):
             col = QVBoxLayout(col_w)
             col.setContentsMargins(2, 0, 2, 0)
             col.setSpacing(0)
+            col.setAlignment(Qt.AlignmentFlag.AlignHCenter)
             # pill 라벨 — QLabel 의 border-radius 로 둥근 모서리
             pill = QLabel(h)
             pill.setAlignment(Qt.AlignmentFlag.AlignCenter)
             pill.setFixedHeight(pill_h)
             pill.setStyleSheet(
-                f"QLabel {{ color: white; font-size: {lbl_px}px; font-weight: bold;"
+                f"color: white; font-size: {lbl_px}px; font-weight: bold;"
                 f" background-color: {_PILL_COLORS[i]};"
-                f" border-radius: {pill_h // 2}px; padding: 0 6px; }}"
+                f" border-radius: {pill_h // 2}px;"
+                " padding-left: 6px; padding-right: 6px;"
             )
             # 가운데 위치 — 좌우 stretch
             pill_row = QHBoxLayout()

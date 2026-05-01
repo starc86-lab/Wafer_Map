@@ -30,9 +30,12 @@ class _DarkNeonDelegate(QStyledItemDelegate):
         painter.fillRect(option.rect, bg)
         text = index.data(Qt.ItemDataRole.DisplayRole)
         if text is not None:
-            font = index.data(Qt.ItemDataRole.FontRole)
-            if font is not None:
-                painter.setFont(font)
+            font = index.data(Qt.ItemDataRole.FontRole) or painter.font()
+            # 사용자 정책 2026-05-01 — 폰트 -1px
+            ps = font.pixelSize()
+            if ps > 0:
+                font.setPixelSize(max(8, ps - 1))
+            painter.setFont(font)
             painter.setPen(self.TEXT_LABEL if index.row() == 0 else self.TEXT_VALUE)
             painter.drawText(option.rect, Qt.AlignmentFlag.AlignCenter, str(text))
         # 세퍼레이터 (cell 사이 verticalline 만, 마지막 col 제외)

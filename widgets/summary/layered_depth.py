@@ -31,8 +31,9 @@ class SummaryLayeredDepth(SummaryWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        # 외곽 layout 은 투명 — 실제 카드 그리기는 paintEvent
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+        # paintEvent 가 카드 그림 — widget 자체 흰 배경 (cell 동일).
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setStyleSheet("background-color: white;")
         outer = QHBoxLayout(self)
         # 본 카드 영역 안쪽 padding (offset 만큼 우하단 여백 + 카드 내부 padding)
         outer.setContentsMargins(2, 1, 2 + self._OFFSET_2, 1 + self._OFFSET_2)

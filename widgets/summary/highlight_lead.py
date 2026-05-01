@@ -16,9 +16,9 @@ from widgets.summary.base import SummaryWidget, format_metrics
 class SummaryHighlightLead(SummaryWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(
-            "SummaryHighlightLead { background-color: white;"
-            " border: 1px solid #888888; }"
+            "background-color: white; border: 1px solid #888888;"
         )
         outer = QHBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -34,7 +34,9 @@ class SummaryHighlightLead(SummaryWidget):
 
         # 좌측 색 띠
         strip = QFrame()
+        strip.setFrameShape(QFrame.Shape.NoFrame)
         strip.setFixedWidth(3)
+        strip.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         strip.setStyleSheet("background-color: #e63946;")
         outer.addWidget(strip)
 
@@ -54,13 +56,11 @@ class SummaryHighlightLead(SummaryWidget):
         left.addWidget(self._mean_val)
         outer.addLayout(left, stretch=2)
 
-        # 세퍼레이터 — Plain shadow 로 single line (default Sunken 은 이중선,
-        # 사용자 정책 2026-05-01 fix)
+        # 세퍼레이터 — VLine 대신 NoFrame 직사각형 (default 검정선 회피)
         sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.VLine)
-        sep.setFrameShadow(QFrame.Shadow.Plain)
-        sep.setLineWidth(1)
+        sep.setFrameShape(QFrame.Shape.NoFrame)
         sep.setFixedWidth(1)
+        sep.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         sep.setStyleSheet("background-color: #dee2e6;")
         outer.addWidget(sep)
 

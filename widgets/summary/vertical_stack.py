@@ -30,6 +30,10 @@ class _VerticalDelegate(QStyledItemDelegate):
             # col 0 (라벨) 은 항상 normal, col 1 (값) 만 bold (사용자 정책 2026-04-30).
             font = index.data(Qt.ItemDataRole.FontRole) or painter.font()
             font.setBold(index.column() == 1)
+            # 사용자 정책 2026-05-01 — 폰트 -1px
+            ps = font.pixelSize()
+            if ps > 0:
+                font.setPixelSize(max(8, ps - 1))
             painter.setFont(font)
             painter.setPen(self.TEXT_LABEL if index.column() == 0 else self.TEXT_VALUE)
             r = option.rect.adjusted(8, 0, -8, 0)
