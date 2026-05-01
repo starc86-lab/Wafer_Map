@@ -1886,6 +1886,16 @@ class WaferCell(QFrame):
             QPoint(int(gl_pos.x() * dpr), int(gl_pos.y() * dpr)),
             gl_img,
         )
+        # 진단 — GL drawImage 후 PNG 저장 (사용자 정책 2026-05-01)
+        if os.environ.get("WAFERMAP_BENCH"):
+            try:
+                pm.save(str(_dbg / "cap_after_gl.png"))
+                sys.stderr.write(
+                    f"[bench gl] gl_pos=({gl_pos.x()},{gl_pos.y()})  "
+                    f"gl_img=({gl_img.width()},{gl_img.height()})\n"
+                )
+            except Exception:
+                pass
 
         # 4. Overlay 복원 — GL 이미지에 덮여 사라진 title/colorbar/badge/chart_overlay
         #    를 self._overlays 에서 visible 만 다시 그림 (z-order 보존).
@@ -1900,6 +1910,15 @@ class WaferCell(QFrame):
             )
 
         painter.end()
+        # 진단 — overlay 복원 후 (clipboard 직전) PNG 저장
+        if os.environ.get("WAFERMAP_BENCH"):
+            try:
+                pm.save(str(_dbg / "cap_final.png"))
+                sys.stderr.write(
+                    f"[bench overlays] count={sum(1 for w in self._overlays if w and w.isVisible())}\n"
+                )
+            except Exception:
+                pass
         QApplication.clipboard().setPixmap(pm)
 
     def _copy_data(self) -> None:

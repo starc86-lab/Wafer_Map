@@ -193,38 +193,17 @@ def main() -> int:
     # 창 표시 후 warmup —
     #   - GUI 스레드: GL warmup → 다음 틱에 pyqtgraph widget warmup (단계 분할)
     #   - 백그라운드 스레드: scipy RBF + lazy 모듈 prefetch (Qt 무관 부분)
-    # 이전 (단일 콜백 직렬 실행) 은 GUI 스레드 0.5~2s 점유 → 윈도우 응답성 저하.
-    # 분할 + 병렬화로 GUI 스레드 점유 ~300ms 이하로 축소.
-    # 환경변수 `WAFERMAP_BENCH=1` 설정 시 단계별 시간 stdout 출력.
-    import os
     import threading
-    import time
-    bench = bool(os.environ.get("WAFERMAP_BENCH"))
-    t_main = time.perf_counter()
-
-    def _log(stage: str, t0: float) -> None:
-        if bench:
-            print(f"[startup] {stage}: {(time.perf_counter() - t0) * 1000:.0f}ms")
 
     def _step_pg() -> None:
-        t0 = time.perf_counter()
         _pg_widget_warmup()
-        _log("pg widget warmup (gui)", t0)
 
     def _step_gl() -> None:
-        t0 = time.perf_counter()
         _gl_warmup()
-        _log("gl warmup (gui)", t0)
         QTimer.singleShot(0, _step_pg)
 
-    def _bg_thread() -> None:
-        t0 = time.perf_counter()
-        _bg_warmup()
-        _log("bg warmup (thread)", t0)
-
-    threading.Thread(target=_bg_thread, daemon=True).start()
+    threading.Thread(target=_bg_warmup, daemon=True).start()
     QTimer.singleShot(0, _step_gl)
-    _log("main → exec (gui blocking)", t_main)
 
     if "--selftest" in sys.argv:
         # 1.5초 후 자동 종료 — 뼈대 import/QSS/창 빌드 검증용
