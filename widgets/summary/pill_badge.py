@@ -90,8 +90,7 @@ class SummaryPillBadge(SummaryWidget):
             _f.setPixelSize(lbl_px)
             _f.setBold(True)
             _fm = QFontMetrics(_f)
-            # 좌우 padding 넉넉하게 (사용자 정책 2026-05-01) — 텍스트 width + 28
-            pill.setMinimumWidth(_fm.horizontalAdvance(h) + 28)
+            pill.setMinimumWidth(_fm.horizontalAdvance(h) + 16)
             # 가운데 위치 — 좌우 stretch
             pill_row = QHBoxLayout()
             pill_row.setContentsMargins(0, 0, 0, 0)
