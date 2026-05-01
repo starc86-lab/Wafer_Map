@@ -517,23 +517,29 @@ def _dynamic_decimals(vmin: float, vmax: float, n_ticks: int = 5) -> int:
 class _CaptureFrame(QFrame):
     """Copy Graph capture container — paintEvent 직접 흰 배경 + 1px border.
 
-    QSS border 가 widget.grab() 시 좌우 비대칭 렌더 (좌측 두꺼움 / 우측 라인
-    없음) 회귀 회피 (사용자 정책 2026-05-01).
+    fractional DPR (Windows 125%/150% 등) 환경에서 logical px integer 좌표가
+    device pixel 의 fractional center 로 매핑되어 좌측 antialias 두꺼움 /
+    우측 잘림 회귀. Cosmetic pen + QRectF(0.5, 0.5, w-1, h-1) 로 pixel-center
+    align — Qt 표준 1px border 패턴 (사용자 정책 2026-05-01).
     """
 
     _BORDER = QColor("#bfbfbf")
     _BG = QColor("#ffffff")
 
     def paintEvent(self, event):
+        from PySide6.QtCore import QRectF
         painter = QPainter(self)
+        # AA off — 정수 device pixel 강제, dpr fractional 영향 차단
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         rect = self.rect()
-        # 흰 배경
         painter.fillRect(rect, self._BG)
-        # 1px border — drawRect 가 widget rect 안 정확. adjusted(0,0,-1,-1) 로
-        # right/bottom 픽셀 cut-off 회피
-        painter.setPen(QPen(self._BORDER, 1))
+        # cosmetic pen — dpr 무관 1 device px stroke
+        pen = QPen(self._BORDER, 1)
+        pen.setCosmetic(True)
+        painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawRect(rect.adjusted(0, 0, -1, -1))
+        # QRectF + 0.5 offset — stroke center 가 device pixel 중심 (Qt 표준 trick)
+        painter.drawRect(QRectF(rect).adjusted(0.5, 0.5, -0.5, -0.5))
         painter.end()
 
 
@@ -1828,7 +1834,9 @@ class WaferCell(QFrame):
         #    아래에서 FBO 이미지로 덮어씀. title/colorbar/badge 도 여기서 찍힘 (z-order)
         #    이지만 drawImage 로 GL 영역 덮을 때 overlap 된 overlay 가 함께 지워지므로
         #    마지막에 재그림.
-        pm = cap.grab()
+        # 명시 rect — PySide6 의 grab() 기본 인자가 일부 빌드에서 contentsRect
+        # 를 사용하는 회귀 가능 (사용자 정책 2026-05-01, 좌우 비대칭 fix).
+        pm = cap.grab(QRect(0, 0, cap.width(), cap.height()))
 
         # 2. GL widget FBO offscreen 렌더 (MSAA 4x, scale=1)
         chart = self._chart_widget
