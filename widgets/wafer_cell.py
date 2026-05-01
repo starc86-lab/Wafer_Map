@@ -759,9 +759,11 @@ class WaferCell(QFrame):
         def _make_badge(parent: QWidget) -> QLabel:
             b = QLabel("r-symmetry mode", parent)
             b.setStyleSheet(
-                "background: rgba(255,255,255,210); color: #555; "
-                "padding: 2px 6px; border: 1px solid #bbb; border-radius: 4px; "
-                "font-size: 11px;"
+                "background-color: rgba(255, 255, 255, 210); color: #555555; "
+                "padding-top: 2px; padding-bottom: 2px;"
+                " padding-left: 6px; padding-right: 6px;"
+                " border: 1px solid #bbbbbb; border-radius: 4px;"
+                " font-size: 11px;"
             )
             b.hide()
             b.move(8, 8)
