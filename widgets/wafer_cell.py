@@ -979,7 +979,7 @@ class WaferCell(QFrame):
         if is_overlay_only:
             avg_s, nu_s = self._summary.overlay_texts()
             self._chart_overlay_avg.setText(f"Mean: {avg_s}")
-            self._chart_overlay_nu.setText(f"NU: {nu_s}")
+            self._chart_overlay_nu.setText(f"N.U%: {nu_s}")
             # 좌상단 8,8 / 8,28 (위/아래 두 라벨)
             self._chart_overlay_avg.adjustSize()
             self._chart_overlay_nu.adjustSize()
