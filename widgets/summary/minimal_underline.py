@@ -21,6 +21,11 @@ class SummaryMinimalUnderline(SummaryWidget):
         outer.setContentsMargins(2, 1, 2, 1)
         outer.setSpacing(0)
 
+        from core.themes import FONT_SIZES
+        _base = int(FONT_SIZES.get("body", 14))
+        lbl_px = max(9, _base - 3)
+        val_px = _base
+
         self._values: list[QLabel] = []
         for h in self.HEADERS:
             col_w = QWidget()
@@ -30,13 +35,13 @@ class SummaryMinimalUnderline(SummaryWidget):
             lbl = QLabel(h)
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl.setStyleSheet(
-                "QLabel { color: #999; font-size: 9px; background: transparent; }"
+                f"QLabel {{ color: #999; font-size: {lbl_px}px; background: transparent; }}"
             )
             val = QLabel("—")
             val.setAlignment(Qt.AlignmentFlag.AlignCenter)
             val.setStyleSheet(
-                "QLabel { color: #111; font-size: 14px; font-weight: bold;"
-                " background: transparent; }"
+                f"QLabel {{ color: #111; font-size: {val_px}px; font-weight: bold;"
+                " background: transparent; }}"
             )
             ul = QFrame()
             ul.setFixedHeight(2)

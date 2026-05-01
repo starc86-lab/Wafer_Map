@@ -24,6 +24,13 @@ class SummaryHighlightLead(SummaryWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
+        # font_scale 자동 비례 — 라벨 base-3 (=11), 값 base-2 (Range/NU 보조).
+        from core.themes import FONT_SIZES
+        _base = int(FONT_SIZES.get("body", 14))
+        lbl_px = max(9, _base - 3)
+        val_px = max(10, _base - 2)
+        mean_px = _base + 4   # Mean 강조
+
         # 좌측 색 띠
         strip = QFrame()
         strip.setFixedWidth(3)
@@ -36,12 +43,12 @@ class SummaryHighlightLead(SummaryWidget):
         left.setSpacing(0)
         self._mean_lbl = QLabel("Mean")
         self._mean_lbl.setStyleSheet(
-            "QLabel { color: #666; font-size: 8px; background: transparent; }"
+            f"QLabel {{ color: #666; font-size: {lbl_px}px; background: transparent; }}"
         )
         self._mean_val = QLabel("—")
         self._mean_val.setStyleSheet(
-            "QLabel { color: #111; font-size: 18px; font-weight: bold;"
-            " background: transparent; }"
+            f"QLabel {{ color: #111; font-size: {mean_px}px; font-weight: bold;"
+            " background: transparent; }}"
         )
         left.addWidget(self._mean_lbl)
         left.addWidget(self._mean_val)
@@ -62,13 +69,13 @@ class SummaryHighlightLead(SummaryWidget):
             l = QLabel(name)
             l.setAlignment(Qt.AlignmentFlag.AlignCenter)
             l.setStyleSheet(
-                "QLabel { color: #666; font-size: 8px; background: transparent; }"
+                f"QLabel {{ color: #666; font-size: {lbl_px}px; background: transparent; }}"
             )
             v = QLabel("—")
             v.setAlignment(Qt.AlignmentFlag.AlignCenter)
             v.setStyleSheet(
-                "QLabel { color: #111; font-size: 12px; font-weight: bold;"
-                " background: transparent; }"
+                f"QLabel {{ color: #111; font-size: {val_px}px; font-weight: bold;"
+                " background: transparent; }}"
             )
             col.addWidget(l)
             col.addWidget(v)

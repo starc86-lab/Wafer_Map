@@ -23,6 +23,12 @@ class SummaryPillBadge(SummaryWidget):
         outer.setContentsMargins(2, 1, 2, 1)
         outer.setSpacing(0)
 
+        from core.themes import FONT_SIZES
+        _base = int(FONT_SIZES.get("body", 14))
+        lbl_px = max(9, _base - 3)
+        val_px = _base + 1
+        pill_h = lbl_px + 4   # pill 안 텍스트 padding 포함
+
         self._values: list[QLabel] = []
         for i, h in enumerate(self.HEADERS):
             col_w = QWidget()
@@ -32,11 +38,11 @@ class SummaryPillBadge(SummaryWidget):
             # pill 라벨 — QLabel 의 border-radius 로 둥근 모서리
             pill = QLabel(h)
             pill.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            pill.setFixedHeight(12)
+            pill.setFixedHeight(pill_h)
             pill.setStyleSheet(
-                f"QLabel {{ color: white; font-size: 8px; font-weight: bold;"
+                f"QLabel {{ color: white; font-size: {lbl_px}px; font-weight: bold;"
                 f" background-color: {_PILL_COLORS[i]};"
-                f" border-radius: 6px; padding: 0 6px; }}"
+                f" border-radius: {pill_h // 2}px; padding: 0 6px; }}"
             )
             # 가운데 위치 — 좌우 stretch
             pill_row = QHBoxLayout()
@@ -49,8 +55,8 @@ class SummaryPillBadge(SummaryWidget):
             val = QLabel("—")
             val.setAlignment(Qt.AlignmentFlag.AlignCenter)
             val.setStyleSheet(
-                "QLabel { color: #111; font-size: 15px; font-weight: bold;"
-                " background: transparent; }"
+                f"QLabel {{ color: #111; font-size: {val_px}px; font-weight: bold;"
+                " background: transparent; }}"
             )
             col.addWidget(val)
             outer.addWidget(col_w, stretch=1)
