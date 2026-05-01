@@ -36,12 +36,11 @@ class _PillLabel(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        # stadium background — radius = height/2 양 끝 반원
+        # 진짜 타원 (ellipse) — drawEllipse(widget rect)
         painter.setBrush(QBrush(self._bg))
         painter.setPen(Qt.PenStyle.NoPen)
         rect = self.rect()
-        radius = rect.height() / 2
-        painter.drawRoundedRect(rect, radius, radius)
+        painter.drawEllipse(rect)
         # 텍스트 — 흰색 bold, 가운데
         font = painter.font()
         font.setPixelSize(self._font_px)
@@ -67,7 +66,9 @@ class SummaryPillBadge(SummaryWidget):
         _base = int(FONT_SIZES.get("body", 14))
         lbl_px = max(9, _base - 3)
         val_px = _base + 1
-        pill_h = lbl_px + 4   # pill 안 텍스트 padding 포함
+        # pill 높이 — 폰트 + 충분한 padding 으로 비율 정원 가깝게 (사용자 정책
+        # 2026-05-01, 직사각형 stadium 회피).
+        pill_h = lbl_px + 8
 
         self._values: list[QLabel] = []
         for i, h in enumerate(self.HEADERS):
