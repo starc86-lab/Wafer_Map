@@ -694,16 +694,20 @@ class WaferCell(QFrame):
         # 다른 style 에서는 hidden. parent=chart_area 로 chart 위에 floating.
         self._chart_overlay_avg = QLabel(self._chart_area)
         self._chart_overlay_avg.setStyleSheet(
-            "QLabel { color: #111; font-size: 11px; font-weight: bold;"
-            " background-color: rgba(255,255,255,200);"
-            " border: 1px solid #aaa; border-radius: 3px; padding: 1px 5px; }"
+            "QLabel { color: #111111; font-size: 11px; font-weight: bold;"
+            " background-color: rgba(255, 255, 255, 200);"
+            " border: 1px solid #aaaaaa; border-radius: 3px;"
+            " padding-top: 1px; padding-bottom: 1px;"
+            " padding-left: 5px; padding-right: 5px; }"
         )
         self._chart_overlay_avg.setVisible(False)
         self._chart_overlay_nu = QLabel(self._chart_area)
         self._chart_overlay_nu.setStyleSheet(
-            "QLabel { color: #111; font-size: 11px; font-weight: bold;"
-            " background-color: rgba(255,255,255,200);"
-            " border: 1px solid #aaa; border-radius: 3px; padding: 1px 5px; }"
+            "QLabel { color: #111111; font-size: 11px; font-weight: bold;"
+            " background-color: rgba(255, 255, 255, 200);"
+            " border: 1px solid #aaaaaa; border-radius: 3px;"
+            " padding-top: 1px; padding-bottom: 1px;"
+            " padding-left: 5px; padding-right: 5px; }"
         )
         self._chart_overlay_nu.setVisible(False)
 
