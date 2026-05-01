@@ -1194,22 +1194,21 @@ class SettingsDialog(QDialog):
     def _apply_ui_runtime(self) -> None:
         """UI 설정 변경 → 런타임 캐시 + 앱 스타일시트 재빌드.
 
-        font_scale 변경 시 — _summary 위젯의 inline stylesheet (font-size 등)
-        은 init 시점 hardcode 라 자동 갱신 안 됨. 현재 style 으로 swap 강제
-        해서 새 FONT_SIZES 반영 (사용자 정책 2026-04-30).
+        font_scale 변경 시 — apply_fonts_all() 로 모든 cell 의 _summary stylesheet
+        만 재 set (가벼움). 이전 set_table_style swap 은 _summary 위젯 재 init
+        이라 무거웠음 (사용자 정책 2026-05-01, scope 2 fix #2).
         """
         merged = self._collect()
         settings_io.set_runtime(merged)
         app = QApplication.instance()
         if app is not None:
             apply_global_style(app, merged)
-        # _summary 재생성 → 새 font_scale 반영
+        # 가벼운 폰트 갱신 — swap 비용 회피
         main = self._main_window or self.parent()
         if main is not None:
             rp = getattr(main, "_result_panel", None)
-            if rp is not None and hasattr(rp, "set_table_style"):
-                cur_style = merged.get("table", {}).get("style", "ppt_basic")
-                rp.set_table_style(cur_style)
+            if rp is not None and hasattr(rp, "apply_fonts_all"):
+                rp.apply_fonts_all()
 
     def _apply_graph_runtime(self) -> None:
         """Graph(2D/3D) 설정 변경 → 런타임 캐시 + MainWindow 재렌더 (cell 재생성 없이).
