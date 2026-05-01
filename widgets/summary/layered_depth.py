@@ -83,24 +83,37 @@ class SummaryLayeredDepth(SummaryWidget):
         return 34
 
     def paintEvent(self, event):
-        """뒤 카드 2장 (offset) + 앞 카드 1장 (흰색 + border) 그리기."""
+        """앞 카드 + 뒤 카드 2장 (우/하만 offset, 좌/상 일치) — 우하단 그림자.
+
+        이전 translated 방식은 좌/상도 함께 offset 되어 좌측 그림자 보이고
+        모서리 어긋남. 좌/상 = front 와 동일, 우/하 만 +offset 으로 변경
+        (사용자 정책 2026-05-01).
+        """
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         rect = self.rect()
-        # 본 카드 영역 = 우하단 offset 만큼 줄어든 영역
+        # 본 카드 — 우하단 offset 만큼 줄어든 영역
         front = QRectF(
             rect.left() + 1,
             rect.top() + 1,
             rect.width() - 2 - self._OFFSET_2,
             rect.height() - 2 - self._OFFSET_2,
         )
-        # 뒤 카드 2 (가장 뒤, 가장 어둡게, 가장 멀리)
-        back2 = front.translated(self._OFFSET_2, self._OFFSET_2)
+        # 뒤 카드 2 (가장 뒤) — 좌/상 = front, 우/하 = front +OFFSET_2
+        back2 = QRectF(
+            front.left(), front.top(),
+            front.width() + self._OFFSET_2,
+            front.height() + self._OFFSET_2,
+        )
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(self._BACK_2))
         painter.drawRoundedRect(back2, self._RADIUS, self._RADIUS)
-        # 뒤 카드 1
-        back1 = front.translated(self._OFFSET_1, self._OFFSET_1)
+        # 뒤 카드 1 — 좌/상 = front, 우/하 = front +OFFSET_1
+        back1 = QRectF(
+            front.left(), front.top(),
+            front.width() + self._OFFSET_1,
+            front.height() + self._OFFSET_1,
+        )
         painter.setBrush(QBrush(self._BACK_1))
         painter.drawRoundedRect(back1, self._RADIUS, self._RADIUS)
         # 앞 카드 (흰색 + 가는 테두리)
