@@ -11,10 +11,10 @@ import numpy as np
 
 import pyqtgraph as pg
 import pyqtgraph.opengl as gl
-from PySide6.QtCore import QMimeData, QPoint, QRect, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QMimeData, QPoint, QRect, QSize, Qt, Signal
 from PySide6.QtGui import (
     QColor, QDoubleValidator, QFont, QFontMetrics, QImage, QLinearGradient,
-    QPainter, QPalette, QPen, QPixmap,
+    QPainter, QPen,
 )
 from PySide6.QtOpenGL import (
     QOpenGLFramebufferObject, QOpenGLFramebufferObjectFormat,
@@ -88,31 +88,6 @@ _CUSTOM_CMAPS: dict[str, pg.ColorMap] = {
     "Reverse-Magma":   _reversed_pg_cmap("magma"),
     "Reverse-Cividis": _reversed_pg_cmap("cividis"),
 }
-
-
-def _compute_smooth_vertex_normals(vertexes: np.ndarray, faces: np.ndarray) -> np.ndarray:
-    """smooth vertex normals — numpy vectorized.
-
-    pyqtgraph `MeshData.vertexNormals()`는 vertex 수만큼 Python for loop을 돌아
-    62,500 vertex 기준 cell당 500ms 이상 소요. 같은 결과를 numpy로 5ms 내외에
-    계산한 뒤 `_meshdata._vertexNormals`에 직접 주입해 lazy 경로를 우회.
-    """
-    v0 = vertexes[faces[:, 0]]
-    v1 = vertexes[faces[:, 1]]
-    v2 = vertexes[faces[:, 2]]
-    face_n = np.cross(v1 - v0, v2 - v0)
-    fl = np.linalg.norm(face_n, axis=1, keepdims=True)
-    fl[fl < 1e-9] = 1.0
-    face_n /= fl
-
-    vert_n = np.zeros_like(vertexes, dtype=np.float32)
-    np.add.at(vert_n, faces[:, 0], face_n)
-    np.add.at(vert_n, faces[:, 1], face_n)
-    np.add.at(vert_n, faces[:, 2], face_n)
-    vl = np.linalg.norm(vert_n, axis=1, keepdims=True)
-    vl[vl < 1e-9] = 1.0
-    vert_n /= vl
-    return vert_n.astype(np.float32)
 
 
 def _build_radial_surface_mesh(
@@ -261,7 +236,7 @@ def _capture_gl_offscreen(gl_view: gl.GLViewWidget, scale: int = 1) -> QImage:
                 if isinstance(it, gl.GLTextItem) and getattr(it, "text", "")
             ]
             if text_items and scale == 1:
-                from PySide6.QtGui import QFont, QVector3D
+                from PySide6.QtGui import QVector3D
                 painter = QPainter(img)
                 painter.setRenderHints(
                     QPainter.RenderHint.Antialiasing
@@ -766,6 +741,17 @@ class WaferCell(QFrame):
         self._chart_overlay_2d = _make_overlay(self._gl_2d)
         self._chart_overlay_3d = _make_overlay(self._gl_3d)
 
+        # Overlay registry — _copy_graph 의 hardcoded list 회피. 새 overlay
+        # 추가 시 여기 한 줄만 추가 (사용자 정책 2026-05-01, scope 2 review #3).
+        self._overlays: list[QWidget] = [
+            self._title,
+            self._colorbar,
+            self._badge_2d,
+            self._badge_3d,
+            self._chart_overlay_2d,
+            self._chart_overlay_3d,
+        ]
+
         # 1D Radial Graph — 2D/3D 그래프와 Summary 표 사이. 체크 시에만 보임.
         # X: r (-5~155 표시, 눈금 0/50/100/150), Y: 실측 min/max 기반.
         # 상/우 테두리는 숨겨진 축(showAxis) 로 표현. 좌/하 축은 라벨 있음.
@@ -782,7 +768,6 @@ class WaferCell(QFrame):
         _ax_top = self._radial_graph.getAxis("top")
         _ax_right = self._radial_graph.getAxis("right")
         # 좌/하 축 pen — 연한 회색 #888888 1px, 숫자 #111, 폰트 12px 하드코딩
-        from PySide6.QtGui import QPen, QColor, QFont
         _border_pen = QPen(QColor("#888888"))
         _border_pen.setWidth(1)
         _ax_font = QFont("Arial")
@@ -1099,29 +1084,6 @@ class WaferCell(QFrame):
             self._rendered_2d = True
 
     # ── 렌더 ────────────────────────────────────────
-    def _render(self) -> None:
-        d = self._display
-        n = min(len(d.x_mm), len(d.y_mm), len(d.values))
-        if n == 0:
-            self._hide_3d_items()
-            return
-        x_mm = np.asarray(d.x_mm[:n], dtype=float)
-        y_mm = np.asarray(d.y_mm[:n], dtype=float)
-        v = np.asarray(d.values[:n], dtype=float)
-
-        x_in, y_in, v_in, _ = filter_in_wafer(x_mm, y_mm, v)
-        self._x_in, self._y_in, self._v_raw = x_in, y_in, v_in
-        self._recompute_v_eff()
-
-        # 새 데이터 — 렌더 캐시 무효화
-        self._rendered_2d = False
-        self._rendered_3d = False
-        self._hide_3d_items()
-
-        settings = settings_io.load_settings()
-        self._update_table(v_in, settings.get("table", {}))
-        self._activate_current_view()
-
     def _hide_3d_items(self) -> None:
         """3D items 숨김 (widget 자체는 유지, setData 로 다음 렌더 시 즉시 재사용)."""
         for it in (self._gl_surface, self._gl_wall,
@@ -1366,7 +1328,6 @@ class WaferCell(QFrame):
             decimals = int(common.get("decimals", tbl.get("decimals", 2)))
             # 라벨 폰트 크기 — chart_2d.label_font_scale (0.85 / 1.0 / 1.15) × base 9pt
             scale = float(chart.get("label_font_scale", 0.85))
-            from PySide6.QtGui import QFont
             label_font = QFont()
             label_font.setPointSize(max(5, int(round(9 * scale))))
             for x, y, val in zip(x_in, y_in, v_in):
@@ -1875,25 +1836,10 @@ class WaferCell(QFrame):
             gl_img,
         )
 
-        # 4. Overlay 복원 — GL 이미지에 덮여 사라진 title/colorbar/badge 를 다시 그림
-        #    (z-order 의 "GL 위에 Qt widget overlay" 순서 보존)
-        overlays: list[QWidget] = []
-        if getattr(self, "_title", None) is not None:
-            overlays.append(self._title)
-        if getattr(self, "_colorbar", None) is not None:
-            overlays.append(self._colorbar)
-        for badge_attr in ("_badge_2d", "_badge_3d"):
-            b = getattr(self, badge_attr, None)
-            if b is not None and b.isVisible():
-                overlays.append(b)
-        # No Table style 의 chart 좌상단 multi-line overlay — 2D/3D 중 active 만
-        for ov_attr in ("_chart_overlay_2d", "_chart_overlay_3d"):
-            ov = getattr(self, ov_attr, None)
-            if ov is not None and ov.isVisible():
-                overlays.append(ov)
-
-        for w in overlays:
-            if not w.isVisible():
+        # 4. Overlay 복원 — GL 이미지에 덮여 사라진 title/colorbar/badge/chart_overlay
+        #    를 self._overlays 에서 visible 만 다시 그림 (z-order 보존).
+        for w in self._overlays:
+            if w is None or not w.isVisible():
                 continue
             pos = w.mapTo(cap, QPoint(0, 0))
             w_pm = w.grab()
