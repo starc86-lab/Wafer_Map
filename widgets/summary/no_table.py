@@ -39,9 +39,6 @@ class SummaryNoTable(SummaryWidget):
         self.setFixedWidth(w)
         self.setFixedHeight(0)
 
-    def get_natural_height(self) -> int:
-        return 0
-
     def is_chart_overlay_only(self) -> bool:
         """wafer_cell 이 chart 좌상단 overlay 표시 / SUMMARY_RESERVED_H=0 결정용."""
         return True

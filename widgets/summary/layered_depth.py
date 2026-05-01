@@ -1,8 +1,6 @@
 """
-Layered Depth style — 3 col × 2 row (header/value), 가운데 행 sep 없음.
-좌/우 가장자리 그라데이션 그림자, 모서리 rounded, 배경 투명 (cell 비춤).
-
-사용자 정책 2026-05-01 — 백지 재설계.
+Rounded Card (key: layered_depth) — 3 col × 2 row, 행 sep 없음, 모서리 rounded,
+컬럼 sep 75% 세로. 폰트 — apply_fonts 매 update 시.
 """
 from __future__ import annotations
 
@@ -16,39 +14,42 @@ from widgets.summary.base import SummaryWidget, format_metrics
 class SummaryLayeredDepth(SummaryWidget):
     HEADERS = ("Mean", "Range", "Non Unif.")
 
-    _RADIUS = 6.0       # 모서리 라운딩
+    _RADIUS = 6.0
     _CARD = QColor("#ffffff")
     _BORDER = QColor("#c0c4c8")
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        # widget 자체 투명 — paintEvent 가 카드 + 그림자만 그림. cell 부모
-        # (capture_container 흰색) 비춤.
-
-        from core.themes import FONT_SIZES
-        _base = int(FONT_SIZES.get("body", 14))
-        lbl_px = max(9, _base - 3)
-        val_px = _base
-
+        # widget 투명 — paintEvent 가 흰 rounded card 그림. 부모 비춤.
         grid = QGridLayout(self)
         grid.setContentsMargins(8, 1, 8, 1)
         grid.setHorizontalSpacing(0)
         grid.setVerticalSpacing(0)
 
+        self._labels: list[QLabel] = []
         self._values: list[QLabel] = []
         for c, h in enumerate(self.HEADERS):
             lbl = QLabel(h)
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            lbl.setStyleSheet(f"color: #666666; font-size: {lbl_px}px;")
             grid.addWidget(lbl, 0, c)
-
             val = QLabel("—")
             val.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            val.setStyleSheet(
-                f"color: #1f3a5f; font-size: {val_px}px; font-weight: bold;"
-            )
             grid.addWidget(val, 1, c)
+            self._labels.append(lbl)
             self._values.append(val)
+        self.apply_fonts()
+
+    def apply_fonts(self) -> None:
+        from core.themes import FONT_SIZES
+        _base = int(FONT_SIZES.get("body", 14))
+        lbl_px = max(9, _base - 3)
+        val_px = _base
+        lbl_ss = f"color: #666666; font-size: {lbl_px}px;"
+        val_ss = f"color: #1f3a5f; font-size: {val_px}px; font-weight: bold;"
+        for l in self._labels:
+            l.setStyleSheet(lbl_ss)
+        for v in self._values:
+            v.setStyleSheet(val_ss)
 
     def update_metrics(self, metrics, decimals, percent_suffix=True):
         avg_s, range_s, nu_s = format_metrics(metrics, decimals, percent_suffix)
@@ -58,18 +59,14 @@ class SummaryLayeredDepth(SummaryWidget):
     def set_target_width(self, w: int) -> None:
         self.setFixedWidth(w)
 
-    def get_natural_height(self) -> int:
-        return 34
-
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        # 흰 rounded card — 그림자 없음
         painter.setBrush(QBrush(self._CARD))
         painter.setPen(QPen(self._BORDER, 0.8))
         painter.drawRoundedRect(rect, self._RADIUS, self._RADIUS)
-        # 컬럼 sep — 세로 75% 길이 (위/아래 12.5% 빈 공간), 사용자 정책 2026-05-01
+        # 컬럼 sep 75%
         painter.setPen(QPen(QColor("#dee2e6"), 1))
         margin_v = rect.height() * 0.125
         y0 = rect.top() + margin_v

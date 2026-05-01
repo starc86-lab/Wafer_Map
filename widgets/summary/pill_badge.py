@@ -1,10 +1,11 @@
 """
 Pill Badge style — 라벨이 둥근 색 pill, 값 큰 폰트 (옵션 E).
+폰트 — apply_fonts 가 매 update 호출되어 font_scale 자동 반영.
 """
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QBrush, QColor, QPainter
+from PySide6.QtGui import QBrush, QColor, QFontMetrics, QFont, QPainter
 from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QVBoxLayout, QWidget,
 )
@@ -16,11 +17,8 @@ _PILL_COLORS = ("#264653", "#2a9d8f", "#e76f51")
 
 
 class _PillLabel(QWidget):
-    """타원 (stadium) 모양 — paintEvent 가 background + 텍스트 모두 직접 그림.
-
-    QLabel + QSS border-radius 가 부정확한 회귀 회피. QWidget 으로 만들어
-    QSS 간섭 없이 QPainter 만으로 그림. matplotlib FancyBboxPatch round 와
-    동일 (사용자 정책 2026-05-01).
+    """타원 (stadium) 모양 — paintEvent 가 background + 텍스트 직접 그림.
+    QSS border-radius 부정확 회귀 회피. font_px 는 set_font_px 로 갱신.
     """
 
     def __init__(self, text: str, bg_color: str, font_px: int, parent=None):
@@ -29,21 +27,18 @@ class _PillLabel(QWidget):
         self._bg = QColor(bg_color)
         self._font_px = int(font_px)
 
-    def setText(self, text: str) -> None:
-        self._text = text
+    def set_font_px(self, font_px: int) -> None:
+        self._font_px = int(font_px)
         self.update()
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        # stadium — 양 끝 반원 (radius = h/2). 양 끝 뭉뚝, drawEllipse 의 뾰족함
-        # 회피 (사용자 정책 2026-05-01).
         painter.setBrush(QBrush(self._bg))
         painter.setPen(Qt.PenStyle.NoPen)
         rect = self.rect()
         radius = rect.height() / 2
         painter.drawRoundedRect(rect, radius, radius)
-        # 텍스트 — 흰색 bold, 가운데
         font = painter.font()
         font.setPixelSize(self._font_px)
         font.setBold(True)
@@ -57,28 +52,13 @@ class SummaryPillBadge(SummaryWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        # 흰색 고정 — selector 없는 단순 properties + WA_StyledBackground.
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet("background-color: white;")
         outer = QHBoxLayout(self)
         outer.setContentsMargins(2, 1, 2, 1)
         outer.setSpacing(0)
 
-        from core.themes import FONT_SIZES
-        _base = int(FONT_SIZES.get("body", 14))
-        lbl_px = max(9, _base - 3)
-        val_px = _base + 1
-        pill_h = lbl_px + 8
-
-        # 모든 pill 가로폭 동일 — 가장 긴 라벨 ("Non Unif.") 기준 max width
-        # (사용자 정책 2026-05-01).
-        from PySide6.QtGui import QFontMetrics, QFont as _QFont
-        _f = _QFont()
-        _f.setPixelSize(lbl_px)
-        _f.setBold(True)
-        _fm = QFontMetrics(_f)
-        pill_w = max(_fm.horizontalAdvance(name) for name in self.HEADERS) + 16
-
+        self._pills: list[_PillLabel] = []
         self._values: list[QLabel] = []
         for i, h in enumerate(self.HEADERS):
             col_w = QWidget()
@@ -86,28 +66,39 @@ class SummaryPillBadge(SummaryWidget):
             col.setContentsMargins(2, 0, 2, 0)
             col.setSpacing(0)
             col.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-            # pill 라벨 — QLabel 의 border-radius 로 둥근 모서리
-            # _PillLabel — QWidget paintEvent 로 stadium + 텍스트 직접 그림
-            # (QSS 간섭 없이, 사용자 정책 2026-05-01).
-            pill = _PillLabel(h, _PILL_COLORS[i], lbl_px)
-            # 모든 pill 동일 size (max 라벨 기준)
-            pill.setFixedSize(pill_w, pill_h)
-            # 가운데 위치 — 좌우 stretch
+            pill = _PillLabel(h, _PILL_COLORS[i], font_px=10)
             pill_row = QHBoxLayout()
             pill_row.setContentsMargins(0, 0, 0, 0)
             pill_row.addStretch(1)
             pill_row.addWidget(pill)
             pill_row.addStretch(1)
             col.addLayout(pill_row)
-
             val = QLabel("—")
             val.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            val.setStyleSheet(
-                f"color: #111111; font-size: {val_px}px; font-weight: bold;"
-            )
             col.addWidget(val)
             outer.addWidget(col_w, stretch=1)
+            self._pills.append(pill)
             self._values.append(val)
+        self.apply_fonts()
+
+    def apply_fonts(self) -> None:
+        from core.themes import FONT_SIZES
+        _base = int(FONT_SIZES.get("body", 14))
+        lbl_px = max(9, _base - 3)
+        val_px = _base + 1
+        pill_h = lbl_px + 8
+        # pill width — 가장 긴 라벨 기준 max (라벨끼리 동일 size)
+        _f = QFont()
+        _f.setPixelSize(lbl_px)
+        _f.setBold(True)
+        _fm = QFontMetrics(_f)
+        pill_w = max(_fm.horizontalAdvance(name) for name in self.HEADERS) + 16
+        for pill in self._pills:
+            pill.set_font_px(lbl_px)
+            pill.setFixedSize(pill_w, pill_h)
+        val_ss = f"color: #111111; font-size: {val_px}px; font-weight: bold;"
+        for v in self._values:
+            v.setStyleSheet(val_ss)
 
     def update_metrics(self, metrics, decimals, percent_suffix=True):
         avg_s, range_s, nu_s = format_metrics(metrics, decimals, percent_suffix)
@@ -116,6 +107,3 @@ class SummaryPillBadge(SummaryWidget):
 
     def set_target_width(self, w: int) -> None:
         self.setFixedWidth(w)
-
-    def get_natural_height(self) -> int:
-        return 34

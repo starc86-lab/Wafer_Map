@@ -1713,6 +1713,9 @@ class WaferCell(QFrame):
         decimals = int(common.get("decimals", tbl_cfg.get("decimals", 2)))
         percent_suffix = bool(tbl_cfg.get("nu_percent_suffix", True))
         m = summary_metrics(v)
+        # font_scale 갱신 — stylesheet 박제 style 도 매 update 시 새 FONT_SIZES
+        # 반영 (사용자 정책 2026-05-01, ui_changed 후 swap 없이 reapply).
+        self._summary.apply_fonts()
         self._summary.update_metrics(m, decimals, percent_suffix)
         # 테이블 높이가 바뀌었으니 cell 전체 크기 재계산 (chart_area 는 그대로, 전체 높이만)
         self._apply_chart_size(common)
@@ -1733,6 +1736,14 @@ class WaferCell(QFrame):
                 break
         old = self._summary
         if old is not None:
+            # old 의 우클릭 signal disconnect — deleteLater 처리 전 stale slot
+            # 호출 회피 (사용자 정책 2026-05-01, scope 1 review C1).
+            old_ctx = (old.context_menu_target()
+                       if hasattr(old, "context_menu_target") else old)
+            try:
+                old_ctx.customContextMenuRequested.disconnect(self._show_table_menu)
+            except (TypeError, RuntimeError):
+                pass
             parent_layout.removeWidget(old)
             old.deleteLater()
 

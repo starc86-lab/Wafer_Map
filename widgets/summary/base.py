@@ -27,32 +27,6 @@ STYLE_DISPLAY_NAMES: dict[str, str] = {
 }
 
 
-def font_px(role: str) -> int:
-    """role 기반 폰트 크기 (px). 현재 font_scale 자동 반영.
-
-    base = FONT_SIZES['body'] (settings_dialog.apply_global_style 가 font_scale
-    적용해 영구 갱신). 모든 style 이 hardcode 대신 이 함수 호출 → 한 곳에서
-    일괄 조정 + font_scale 연동 (사용자 정책 2026-04-30).
-
-    role 카탈로그:
-      label_xs : 매우 작은 라벨 (대시보드 톤)
-      label    : 보통 라벨
-      value    : 표준 값 (ppt_basic / 일반)
-      value_lg : 강조 값
-      value_xl : 매우 큰 강조 값 (Big Number 류)
-    """
-    from core.themes import FONT_SIZES
-    base = int(FONT_SIZES.get("body", 14))
-    table = {
-        "label_xs": max(7, base - 6),
-        "label":    max(8, base - 4),
-        "value":    base,
-        "value_lg": base + 2,
-        "value_xl": base + 4,
-    }
-    return table.get(role, base)
-
-
 def fmt_value(v, decimals: int) -> str:
     """metric 값 포맷 — NaN/None → '—'."""
     if v is None or (isinstance(v, float) and np.isnan(v)):
@@ -135,15 +109,16 @@ class SummaryWidget(QWidget):
         """wafer_cell 의 _apply_chart_size 에서 호출. setFixedWidth 디폴트."""
         self.setFixedWidth(w)
 
-    def get_natural_height(self) -> int:
-        """ppt_basic 기준값 — 다른 style 도 가능하면 동일 높이 따름.
+    def apply_fonts(self) -> None:
+        """font_scale 변경 시 호출 — stylesheet 박제 폰트 재적용.
 
-        wafer_cell 이 setFixedHeight(get_natural_height()) 호출해 cell 전체
-        세로 길이 일관 유지.
+        delegate 기반 style (ppt_basic / dark_neon / vertical_stack) 은 paint
+        매번 FONT_SIZES 읽으므로 default no-op. 자유 layout style 만 init 의
+        stylesheet 부분을 별도 함수로 분리해 override (사용자 정책 2026-05-01).
+
+        wafer_cell._update_table 이 매 update 직전 호출 — swap 없이 폰트 갱신.
         """
-        # ppt_basic: 2 row × 24 + frame ≈ 50px. 정확한 값은 _update_table 에서
-        # resizeRowsToContents 후 계산되지만, base default 는 공통 추정치.
-        return 50
+        return
 
     def fit_to_height(self, h: int) -> None:
         """wafer_cell 이 setFixedHeight(reserved) 후 호출. style 별 내부 layout

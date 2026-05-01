@@ -108,9 +108,6 @@ class SummaryPPTBasic(SummaryWidget):
         self.setFixedWidth(w)
         self._table.setFixedWidth(w)
 
-    def get_natural_height(self) -> int:
-        return self.height() if self.height() > 0 else 50
-
     def context_menu_target(self) -> QWidget:
         """우클릭 메뉴 연결 대상 — wafer_cell 이 customContextMenuRequested 연결."""
         return self._table
