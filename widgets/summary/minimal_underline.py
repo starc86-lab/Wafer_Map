@@ -51,9 +51,16 @@ class SummaryMinimalUnderline(SummaryWidget):
             ul.setFixedHeight(2)
             ul.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
             ul.setStyleSheet(f"background-color: {self.ACCENT};")
+            # underline 짧게 — col 가로 60% 만 차지 (사용자 정책 2026-05-01,
+            # prototype 의 minimal 컨셉 매칭)
+            ul_row = QHBoxLayout()
+            ul_row.setContentsMargins(0, 0, 0, 0)
+            ul_row.addStretch(1)
+            ul_row.addWidget(ul, 3)
+            ul_row.addStretch(1)
             col.addWidget(lbl)
             col.addWidget(val)
-            col.addWidget(ul)
+            col.addLayout(ul_row)
             outer.addWidget(col_w, stretch=1)
             self._values.append(val)
 
