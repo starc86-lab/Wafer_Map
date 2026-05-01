@@ -551,6 +551,7 @@ class WaferCell(QFrame):
         # 기존 WaferCell 이 갖던 border/배경/내용을 이 컨테이너로 이동.
         self._capture_container = QFrame()
         self._capture_container.setObjectName("waferCell")
+        self._capture_container.setFrameShape(QFrame.Shape.NoFrame)
         self._capture_container.setStyleSheet(
             "#waferCell { background-color: white; border: 1px solid #bfbfbf; }"
         )

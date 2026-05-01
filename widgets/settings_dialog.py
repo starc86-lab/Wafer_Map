@@ -325,9 +325,11 @@ class ChartCommonGroup(QGroupBox):
         self.sb_edge_cut.setValue(float(cfg.get("edge_cut_mm", 0.0)))
         _limit_width(self.sb_edge_cut)
 
-        # 그래프 크기 — 9:7 비율 고정 (360:280 기준, 0.8× ~ 1.6×)
+        # 그래프 크기 — 9:7 비율 고정 (360:280 기준)
         self.cb_chart_size = _limit_width(QComboBox())
-        for w, h in ((288, 224), (360, 280), (432, 336), (504, 392), (576, 448)):
+        for w, h in (
+            (288, 224), (324, 252), (360, 280), (432, 336), (504, 392), (576, 448),
+        ):
             self.cb_chart_size.addItem(f"{w}×{h}", (w, h))
         cur_w = int(cfg.get("chart_width", 360))
         cur_h = int(cfg.get("chart_height", 280))
