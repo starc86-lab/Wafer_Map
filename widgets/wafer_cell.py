@@ -35,6 +35,29 @@ from core.metrics import summary_metrics
 
 BOUNDARY_SEGMENTS = 361
 
+
+def _safe_clipboard_set(op_callable, retries: int = 2, delay_ms: int = 50) -> bool:
+    """Windows clipboard race 대비 retry helper (외부 LLM 리뷰 2026-05-01).
+
+    사내 보안 프로그램 / Excel / 클립보드 매니저 등이 clipboard 를 선점 중일
+    때 setMimeData / setText 가 실패할 수 있음. 짧은 sleep 후 1~2회 재시도.
+
+    Returns: True 성공 / False 모두 실패 (silent — 다음 copy 재시도 가능).
+    """
+    from PySide6.QtCore import QThread
+    last_exc: Exception | None = None
+    for i in range(retries + 1):
+        try:
+            op_callable()
+            return True
+        except Exception as e:  # noqa: BLE001 — Windows native 예외 광범위
+            last_exc = e
+            if i < retries:
+                QThread.msleep(delay_ms)
+    import sys as _sys
+    _sys.stderr.write(f"[clipboard] set 실패 ({retries+1}회): {last_exc}\n")
+    return False
+
 # 300mm 웨이퍼 notch — 실제 스펙은 ~3mm 폭/~1mm 깊이지만 화면에서 잘 보이도록 과장.
 # 방향은 6시(하단, 3π/2) 고정. 깊이는 settings(chart_common.notch_depth_mm)에서 주입.
 _NOTCH_ANGLE = 3 * np.pi / 2
@@ -217,15 +240,22 @@ def _capture_gl_offscreen(gl_view: gl.GLViewWidget, scale: int = 1) -> QImage:
     try:
         gl_view.makeCurrent()
         try:
-            fmt = QOpenGLFramebufferObjectFormat()
-            fmt.setSamples(4)  # MSAA 4x (FBO 레벨 강제)
-            fmt.setAttachment(
-                QOpenGLFramebufferObject.Attachment.CombinedDepthStencil,
-            )
             w = max(1, int(gl_view.width()) * scale)
             h = max(1, int(gl_view.height()) * scale)
-            fbo = QOpenGLFramebufferObject(QSize(w, h), fmt)
+            # FBO 재사용 — gl_view 의 attr 로 캐시. size 동일하면 재사용해 GPU
+            # 메모리 파편화 방지 (외부 LLM 리뷰 2026-05-01).
+            fbo = getattr(gl_view, "_cached_capture_fbo", None)
+            if fbo is None or fbo.size() != QSize(w, h):
+                fmt = QOpenGLFramebufferObjectFormat()
+                fmt.setSamples(4)  # MSAA 4x (FBO 레벨 강제)
+                fmt.setAttachment(
+                    QOpenGLFramebufferObject.Attachment.CombinedDepthStencil,
+                )
+                fbo = QOpenGLFramebufferObject(QSize(w, h), fmt)
+                gl_view._cached_capture_fbo = fbo
             if not fbo.bind():
+                # bind 실패 — context 변경 가능성. cache invalidate 후 폴백.
+                gl_view._cached_capture_fbo = None
                 return QImage()
             _GL.glViewport(0, 0, w, h)
             gl_view.paint(region=(0, 0, w, h), viewport=(0, 0, w, h))
@@ -1313,9 +1343,13 @@ class WaferCell(QFrame):
             self._gl_3d.setCameraPosition(distance=dist)
             self._applied_cam_dist = dist
 
-        # 기존 모든 item 제거 (top view 는 매 렌더 깨끗이 다시 그림 — overhead 작음)
+        # 기존 모든 item 제거 (top view 는 매 렌더 깨끗이 다시 그림 — overhead 작음).
+        # `removeItem` 만 호출하면 GLViewWidget 의 Qt parent-child 관계가 유지되어
+        # 누적 (다중 wafer + 3D 토글 반복 시 메모리 누수 회귀). `deleteLater()` 로
+        # C++ 자원 명시 해제 (외부 LLM 리뷰 2026-05-01).
         for it in list(gview.items):
             gview.removeItem(it)
+            it.deleteLater()
 
         # RBF fit — settings 의 interp_method 반영
         pts = np.column_stack([np.asarray(x_in, dtype=float), np.asarray(y_in, dtype=float)])
@@ -2007,13 +2041,14 @@ class WaferCell(QFrame):
         mime = QMimeData()
         mime.setImageData(img)         # CF_DIB — PNG 못 읽는 앱 호환
         mime.setData("image/png", ba)  # PPT / Excel 우선 픽킹
-        QApplication.clipboard().setMimeData(mime)
+        _safe_clipboard_set(lambda: QApplication.clipboard().setMimeData(mime))
 
     def _copy_data(self) -> None:
         lines = [f"X\tY\t{self._value_name}"]
         for x, y, v in zip(self._x_in, self._y_in, self._v_in):
             lines.append(f"{x}\t{y}\t{v}")
-        QApplication.clipboard().setText("\n".join(lines))
+        text = "\n".join(lines)
+        _safe_clipboard_set(lambda: QApplication.clipboard().setText(text))
 
     def _copy_table(self) -> None:
         # 자유 layout style 도 지원 — _summary.copy_table_data() 위임.
@@ -2033,4 +2068,4 @@ class WaferCell(QFrame):
         mime = QMimeData()
         mime.setText(tsv)
         mime.setHtml(html)
-        QApplication.clipboard().setMimeData(mime)
+        _safe_clipboard_set(lambda: QApplication.clipboard().setMimeData(mime))

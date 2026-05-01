@@ -13,6 +13,9 @@ coord_library.json
 # 디버그/샘플/검증용 산출물 — 모두 debug/ 한 곳에 모음
 debug/
 
+# 작업 노트 / 임시 문서 (외부 LLM 리뷰 2026-05-01)
+docs/homework_combined.txt
+
 # stylesheet 가 동적으로 만드는 체크박스 SVG (테마 accent 색별)
 assets/check_*.svg
 # stylesheet 가 동적으로 만드는 스크롤바 화살표 SVG (테마 text 색별)

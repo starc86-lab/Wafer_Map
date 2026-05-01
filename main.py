@@ -320,6 +320,15 @@ def _row_values(row: pd.Series, data_cols: list[str]) -> np.ndarray:
         # 컬럼명 중복으로 DataFrame 반환 — row 가 한 행이라 (1, N) 모양이지만
         # 더 안전하게 첫 행만 추출
         sel = sel.iloc[0] if sel.shape[0] >= 1 else pd.Series(dtype=float)
+    # 숫자 포맷 오염 cleansing — `"1,234.5"` / `"1 234"` / 따옴표 같은 사용자
+    # 실수 입력이 silent NaN 되는 회귀 차단 (외부 LLM 리뷰 2026-05-01).
+    if sel.dtype == object:
+        sel = (
+            sel.astype(str)
+            .str.replace(",", "", regex=False)
+            .str.replace(" ", "", regex=False)
+            .str.strip("\"'")
+        )
     arr = pd.to_numeric(sel, errors="coerce").to_numpy(dtype=float)
     valid = ~np.isnan(arr)
     if not valid.any():
