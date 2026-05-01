@@ -160,6 +160,6 @@ class SummaryWidget(QWidget):
         """
         return False
 
-    def overlay_texts(self) -> tuple[str, str]:
-        """is_chart_overlay_only True 인 style 만 의미. (Mean, NU) 문자열."""
-        return "—", "—"
+    def overlay_texts(self) -> tuple[str, str, str]:
+        """is_chart_overlay_only True 인 style 만 의미. (Mean, Range, NU) 문자열."""
+        return "—", "—", "—"

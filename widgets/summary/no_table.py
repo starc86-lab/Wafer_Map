@@ -26,11 +26,13 @@ class SummaryNoTable(SummaryWidget):
         # update_metrics 는 cell 이 직접 호출하지만 여기 보관해 cell 이 last_metrics
         # 조회 가능하게 함.
         self._last_avg: str = "—"
+        self._last_range: str = "—"
         self._last_nu: str = "—"
 
     def update_metrics(self, metrics, decimals, percent_suffix=True):
-        avg_s, _, nu_s = format_metrics(metrics, decimals, percent_suffix)
+        avg_s, range_s, nu_s = format_metrics(metrics, decimals, percent_suffix)
         self._last_avg = avg_s
+        self._last_range = range_s
         self._last_nu = nu_s
 
     def set_target_width(self, w: int) -> None:
@@ -44,6 +46,6 @@ class SummaryNoTable(SummaryWidget):
         """wafer_cell 이 chart 좌상단 overlay 표시 / SUMMARY_RESERVED_H=0 결정용."""
         return True
 
-    def overlay_texts(self) -> tuple[str, str]:
-        """현재 (Mean, NU) 표시 문자열 — wafer_cell 이 overlay 라벨 갱신."""
-        return self._last_avg, self._last_nu
+    def overlay_texts(self) -> tuple[str, str, str]:
+        """현재 (Mean, Range, NU) 표시 문자열 — wafer_cell 이 overlay 라벨 갱신."""
+        return self._last_avg, self._last_range, self._last_nu
