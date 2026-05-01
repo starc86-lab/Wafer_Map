@@ -36,11 +36,13 @@ class _PillLabel(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        # 진짜 타원 (ellipse) — drawEllipse(widget rect)
+        # stadium — 양 끝 반원 (radius = h/2). 양 끝 뭉뚝, drawEllipse 의 뾰족함
+        # 회피 (사용자 정책 2026-05-01).
         painter.setBrush(QBrush(self._bg))
         painter.setPen(Qt.PenStyle.NoPen)
         rect = self.rect()
-        painter.drawEllipse(rect)
+        radius = rect.height() / 2
+        painter.drawRoundedRect(rect, radius, radius)
         # 텍스트 — 흰색 bold, 가운데
         font = painter.font()
         font.setPixelSize(self._font_px)
@@ -88,7 +90,8 @@ class SummaryPillBadge(SummaryWidget):
             _f.setPixelSize(lbl_px)
             _f.setBold(True)
             _fm = QFontMetrics(_f)
-            pill.setMinimumWidth(_fm.horizontalAdvance(h) + 16)
+            # 좌우 padding 넉넉하게 (사용자 정책 2026-05-01) — 텍스트 width + 28
+            pill.setMinimumWidth(_fm.horizontalAdvance(h) + 28)
             # 가운데 위치 — 좌우 stretch
             pill_row = QHBoxLayout()
             pill_row.setContentsMargins(0, 0, 0, 0)
