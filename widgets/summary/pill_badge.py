@@ -15,30 +15,40 @@ from widgets.summary.base import SummaryWidget, format_metrics
 _PILL_COLORS = ("#264653", "#2a9d8f", "#e76f51")
 
 
-class _PillLabel(QLabel):
-    """타원 (stadium) 모양 라벨 — paintEvent 직접 그림.
+class _PillLabel(QWidget):
+    """타원 (stadium) 모양 — paintEvent 가 background + 텍스트 모두 직접 그림.
 
-    QSS border-radius 가 QLabel + padding 조합에서 부정확하게 그려지는 회귀
-    회피 (사용자 정책 2026-05-01). matplotlib FancyBboxPatch round 와 동일.
+    QLabel + QSS border-radius 가 부정확한 회귀 회피. QWidget 으로 만들어
+    QSS 간섭 없이 QPainter 만으로 그림. matplotlib FancyBboxPatch round 와
+    동일 (사용자 정책 2026-05-01).
     """
 
-    def __init__(self, text: str, bg_color: str, parent=None):
-        super().__init__(text, parent)
+    def __init__(self, text: str, bg_color: str, font_px: int, parent=None):
+        super().__init__(parent)
+        self._text = text
         self._bg = QColor(bg_color)
+        self._font_px = int(font_px)
+
+    def setText(self, text: str) -> None:
+        self._text = text
+        self.update()
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        # stadium background — radius = height/2 양 끝 반원
         painter.setBrush(QBrush(self._bg))
         painter.setPen(Qt.PenStyle.NoPen)
         rect = self.rect()
-        # radius = height/2 → 양 끝 완전 반원 (stadium)
         radius = rect.height() / 2
         painter.drawRoundedRect(rect, radius, radius)
-        painter.end()
-        # QLabel 의 default paintEvent — 텍스트 그림 (autoFillBackground=False
-        # 라 background 안 덮어씀)
-        super().paintEvent(event)
+        # 텍스트 — 흰색 bold, 가운데
+        font = painter.font()
+        font.setPixelSize(self._font_px)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.setPen(QColor("white"))
+        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, self._text)
 
 
 class SummaryPillBadge(SummaryWidget):
@@ -67,15 +77,17 @@ class SummaryPillBadge(SummaryWidget):
             col.setSpacing(0)
             col.setAlignment(Qt.AlignmentFlag.AlignHCenter)
             # pill 라벨 — QLabel 의 border-radius 로 둥근 모서리
-            # _PillLabel — paintEvent 로 stadium 직접 그림 (QSS border-radius
-            # 부정확 회피, 사용자 정책 2026-05-01).
-            pill = _PillLabel(h, _PILL_COLORS[i])
-            pill.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            # _PillLabel — QWidget paintEvent 로 stadium + 텍스트 직접 그림
+            # (QSS 간섭 없이, 사용자 정책 2026-05-01).
+            pill = _PillLabel(h, _PILL_COLORS[i], lbl_px)
             pill.setFixedHeight(pill_h)
-            pill.setStyleSheet(
-                f"color: white; font-size: {lbl_px}px; font-weight: bold;"
-                " padding-left: 6px; padding-right: 6px;"
-            )
+            # 텍스트 fit 위해 minimum width 보장 (텍스트 width + padding 12)
+            from PySide6.QtGui import QFontMetrics, QFont as _QFont
+            _f = _QFont()
+            _f.setPixelSize(lbl_px)
+            _f.setBold(True)
+            _fm = QFontMetrics(_f)
+            pill.setMinimumWidth(_fm.horizontalAdvance(h) + 16)
             # 가운데 위치 — 좌우 stretch
             pill_row = QHBoxLayout()
             pill_row.setContentsMargins(0, 0, 0, 0)
