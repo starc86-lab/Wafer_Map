@@ -131,9 +131,19 @@ def apply_global_style(app: QApplication, settings: dict[str, Any]) -> None:
 
 
 def _fix_width(widget: QWidget, px: int = FIELD_WIDTH) -> QWidget:
-    """모든 입력 위젯의 폭·높이를 고정 — 시작·끝·행 높이 모두 동일."""
+    """모든 입력 위젯의 폭·높이를 고정 — 시작·끝·행 높이 모두 동일.
+
+    spinbox 의 경우 추가로 `CorrectToNearestValue` 모드 적용 — invalid 입력
+    (range 외) 시 이전 값 복귀가 아닌 가장 가까운 boundary 로 clamp (사용자
+    정책 2026-05-01, "min 미만 → min / max 초과 → max").
+    """
     widget.setFixedWidth(px)
     widget.setFixedHeight(FIELD_HEIGHT)
+    if isinstance(widget, (QSpinBox, QDoubleSpinBox)):
+        from PySide6.QtWidgets import QAbstractSpinBox
+        widget.setCorrectionMode(
+            QAbstractSpinBox.CorrectionMode.CorrectToNearestValue,
+        )
     return widget
 
 
@@ -175,16 +185,16 @@ class UiSettingsCard(QGroupBox):
         if idx >= 0:
             self.cb_font.setCurrentIndex(idx)
 
-        self.cb_scale = _fix_width(QComboBox())
+        self.cb_font_scale = _fix_width(QComboBox())
         current_scale = float(settings.get("font_scale", 1.0) or 1.0)
         nearest_idx = 1
         best_diff = abs(current_scale - FONT_SCALE_CHOICES[1][1])
         for i, (label, val) in enumerate(FONT_SCALE_CHOICES):
-            self.cb_scale.addItem(label, val)
+            self.cb_font_scale.addItem(label, val)
             if abs(current_scale - val) < best_diff:
                 best_diff = abs(current_scale - val)
                 nearest_idx = i
-        self.cb_scale.setCurrentIndex(nearest_idx)
+        self.cb_font_scale.setCurrentIndex(nearest_idx)
 
         self.chk_save_window = _fix_width(QCheckBox())
         self.chk_save_window.setChecked(bool(settings.get("window_save_enabled", True)))
@@ -216,14 +226,14 @@ class UiSettingsCard(QGroupBox):
             ("윈도우 크기 저장", self.chk_save_window),
             ("Table Style", self.cb_table_style),
             ("글꼴", self.cb_font),
-            ("글자 크기", self.cb_scale),
+            ("글자 크기", self.cb_font_scale),
             ("UI 해상도 (재시작)", self.cb_ui_mode),
         ])
 
         # 즉시 적용
         self.cb_theme.currentIndexChanged.connect(self.changed)
         self.cb_font.currentIndexChanged.connect(self.changed)
-        self.cb_scale.currentIndexChanged.connect(self.changed)
+        self.cb_font_scale.currentIndexChanged.connect(self.changed)
         self.chk_save_window.toggled.connect(self.changed)
         # table_style 은 별도 시그널 — RBF/GL 재렌더 없이 _summary 위젯만 swap
         self.cb_table_style.currentIndexChanged.connect(
@@ -236,7 +246,7 @@ class UiSettingsCard(QGroupBox):
         return {
             "theme": self.cb_theme.currentData(),
             "font": self.cb_font.currentData(),
-            "font_scale": float(self.cb_scale.currentData()),
+            "font_scale": float(self.cb_font_scale.currentData()),
             "window_save_enabled": self.chk_save_window.isChecked(),
             "table": {"style": self.cb_table_style.currentData()},
             "ui_mode": self.cb_ui_mode.currentData(),
@@ -296,13 +306,13 @@ class ChartCommonGroup(QGroupBox):
         self.cb_decimals.setCurrentIndex(idx if idx >= 0 else 2)
 
         # Edge cut — 웨이퍼 경계에서 안쪽으로 cut. 0=cut 없음. radial/RBF 양쪽 공통
-        self.sb_edge_cut = QDoubleSpinBox()
-        self.sb_edge_cut.setRange(0.0, 10.0)
-        self.sb_edge_cut.setSingleStep(0.5)
-        self.sb_edge_cut.setDecimals(1)
-        self.sb_edge_cut.setSuffix(" mm")
-        self.sb_edge_cut.setValue(float(cfg.get("edge_cut_mm", 0.0)))
-        _fix_width(self.sb_edge_cut)
+        self.sp_edge_cut = QDoubleSpinBox()
+        self.sp_edge_cut.setRange(0.0, 10.0)
+        self.sp_edge_cut.setSingleStep(0.5)
+        self.sp_edge_cut.setDecimals(1)
+        self.sp_edge_cut.setSuffix(" mm")
+        self.sp_edge_cut.setValue(float(cfg.get("edge_cut_mm", 0.0)))
+        _fix_width(self.sp_edge_cut)
 
         # 그래프 크기 — 9:7 비율 고정 (360:280 기준)
         self.cb_chart_size = _fix_width(QComboBox())
@@ -320,12 +330,13 @@ class ChartCommonGroup(QGroupBox):
                 break
         self.cb_chart_size.setCurrentIndex(match_idx)
 
-        # Map Size — 카메라 거리 (작을수록 확대). 2D top view / 3D 공통 적용.
-        # 사용자 관점에서 "Map 크기" 가 직관적이라 라벨을 이렇게 표기.
+        # Map Size — 사용자 직관 값 (값 ↑ → 맵 ↑). 내부적으로 camera_distance
+        # 는 반대 (거리 ↑ → 맵 ↓) 라 `1200 - display` 변환 (사용자 정책 2026-05-01).
+        # 변수명 `sp_cam_dist` historical — settings 키 `camera_distance` 가 진실.
         self.sp_cam_dist = _fix_width(QSpinBox())
         self.sp_cam_dist.setRange(400, 800)
         self.sp_cam_dist.setSingleStep(10)
-        self.sp_cam_dist.setValue(int(cfg.get("camera_distance", 620)))
+        self.sp_cam_dist.setValue(1200 - int(cfg.get("camera_distance", 620)))
 
         # radial mesh 밀도 (2D·3D 공통)
         self.sp_rings = _fix_width(QSpinBox())
@@ -347,7 +358,7 @@ class ChartCommonGroup(QGroupBox):
             ("Map Size", self.sp_cam_dist),
             ("Radial: rings", self.sp_rings),
             ("Radial: seg", self.sp_rseg),
-            ("Edge cut", self.sb_edge_cut),
+            ("Edge cut", self.sp_edge_cut),
         ])
 
         self.cb_cmap.currentIndexChanged.connect(self.changed)
@@ -356,7 +367,7 @@ class ChartCommonGroup(QGroupBox):
         self.sp_rseg.valueChanged.connect(self.changed)
         self.cb_chart_size.currentIndexChanged.connect(self.changed)
         self.cb_decimals.currentIndexChanged.connect(self.changed)
-        self.sb_edge_cut.valueChanged.connect(self.changed)
+        self.sp_edge_cut.valueChanged.connect(self.changed)
         self.sp_cam_dist.valueChanged.connect(self.changed)
 
     def gather(self) -> dict[str, Any]:
@@ -371,8 +382,8 @@ class ChartCommonGroup(QGroupBox):
             "chart_width": int(w),
             "chart_height": int(h),
             "decimals": int(self.cb_decimals.currentData()),
-            "edge_cut_mm": float(self.sb_edge_cut.value()),
-            "camera_distance": int(self.sp_cam_dist.value()),
+            "edge_cut_mm": float(self.sp_edge_cut.value()),
+            "camera_distance": 1200 - int(self.sp_cam_dist.value()),
         })
         return result
 
@@ -381,7 +392,7 @@ class ChartCommonGroup(QGroupBox):
         widgets = (self.cb_cmap, self.cb_interp,
                    self.sp_rings, self.sp_rseg,
                    self.cb_chart_size, self.cb_decimals,
-                   self.sb_edge_cut, self.sp_cam_dist)
+                   self.sp_edge_cut, self.sp_cam_dist)
         for w in widgets:
             w.blockSignals(True)
         try:
@@ -401,8 +412,8 @@ class ChartCommonGroup(QGroupBox):
             idx = self.cb_decimals.findData(int(cfg.get("decimals", 2)))
             if idx >= 0:
                 self.cb_decimals.setCurrentIndex(idx)
-            self.sb_edge_cut.setValue(float(cfg.get("edge_cut_mm", 0.0)))
-            self.sp_cam_dist.setValue(int(cfg.get("camera_distance", 620)))
+            self.sp_edge_cut.setValue(float(cfg.get("edge_cut_mm", 0.0)))
+            self.sp_cam_dist.setValue(1200 - int(cfg.get("camera_distance", 620)))
         finally:
             for w in widgets:
                 w.blockSignals(False)
@@ -655,7 +666,8 @@ class Chart3DGroup(QGroupBox):
         self.chk_smooth = _fix_width(QCheckBox())
         self.chk_smooth.setChecked(bool(cfg.get("smooth", True)))
 
-        # Z-Height (배율) — DoubleSpinBox, 0.1~3.0, step 0.1, 소수 1자리
+        # Z-Height (배율) — DoubleSpinBox, 0.1~3.0, step 0.1, 소수 1자리.
+        # 변수명 `sp_zexag` historical — settings 키 `z_exaggeration` 가 진실.
         self.sp_zexag = _fix_width(QDoubleSpinBox())
         self.sp_zexag.setRange(0.1, 3.0)
         self.sp_zexag.setSingleStep(0.1)

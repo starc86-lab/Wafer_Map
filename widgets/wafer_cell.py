@@ -478,6 +478,7 @@ class WaferDisplay:
     is_radial: bool = False                             # 직선/방사 스캔 자동 감지 여부 (badge 표시용)
     is_delta: bool = False                              # DELTA 모드(A-B) 여부 — ER Time 입력 가시성용
     er_time_sec: float | None = None                    # ER/RR 변환용 time (초). None/0 = 변환 안 함
+    delta_interp_active: bool = False                   # Δ-Interp mode (DELTA 만) — 배지 표시용
 
 
 def _dynamic_decimals(vmin: float, vmax: float, n_ticks: int = 5) -> int:
@@ -686,7 +687,13 @@ class WaferCell(QFrame):
         outer_lay.addWidget(self._er_row)
         self._er_row.setVisible(bool(getattr(display, "is_delta", False)))
 
-        # signal 연결 — editingFinished (엔터/포커스 아웃) 만 emit (textChanged 는
+        # signal 연결 — editingFinished + returnPressed 둘 다 (textChanged 는
+        # 모든 키 입력마다 trigger 라 너무 많이 emit). editingFinished 만 쓰면
+        # 빈 문자열 + Enter 시 validator 가 Intermediate 로 잡아 editingFinished
+        # 가 emit 안 됨 → returnPressed 로 보강 (사용자 정책 2026-05-01,
+        # 공란 입력으로 ER mode 해제 가능하게).
+        self.le_time.returnPressed.connect(self._on_time_edit_finished)
+        # editingFinished 도 유지 — focus 이동 (Tab / 마우스 클릭) 시.
         # 타이핑 매 키마다라 과함)
         self.le_time.editingFinished.connect(self._on_time_edit_finished)
         if self.chk_apply_all is not None:
@@ -772,12 +779,13 @@ class WaferCell(QFrame):
 
         self._chart_widget: QWidget = self._gl_2d  # 활성 위젯 추적
 
-        # r-symmetry 모드 배지 — 직선 스캔 자동 감지 시 좌상단에 표시.
-        # 각 GL 위젯의 자식으로 두 개 배치 (stacked layout 토글 시 각자 보임).
-        # GL native surface 위에 QLabel 이지만 Windows + AA_ShareOpenGLContexts
-        # 조합에서는 합성 정상. 카드 2D/3D 토글 시 자식 배지가 각각 활성.
-        def _make_badge(parent: QWidget) -> QLabel:
-            b = QLabel("r-symmetry mode", parent)
+        # 모드 배지 (좌하단) — 두 종류:
+        #   - r-symmetry: 직선 스캔 auto-detect 또는 사용자 강제
+        #   - Δ-Interp: DELTA 모드에서 좌표 미일치 점 보간 채움
+        # 둘 다 visible 시 가로로 나란히 배치 (`_apply_chart_size` 에서 처리).
+        # GL widget 의 자식 QLabel — 2D/3D 각각 한 쌍씩.
+        def _make_badge(parent: QWidget, text: str) -> QLabel:
+            b = QLabel(text, parent)
             b.setStyleSheet(
                 "background-color: rgba(255, 255, 255, 210); color: #555555; "
                 "padding-top: 2px; padding-bottom: 2px;"
@@ -786,11 +794,12 @@ class WaferCell(QFrame):
                 " font-size: 11px;"
             )
             b.hide()
-            b.move(8, 8)
             b.adjustSize()
             return b
-        self._badge_2d = _make_badge(self._gl_2d)
-        self._badge_3d = _make_badge(self._gl_3d)
+        self._badge_2d = _make_badge(self._gl_2d, "r-symmetry mode")
+        self._badge_3d = _make_badge(self._gl_3d, "r-symmetry mode")
+        self._badge_delta_2d = _make_badge(self._gl_2d, "Δ-Interp mode")
+        self._badge_delta_3d = _make_badge(self._gl_3d, "Δ-Interp mode")
 
         # No Table style 용 chart overlay (Mean / Range / N.U) — GL widget 자식
         # _OutlineLabel 한 쌍씩 (2D / 3D). 흰 외곽선 + 검정 fill 로 그래프 진한 색
@@ -814,6 +823,8 @@ class WaferCell(QFrame):
             self._colorbar,
             self._badge_2d,
             self._badge_3d,
+            self._badge_delta_2d,
+            self._badge_delta_3d,
             self._chart_overlay_2d,
             self._chart_overlay_3d,
         ]
@@ -972,11 +983,12 @@ class WaferCell(QFrame):
         # title 이 chart_box / colorbar 위에 z-order 최상
         self._title.raise_()
 
-        # r-symmetry 배지 — 좌측 하단. chart_area 의 자식 GL widget 기준 pos.
+        # 모드 배지 y 좌표만 여기서 결정 (chart 크기 변경 시 업데이트).
+        # 실제 가로 배치는 _layout_badges() 가 visibility 보고 처리 — _render_2d/3d
+        # 의 setVisible 호출 후에도 호출되어 visibility 변화에 즉시 반응.
         bh = self._badge_2d.sizeHint().height()
-        badge_y = stack_h - bh - 4
-        for b in (self._badge_2d, self._badge_3d):
-            b.move(8, badge_y)
+        self._badge_y = stack_h - bh - 4
+        self._layout_badges()
         # 1D Radial Graph — show_1d_radial 체크 시 보이고, 높이 135px
         # 위젯은 cell content 꽉 채움. 플롯 centering 은 내부 좌/우 축 대칭으로.
         show_radial = bool(common.get("show_1d_radial", False))
@@ -1082,6 +1094,38 @@ class WaferCell(QFrame):
         self._hide_3d_items()
         if self._view_mode == "3D":
             self._activate_current_view()
+
+    def _place_badges(
+        self, rsym: QLabel, delta: QLabel, is_rad: bool, is_di: bool,
+    ) -> None:
+        """setVisible 호출 전에 호출 — visibility 인자로 위치 미리 set.
+
+        둘 다 visible 시 r-symmetry 첫, Δ-Interp 옆 (8px gap). 한 쪽만이면
+        그 쪽이 8px 시작 자리. setVisible 후 호출하면 (0,0) 깜빡임 발생 —
+        반드시 setVisible 전에 호출 (사용자 정책 2026-05-01).
+        """
+        by = getattr(self, "_badge_y", None)
+        if by is None:
+            return
+        x = 8
+        if is_rad:
+            rsym.move(x, by)
+            x += rsym.width() + 8
+        if is_di:
+            delta.move(x, by)
+
+    def _layout_badges(self) -> None:
+        """현재 visibility 기준 위치 재계산 — _apply_chart_size 의 chart 크기
+        변경 시 y 좌표 갱신용 (visibility 자체는 변하지 않는 상황).
+        """
+        by = getattr(self, "_badge_y", None)
+        if by is None:
+            return
+        for rsym, delta in (
+            (self._badge_2d, self._badge_delta_2d),
+            (self._badge_3d, self._badge_delta_3d),
+        ):
+            self._place_badges(rsym, delta, rsym.isVisible(), delta.isVisible())
 
     def refresh(self) -> None:
         """Settings(컬러맵·보간·mesh 옵션 등) 변경 시 호출 — 양쪽 view 재렌더."""
@@ -1243,9 +1287,15 @@ class WaferCell(QFrame):
         # r-symmetry mode 배지 — auto-detect (is_radial) 또는 force (r_symmetry_mode).
         is_rad = bool(getattr(self._display, "is_radial", False)) or \
                  bool(settings.get("r_symmetry_mode", False))
+        is_di = bool(getattr(self._display, "delta_interp_active", False))
+        # setVisible 호출 전에 위치 set — (0,0) 깜빡임 회피 (사용자 정책 2026-05-01).
+        self._place_badges(self._badge_2d, self._badge_delta_2d, is_rad, is_di)
         self._badge_2d.setVisible(is_rad)
+        self._badge_delta_2d.setVisible(is_di)
         if is_rad:
             self._badge_2d.raise_()
+        if is_di:
+            self._badge_delta_2d.raise_()
         rings = max(5, int(common.get("radial_rings", 20)))
         seg = max(60, int(common.get("radial_seg", 180)))
         edge_cut_mm = float(common.get("edge_cut_mm", 0.0))
@@ -1429,9 +1479,15 @@ class WaferCell(QFrame):
         # r-symmetry mode 배지 — 2D 와 동일 로직.
         is_rad = bool(getattr(self._display, "is_radial", False)) or \
                  bool(settings.get("r_symmetry_mode", False))
+        is_di = bool(getattr(self._display, "delta_interp_active", False))
+        # setVisible 호출 전에 위치 set — (0,0) 깜빡임 회피.
+        self._place_badges(self._badge_3d, self._badge_delta_3d, is_rad, is_di)
         self._badge_3d.setVisible(is_rad)
+        self._badge_delta_3d.setVisible(is_di)
         if is_rad:
             self._badge_3d.raise_()
+        if is_di:
+            self._badge_delta_3d.raise_()
 
         # 카메라 distance / elevation / azimuth — Settings 값이 **바뀔 때만** 반영
         # (사용자의 휠 zoom / 드래그 회전 보존). opts 대신 _applied_* 트래커와 비교.

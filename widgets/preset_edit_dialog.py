@@ -41,12 +41,27 @@ def _boundary_xy(R: float = _BOUNDARY_R, depth: float = _NOTCH_DEPTH) -> tuple[n
 
 
 class _FloatDelegate(QStyledItemDelegate):
-    """X/Y cell 편집 시 float 만 입력 허용."""
+    """X/Y cell 편집 시 float 만 입력 허용.
+
+    cell 높이 좁으면 editor 도 그대로 좁아 숫자 위/아래 잘림 →
+    updateEditorGeometry 에서 cell 보다 높게 (min 26px) 그리도록 override
+    (사용자 정책 2026-05-01).
+    """
+
+    _MIN_EDITOR_H = 26
 
     def createEditor(self, parent, option, index):
         editor = QLineEdit(parent)
         editor.setValidator(QDoubleValidator(parent))
         return editor
+
+    def updateEditorGeometry(self, editor, option, index):
+        rect = option.rect
+        if rect.height() < self._MIN_EDITOR_H:
+            # 위/아래 균등 확장 — cell 중심 유지
+            extra = self._MIN_EDITOR_H - rect.height()
+            rect.adjust(0, -extra // 2, 0, extra - extra // 2)
+        editor.setGeometry(rect)
 
 
 class PresetEditDialog(QDialog):

@@ -327,6 +327,9 @@ class MainWindow(QMainWindow):
         self._z_margin_pct_common = 20
         self._z_margin_pct_indiv = 0
         self._last_zscale_mode = self.cb_zscale.currentText()  # "개별"
+        # 변수명 `lbl_z_range` / `sp_z_range` (GUI 라벨 "Z-Margin" 과 mismatch)
+        # — historical naming. settings 키는 `z_margin_pct_*` 가 진실. callsite
+        # 다수라 보존, 의미는 z_margin (matplotlib margins() 관례).
         self.lbl_z_range = QLabel("Z-Margin:")
         # 1% 단위 step + 사용자 직접 입력 시 소수 1자리까지 허용 (사용자 정책 2026-04-29)
         self.sp_z_range = QDoubleSpinBox()
@@ -334,6 +337,9 @@ class MainWindow(QMainWindow):
         self.sp_z_range.setSingleStep(1.0)
         self.sp_z_range.setDecimals(1)
         self.sp_z_range.setSuffix("%")
+        # invalid 입력 → 가장 가까운 boundary 로 clamp (사용자 정책 2026-05-01).
+        from PySide6.QtWidgets import QAbstractSpinBox as _ASB
+        self.sp_z_range.setCorrectionMode(_ASB.CorrectionMode.CorrectToNearestValue)
         _init_pct = (self._z_margin_pct_common if self._last_zscale_mode == "공통"
                      else self._z_margin_pct_indiv)
         self.sp_z_range.setValue(float(_init_pct))
@@ -344,6 +350,8 @@ class MainWindow(QMainWindow):
         # Run — Input B 의 [Text]+[Table] 두 버튼 폭과 동일 (88*2+6=182). 그러면
         # 그 위 [Clear] 와 Run 옆 [Clear] 가 우측 정렬로 자동 일치.
         # (사용자 정책 2026-04-29: ReasonBar 이동 후 폭 넉넉해져 정렬 통일)
+        # 변수명 `btn_visualize` (GUI 라벨 "Run" 과 mismatch) — historical
+        # naming 유지. callsite 50+ 라 일괄 rename 회귀 위험 vs 이득 미미로 보존.
         self.btn_visualize = QPushButton("▶  Run")
         self.btn_visualize.setProperty("class", "primary")
         self.btn_visualize.setFixedWidth(
@@ -1367,6 +1375,7 @@ class MainWindow(QMainWindow):
                 x_mm=d.x_mm, y_mm=d.y_mm, values=d.delta_v,
                 is_radial=bool(is_collinear(d.x_mm, d.y_mm)),
                 is_delta=True,
+                delta_interp_active=self.chk_delta_interp.isChecked(),
             ))
         view_mode = self.cb_view.currentText() or "2D"
         self._apply_z_scale_mode(displays, view_mode)
@@ -1415,17 +1424,18 @@ class MainWindow(QMainWindow):
                 c.set_er_time(t)
 
         is_common = self.cb_zscale.currentText() == "공통"
+        view_mode = self.cb_view.currentText() or "2D"
         if is_common:
-            view_mode = self.cb_view.currentText() or "2D"
             displays = [c.display for c in cells]
             self._apply_z_scale_mode(displays, view_mode)
             self._result_panel.refresh_all()
         else:
-            if apply_all_on:
-                for c in cells:
-                    c.refresh()
-            else:
-                cell.refresh()
+            # 개별 모드 — z_range 도 ER time 적용된 값 기준으로 재계산해야
+            # colorbar 가 stale 안 됨 (사용자 정책 2026-05-01).
+            affected = list(cells) if apply_all_on else [cell]
+            self._apply_z_scale_mode([c.display for c in affected], view_mode)
+            for c in affected:
+                c.refresh()
 
     def _on_apply_all_toggled(self, checked: bool) -> None:
         """master 의 '전체 적용' 체크 토글.
@@ -2015,8 +2025,12 @@ class MainWindow(QMainWindow):
         DELTA 모드 전용. 체크 시 a_only/b_only 점에서 상대 측정값을 RBF 보간
         값으로 채워 정상 delta 계산 (사용자 정책 2026-04-27).
 
-        **세션 휘발** — settings.json 저장 안 함. 양쪽 입력 있으면 즉시 재시각화.
+        **세션 휘발** — settings.json 저장 안 함. 이미 시각화된 cells 가 있을
+        때만 재시각화 — Run 안 누른 상태에서 체크박스만 토글로 자동 렌더되던
+        회귀 fix (사용자 정책 2026-05-01, r-symmetry 와 동일 가드).
         """
+        if not self._result_panel.cells:
+            return
         if self._result_a and self._result_b:
             self._on_visualize()
 

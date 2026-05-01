@@ -249,9 +249,9 @@ suffix 자동 매칭 (X↔Y, X_1000↔Y_1000).</p>
   </tr>
   <tr>
     <td><b>Map Size</b></td>
-    <td>3D 카메라 거리 ↑ → 그래프 작게 보임</td>
-    <td>거리 ↓ → 크게 보임</td>
-    <td>620</td>
+    <td>값 ↑ → 그래프 크게 보임</td>
+    <td>값 ↓ → 작게 보임</td>
+    <td>580</td>
   </tr>
   <tr>
     <td><b>1D Scan 폭 (mm)</b></td>

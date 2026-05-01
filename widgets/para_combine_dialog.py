@@ -212,8 +212,7 @@ class ParaCombineDialog(QDialog):
         self.cb_c1.currentIndexChanged.connect(self._refresh_preview)
         self.cb_c2.currentIndexChanged.connect(self._refresh_preview)
 
-        # 초기 자동 선택 — PARA 1 은 첫 후보, PARA 2 는 미선택
-        self._on_p1_changed()  # 좌표 1 자동 매칭
+        # 초기 — PARA 1 / PARA 2 둘 다 미선택 (사용자 정책 2026-05-01).
         self._refresh_preview()
 
         # 다이얼로그를 부모 (메인 윈도우) 의 중앙에 배치
@@ -235,9 +234,6 @@ class ParaCombineDialog(QDialog):
             for v_key, n in self._composites_v:
                 cb.addItem(f"🔗 {v_key}  [{n} pt]", v_key)
             cb.blockSignals(False)
-        # PARA 1 자동 선택 (첫 후보)
-        if self._value_paras or self._composites_v:
-            self.cb_p1.setCurrentIndex(1)  # 0 은 placeholder
 
     def _fill_coord_combos(self) -> None:
         for cb in (self.cb_c1, self.cb_c2):
@@ -344,9 +340,10 @@ class ParaCombineDialog(QDialog):
         return [name]
 
     def _extract(self) -> dict | None:
-        """콤보 4개 모두 선택됐고 PARA 가 서로 다르면 dict 반환, 아니면 None.
+        """콤보 4개 모두 선택됐으면 dict 반환, 아니면 None.
 
         mode 자동 판정: 두 좌표 페어가 같으면 "sum", 다르면 "concat".
+        같은 PARA 두 번도 허용 — 사용자 자유도 (사용자 정책 2026-05-01).
         """
         p1 = self.cb_p1.currentData()
         p2 = self.cb_p2.currentData()
@@ -354,8 +351,6 @@ class ParaCombineDialog(QDialog):
         c2 = self.cb_c2.currentData()
         if not (p1 and p2 and c1 and c2):
             return None
-        if p1 == p2:
-            return None  # 같은 PARA 두 번 의미 없음
         mode = "sum" if c1 == c2 else "concat"
         return {"value": (p1, p2), "coord1": c1, "coord2": c2, "mode": mode}
 
