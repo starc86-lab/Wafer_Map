@@ -93,6 +93,8 @@ class ParaCombineDialog(QDialog):
         self.setWindowTitle("Para 조합")
         self.setModal(True)
         self.resize(540, 280)
+        from widgets import clamp_to_screen
+        clamp_to_screen(self)
 
         # 미리보기 flatten 용 — main_window 의 CombinedState. dialog 는 외부 모듈
         # import 안 하고 duck typing (items 속성 + mode/v_key/operands 만 사용).

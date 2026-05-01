@@ -276,6 +276,8 @@ class PresetEditDialog(QDialog):
         self._history: list[tuple[str, np.ndarray, np.ndarray]] = []
         self._push_state()
         self.adjustSize()
+        from widgets import clamp_to_screen
+        clamp_to_screen(self)
 
     # ── slots ──────────────────────────────────
     def _on_show_numbers_toggled(self, checked: bool) -> None:

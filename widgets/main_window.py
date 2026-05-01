@@ -87,10 +87,18 @@ class MainWindow(QMainWindow):
         win_cfg = s.get("window", {}) or {}
         saved_main = win_cfg.get("main")
         if isinstance(saved_main, (list, tuple)) and len(saved_main) == 2:
-            self.resize(int(saved_main[0]), int(saved_main[1]))
+            target_w, target_h = int(saved_main[0]), int(saved_main[1])
         else:
-            w, h = runtime.default_window_size("main")
-            self.resize(w, h)
+            target_w, target_h = runtime.default_window_size("main")
+        # 화면 영역 초과 방지 — 작은 모니터에서 UI 해상도 UHD 모드 등 큰 scale
+        # 적용 시 윈도우가 화면 밖으로 나가 Settings 버튼 클릭 불가 deadlock
+        # 회피 (사용자 정책 2026-05-01).
+        _scr = QGuiApplication.primaryScreen()
+        if _scr is not None:
+            _avail = _scr.availableGeometry()
+            target_w = min(target_w, _avail.width())
+            target_h = min(target_h, _avail.height())
+        self.resize(target_w, target_h)
         # 최대화 상태 복원 — resize()로 normal 크기를 먼저 넣고 최대화 플래그만 얹어야
         # 복원 버튼 / 엣지 드래그가 정상 동작 (window.main에 스크린 크기가 박히는 문제 해결)
         if win_cfg.get("maximized"):

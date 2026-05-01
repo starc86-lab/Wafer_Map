@@ -234,6 +234,8 @@ class CoordPreviewDialog(QDialog):
 
         # 고정 크기 구성이라 dialog 도 자연 크기에 맞춤
         self.adjustSize()
+        from widgets import clamp_to_screen
+        clamp_to_screen(self)
 
     # ── slots ─────────────────────────────────
     def _on_show_numbers_toggled(self, checked: bool) -> None:

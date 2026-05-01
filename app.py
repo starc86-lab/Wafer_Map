@@ -7,7 +7,9 @@ Wafer Map 엔트리포인트.
 """
 from __future__ import annotations
 
+import os
 import sys
+import threading
 import warnings
 
 VERSION = "0.4.0"
@@ -28,7 +30,6 @@ warnings.filterwarnings(
 # 사용자 정책 2026-05-01.
 # ────────────────────────────────────────────────────────────────
 def _apply_ui_scale() -> None:
-    import os
     from core import settings as _settings_io
     from core.themes import UI_MODE_SCALE
     s = _settings_io.load_settings()
@@ -54,8 +55,12 @@ def _apply_ui_scale() -> None:
         scale = UI_MODE_SCALE[mode]
     else:
         scale = 1.0
+    # 내부 ui_mode 가 ground truth — scale==1.0 일 때 외부 env 가 잔존하면
+    # 사용자 설정과 다른 scale 이 적용됨 (사용자 정책 2026-05-01).
     if scale != 1.0:
         os.environ["QT_SCALE_FACTOR"] = str(scale)
+    else:
+        os.environ.pop("QT_SCALE_FACTOR", None)
 
 
 _apply_ui_scale()
@@ -130,7 +135,6 @@ def _bg_warmup() -> None:
         import core.interp  # noqa  — scipy.interpolate / scipy.signal 끌어옴 (가장 무거움)
         import core.delta   # noqa
         import widgets.preset_dialog        # noqa
-        import widgets.settings_dialog      # noqa
         import widgets.coord_preview_dialog # noqa
         import widgets.preset_add_dialog    # noqa
     except Exception:
@@ -162,9 +166,11 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
 
-    # 해상도 기반 기본 창 크기 준비
-    screen = QGuiApplication.primaryScreen().availableGeometry()
-    runtime.update_screen_max(screen.width(), screen.height())
+    # 해상도 기반 기본 창 크기 준비 — RDP 재접속 등 edge case 에서 None 가능
+    primary = QGuiApplication.primaryScreen()
+    if primary is not None:
+        screen = primary.availableGeometry()
+        runtime.update_screen_max(screen.width(), screen.height())
 
     # 설정 로드 + QSS 적용 (theme / font / font_scale 반영)
     s = settings_io.load_settings()
@@ -183,24 +189,21 @@ def main() -> int:
     win.raise_()
     win.activateWindow()
 
-    # Splash screen 닫기 (PyInstaller bundle 만 효과; dev 환경엔 pyi_splash 없음)
+    # Splash screen 닫기 (PyInstaller bundle 만 효과; dev 환경엔 pyi_splash 없음).
+    # close() 가 multi-call / detach 후 호출 시 RuntimeError/AttributeError 가능 →
+    # 광범위 except 로 앱 죽음 방지 (사용자 정책 2026-05-01).
     try:
         import pyi_splash  # type: ignore[import-not-found]
         pyi_splash.close()
-    except ImportError:
+    except Exception:
         pass
 
     # 창 표시 후 warmup —
     #   - GUI 스레드: GL warmup → 다음 틱에 pyqtgraph widget warmup (단계 분할)
     #   - 백그라운드 스레드: scipy RBF + lazy 모듈 prefetch (Qt 무관 부분)
-    import threading
-
-    def _step_pg() -> None:
-        _pg_widget_warmup()
-
     def _step_gl() -> None:
         _gl_warmup()
-        QTimer.singleShot(0, _step_pg)
+        QTimer.singleShot(0, _pg_widget_warmup)
 
     threading.Thread(target=_bg_warmup, daemon=True).start()
     QTimer.singleShot(0, _step_gl)

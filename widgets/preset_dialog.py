@@ -36,6 +36,8 @@ class PresetSelectDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("좌표 추가")
         self.resize(720, 500)
+        from widgets import clamp_to_screen
+        clamp_to_screen(self)
 
         self._library = library
         self._current_recipe = current_recipe

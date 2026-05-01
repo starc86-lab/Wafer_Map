@@ -1057,6 +1057,8 @@ class SettingsDialog(QDialog):
         self.setWindowTitle("Settings")
         # 5개 카드 (UI / Chart Common / 2D / 3D / 1D Radial) 모두 스크롤 없이 보이는 높이
         self.resize(760, 940)
+        from widgets import clamp_to_screen
+        clamp_to_screen(self)
         self.setModal(False)
         # FBO 캡처 경로 도입으로 Settings 창이 Copy Graph 에 포함되던 이슈 해결됨.
         # QDialog 기본 windowFlags (Qt.Dialog + transient owner 관계) 사용.

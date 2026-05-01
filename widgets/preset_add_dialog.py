@@ -159,6 +159,8 @@ class PresetAddDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("좌표 프리셋 수동 추가")
         self.resize(720, 560)
+        from widgets import clamp_to_screen
+        clamp_to_screen(self)
 
         self._recipe = QLineEdit()
         self._recipe.setPlaceholderText("예: HT_SOC_POLAR_49PT_5mm")

@@ -292,9 +292,13 @@ UI_MODE_DISPLAY = {
     "auto": "Auto (자동 감지)",
     "FHD": "FHD (×0.75)",
     "QHD": "QHD (×1.0, 기본)",
-    "UHD": "UHD (×1.5)",
+    "UHD": "UHD (×1.3)",
 }
-UI_MODE_SCALE = {"FHD": 0.75, "QHD": 1.0, "UHD": 1.5}
+# UHD 1.5 → 1.3 (사용자 정책 2026-05-01) — UHD 모드 + 작은 모니터 (FHD 등)
+# 조합에서 control bar 의 logical minimum width 가 화면 logical avail 보다
+# 커서 윈도우가 화면 밖으로 나가던 회귀 fix. UHD 모니터에서 위젯 약 13%
+# 작아지지만 FHD 모니터 호환성 확보가 우선.
+UI_MODE_SCALE = {"FHD": 0.75, "QHD": 1.0, "UHD": 1.3}
 
 
 DEFAULT_SETTINGS = {

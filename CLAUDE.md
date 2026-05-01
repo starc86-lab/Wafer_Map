@@ -616,7 +616,7 @@ Wafer Map/
 - 이전 `_async_warmups` 단일 콜백이 GUI 스레드 0.5~2s 점유 → 윈도우 응답성 저하
 - 분리 구조: GUI 스레드 단계 분할 (`_gl_warmup` → 다음 틱 `_pg_widget_warmup`) + 백그라운드 `threading.Thread` 로 `_bg_warmup` (scipy RBF dummy + lazy import). Qt widget 은 GUI 스레드 전용이므로 백그라운드는 절대 만지지 않음
 - 측정 (벤치): GUI 스레드 ~167ms (gl 132ms + pg 35ms), bg 스레드 ~1.1s (병렬). 이전 대비 GUI 점유 89% 감소
-- 환경변수 `WAFERMAP_BENCH=1` 설정 시 단계별 시간 stdout 출력
+- 진단용 startup bench 출력은 F94 (2026-05-01) 에서 제거됨
 
 **3D 첫 렌더링 깜빡임 제거 (0.1.0~)**
 - `app.py`에서 `Qt.AA_ShareOpenGLContexts` set + 시작 시 dummy `GLViewWidget` show→hide→deleteLater (`_gl_warmup`).
