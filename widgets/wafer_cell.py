@@ -980,7 +980,7 @@ class WaferCell(QFrame):
             text = (
                 f"Mean  {avg_s}\n"
                 f"Range {range_s}\n"
-                f"N.U%  {nu_clean}"
+                f"N.U % {nu_clean}"
             )
             title_geo = self._title.geometry()
             overlay_y = title_geo.y() + title_geo.height() + 4
