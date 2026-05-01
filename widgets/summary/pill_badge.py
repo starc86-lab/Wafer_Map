@@ -4,6 +4,7 @@ Pill Badge style — 라벨이 둥근 색 pill, 값 큰 폰트 (옵션 E).
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QBrush, QColor, QPainter
 from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QVBoxLayout, QWidget,
 )
@@ -12,6 +13,32 @@ from widgets.summary.base import SummaryWidget, format_metrics
 
 
 _PILL_COLORS = ("#264653", "#2a9d8f", "#e76f51")
+
+
+class _PillLabel(QLabel):
+    """타원 (stadium) 모양 라벨 — paintEvent 직접 그림.
+
+    QSS border-radius 가 QLabel + padding 조합에서 부정확하게 그려지는 회귀
+    회피 (사용자 정책 2026-05-01). matplotlib FancyBboxPatch round 와 동일.
+    """
+
+    def __init__(self, text: str, bg_color: str, parent=None):
+        super().__init__(text, parent)
+        self._bg = QColor(bg_color)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setBrush(QBrush(self._bg))
+        painter.setPen(Qt.PenStyle.NoPen)
+        rect = self.rect()
+        # radius = height/2 → 양 끝 완전 반원 (stadium)
+        radius = rect.height() / 2
+        painter.drawRoundedRect(rect, radius, radius)
+        painter.end()
+        # QLabel 의 default paintEvent — 텍스트 그림 (autoFillBackground=False
+        # 라 background 안 덮어씀)
+        super().paintEvent(event)
 
 
 class SummaryPillBadge(SummaryWidget):
@@ -40,16 +67,13 @@ class SummaryPillBadge(SummaryWidget):
             col.setSpacing(0)
             col.setAlignment(Qt.AlignmentFlag.AlignHCenter)
             # pill 라벨 — QLabel 의 border-radius 로 둥근 모서리
-            pill = QLabel(h)
+            # _PillLabel — paintEvent 로 stadium 직접 그림 (QSS border-radius
+            # 부정확 회피, 사용자 정책 2026-05-01).
+            pill = _PillLabel(h, _PILL_COLORS[i])
             pill.setAlignment(Qt.AlignmentFlag.AlignCenter)
             pill.setFixedHeight(pill_h)
-            # WA_StyledBackground + 큰 radius → 양 끝 완전 반원 stadium 모양
-            # (사용자 정책 2026-05-01, 직사각 corner 회귀 fix).
-            pill.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
             pill.setStyleSheet(
                 f"color: white; font-size: {lbl_px}px; font-weight: bold;"
-                f" background-color: {_PILL_COLORS[i]};"
-                f" border-radius: {pill_h // 2}px;"
                 " padding-left: 6px; padding-right: 6px;"
             )
             # 가운데 위치 — 좌우 stretch
