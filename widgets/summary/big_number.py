@@ -47,14 +47,12 @@ class SummaryBigNumber(SummaryWidget):
             lbl = QLabel(" ".join(h.upper()))
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl.setStyleSheet(
-                f"QLabel {{ color: #6c757d; font-size: {lbl_px}px;"
-                " font-weight: bold; background-color: transparent; }}"
+                f"color: #6c757d; font-size: {lbl_px}px; font-weight: bold;"
             )
             val = QLabel("—")
             val.setAlignment(Qt.AlignmentFlag.AlignCenter)
             val.setStyleSheet(
-                f"QLabel {{ color: #111111; font-size: {val_px}px;"
-                " font-weight: bold; background-color: transparent; }}"
+                f"color: #111111; font-size: {val_px}px; font-weight: bold;"
             )
             # 라벨+값 세로 중앙 정렬 — 위/아래 stretch 균등 (사용자 정책 2026-04-30,
             # 표 아래쪽 치우침 fix)

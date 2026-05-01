@@ -41,14 +41,12 @@ class SummaryStatTiles(SummaryWidget):
             val = QLabel("—")
             val.setAlignment(Qt.AlignmentFlag.AlignCenter)
             val.setStyleSheet(
-                f"QLabel {{ color: #1f3a5f; font-size: {val_px}px; font-weight: bold;"
-                " background-color: transparent; }}"
+                f"color: #1f3a5f; font-size: {val_px}px; font-weight: bold;"
             )
             lbl = QLabel(h)
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl.setStyleSheet(
-                f"QLabel {{ color: #666; font-size: {lbl_px}px;"
-                " background-color: transparent; }}"
+                f"color: #666666; font-size: {lbl_px}px;"
             )
             v.addWidget(val)
             v.addWidget(lbl)

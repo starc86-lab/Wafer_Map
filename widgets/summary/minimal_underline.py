@@ -34,20 +34,18 @@ class SummaryMinimalUnderline(SummaryWidget):
         self._values: list[QLabel] = []
         for h in self.HEADERS:
             col_w = QWidget()
-            col_w.setStyleSheet("background: transparent;")
             col = QVBoxLayout(col_w)
             col.setContentsMargins(2, 0, 2, 0)
             col.setSpacing(0)
             lbl = QLabel(h)
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl.setStyleSheet(
-                f"QLabel {{ color: #999; font-size: {lbl_px}px; background: transparent; }}"
+                f"color: #999999; font-size: {lbl_px}px;"
             )
             val = QLabel("—")
             val.setAlignment(Qt.AlignmentFlag.AlignCenter)
             val.setStyleSheet(
-                f"QLabel {{ color: #111; font-size: {val_px}px; font-weight: bold;"
-                " background: transparent; }}"
+                f"color: #111111; font-size: {val_px}px; font-weight: bold;"
             )
             ul = QFrame()
             ul.setFixedHeight(2)

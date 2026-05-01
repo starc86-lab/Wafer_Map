@@ -37,7 +37,6 @@ class SummaryPillBadge(SummaryWidget):
         self._values: list[QLabel] = []
         for i, h in enumerate(self.HEADERS):
             col_w = QWidget()
-            col_w.setStyleSheet("background: transparent;")
             col = QVBoxLayout(col_w)
             col.setContentsMargins(2, 0, 2, 0)
             col.setSpacing(0)
@@ -61,8 +60,7 @@ class SummaryPillBadge(SummaryWidget):
             val = QLabel("—")
             val.setAlignment(Qt.AlignmentFlag.AlignCenter)
             val.setStyleSheet(
-                f"QLabel {{ color: #111; font-size: {val_px}px; font-weight: bold;"
-                " background: transparent; }}"
+                f"color: #111111; font-size: {val_px}px; font-weight: bold;"
             )
             col.addWidget(val)
             outer.addWidget(col_w, stretch=1)

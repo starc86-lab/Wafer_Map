@@ -44,12 +44,11 @@ class SummaryHighlightLead(SummaryWidget):
         left.setSpacing(0)
         self._mean_lbl = QLabel("Mean")
         self._mean_lbl.setStyleSheet(
-            f"QLabel {{ color: #666; font-size: {lbl_px}px; background: transparent; }}"
+            f"color: #666666; font-size: {lbl_px}px;"
         )
         self._mean_val = QLabel("—")
         self._mean_val.setStyleSheet(
-            f"QLabel {{ color: #111; font-size: {mean_px}px; font-weight: bold;"
-            " background: transparent; }}"
+            f"color: #111111; font-size: {mean_px}px; font-weight: bold;"
         )
         left.addWidget(self._mean_lbl)
         left.addWidget(self._mean_val)
@@ -74,13 +73,12 @@ class SummaryHighlightLead(SummaryWidget):
             l = QLabel(name)
             l.setAlignment(Qt.AlignmentFlag.AlignCenter)
             l.setStyleSheet(
-                f"QLabel {{ color: #666; font-size: {lbl_px}px; background: transparent; }}"
+                f"color: #666666; font-size: {lbl_px}px;"
             )
             v = QLabel("—")
             v.setAlignment(Qt.AlignmentFlag.AlignCenter)
             v.setStyleSheet(
-                f"QLabel {{ color: #111; font-size: {val_px}px; font-weight: bold;"
-                " background: transparent; }}"
+                f"color: #111111; font-size: {val_px}px; font-weight: bold;"
             )
             col.addWidget(l)
             col.addWidget(v)

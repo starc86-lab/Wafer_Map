@@ -35,20 +35,18 @@ class SummaryColorFooter(SummaryWidget):
         self._values: list[QLabel] = []
         for i, h in enumerate(self.HEADERS):
             col_w = QWidget()
-            col_w.setStyleSheet("background: transparent;")
             col = QVBoxLayout(col_w)
             col.setContentsMargins(0, 1, 0, 0)
             col.setSpacing(0)
             val = QLabel("—")
             val.setAlignment(Qt.AlignmentFlag.AlignCenter)
             val.setStyleSheet(
-                f"QLabel {{ color: #111; font-size: {val_px}px; font-weight: bold;"
-                " background: transparent; }}"
+                f"color: #111111; font-size: {val_px}px; font-weight: bold;"
             )
             lbl = QLabel(h)
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl.setStyleSheet(
-                f"QLabel {{ color: #666; font-size: {lbl_px}px; background: transparent; }}"
+                f"color: #666666; font-size: {lbl_px}px;"
             )
             footer = QFrame()
             footer.setFixedHeight(3)
