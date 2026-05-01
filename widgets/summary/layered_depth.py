@@ -45,7 +45,7 @@ class SummaryLayeredDepth(SummaryWidget):
             val = QLabel("—")
             val.setAlignment(Qt.AlignmentFlag.AlignCenter)
             val.setStyleSheet(
-                f"color: #111111; font-size: {val_px}px; font-weight: bold;"
+                f"color: #1f3a5f; font-size: {val_px}px; font-weight: bold;"
             )
             grid.addWidget(val, 1, c)
             self._values.append(val)
@@ -69,9 +69,9 @@ class SummaryLayeredDepth(SummaryWidget):
         painter.setBrush(QBrush(self._CARD))
         painter.setPen(QPen(self._BORDER, 0.8))
         painter.drawRoundedRect(rect, self._RADIUS, self._RADIUS)
-        # 컬럼 sep — 세로 70% 길이 (위/아래 15% 빈 공간), 사용자 정책 2026-05-01
+        # 컬럼 sep — 세로 75% 길이 (위/아래 12.5% 빈 공간), 사용자 정책 2026-05-01
         painter.setPen(QPen(QColor("#dee2e6"), 1))
-        margin_v = rect.height() * 0.15
+        margin_v = rect.height() * 0.125
         y0 = rect.top() + margin_v
         y1 = rect.bottom() - margin_v
         for k in (1, 2):
