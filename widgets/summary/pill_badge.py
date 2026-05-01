@@ -43,6 +43,9 @@ class SummaryPillBadge(SummaryWidget):
             pill = QLabel(h)
             pill.setAlignment(Qt.AlignmentFlag.AlignCenter)
             pill.setFixedHeight(pill_h)
+            # WA_StyledBackground + 큰 radius → 양 끝 완전 반원 stadium 모양
+            # (사용자 정책 2026-05-01, 직사각 corner 회귀 fix).
+            pill.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
             pill.setStyleSheet(
                 f"color: white; font-size: {lbl_px}px; font-weight: bold;"
                 f" background-color: {_PILL_COLORS[i]};"
