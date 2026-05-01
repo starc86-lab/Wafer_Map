@@ -669,8 +669,8 @@ class WaferCell(QFrame):
         # FONT_SIZES['body']는 font_scale 반영된 값이라 +4도 스케일 따라감.
         title_px = FONT_SIZES.get("body", 14) + 3
         self._title.setStyleSheet(
-            f"font-weight: bold; color: #111; font-size: {title_px}px;"
-            "background: transparent;"
+            f"font-weight: bold; color: #111111; font-size: {title_px}px;"
+            " background-color: transparent;"
         )
         self._title.move(0, 0)  # title_stack 내 상단 pin
 
@@ -1030,7 +1030,7 @@ class WaferCell(QFrame):
         from core.themes import FONT_SIZES
         _title_px = FONT_SIZES.get("body", 14) + 3
         self._title.setStyleSheet(
-            f"font-weight: bold; color: #111; font-size: {_title_px}px;"
+            f"font-weight: bold; color: #111111; font-size: {_title_px}px;"
         )
         # er_row 내 위젯 폰트 재적용 — Settings 글자크기 변경 시 따라감.
         # - chk_apply_all: 전역 QSS 가 small 이라 body 강제
