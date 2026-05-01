@@ -106,21 +106,34 @@ def _populate_two_columns(group: QGroupBox, items: list[tuple[str, QWidget]]) ->
 
 
 def apply_global_style(app: QApplication, settings: dict[str, Any]) -> None:
+    import os, time
+    bench = bool(os.environ.get("WAFERMAP_BENCH"))
+    t0 = time.perf_counter() if bench else 0.0
+
     theme_name = settings.get("theme", "Light")
     font_name = settings.get("font", "Segoe UI")
     scale = float(settings.get("font_scale", 1.0) or 1.0)
 
     theme = THEMES.get(theme_name, THEMES["Light"])
 
-    # BASE_FONT_SIZES 에서 scale 적용해 FONT_SIZES 영구 갱신 — 이후 FONT_SIZES 를
-    # 읽는 모든 코드 (차트 제목, 컬러바, 1D 축 폰트 등) 가 현재 scale 반영된 값
-    # 을 얻음. 이전엔 QSS 빌드 직후 원복해 연동 안 됐음.
     scaled = {k: max(8, int(round(v * scale))) for k, v in BASE_FONT_SIZES.items()}
     FONT_SIZES.clear()
     FONT_SIZES.update(scaled)
+    if bench:
+        t1 = time.perf_counter()
     qss = build_stylesheet(theme, font_name)
+    if bench:
+        t2 = time.perf_counter()
 
     app.setStyleSheet(qss)
+    if bench:
+        t3 = time.perf_counter()
+        import sys
+        sys.stderr.write(
+            f"  [bench global] FONT_SIZES={1000*(t1-t0):.1f}ms  "
+            f"build_stylesheet={1000*(t2-t1):.1f}ms  "
+            f"setStyleSheet={1000*(t3-t2):.1f}ms\n"
+        )
 
 
 def _fix_width(widget: QWidget, px: int = FIELD_WIDTH) -> QWidget:
