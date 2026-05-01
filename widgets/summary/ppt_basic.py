@@ -30,11 +30,12 @@ class _PPTSummaryDelegate(QStyledItemDelegate):
         painter.fillRect(option.rect, bg)
         text = index.data(Qt.ItemDataRole.DisplayRole)
         if text is not None:
-            font = index.data(Qt.ItemDataRole.FontRole) or painter.font()
-            # 사용자 정책 2026-05-01 — 폰트 -1px
-            ps = font.pixelSize()
-            if ps > 0:
-                font.setPixelSize(max(8, ps - 1))
+            from PySide6.QtGui import QFont
+            from core.themes import FONT_SIZES
+            # 매 cell 마다 절대값 set — painter.font() sticky 누적 회피
+            # (사용자 정책 2026-05-01, 폰트 -1px).
+            font = QFont(painter.font())
+            font.setPixelSize(max(8, int(FONT_SIZES.get("body", 14)) - 1))
             painter.setFont(font)
             painter.setPen(self.TEXT)
             painter.drawText(option.rect, Qt.AlignmentFlag.AlignCenter, str(text))

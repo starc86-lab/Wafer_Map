@@ -21,9 +21,7 @@ class SummaryPillBadge(SummaryWidget):
         super().__init__(parent)
         # 흰색 고정 — selector 없는 단순 properties + WA_StyledBackground.
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setStyleSheet(
-            "background-color: white; border: 1px solid #888888;"
-        )
+        self.setStyleSheet("background-color: white;")
         outer = QHBoxLayout(self)
         outer.setContentsMargins(2, 1, 2, 1)
         outer.setSpacing(0)

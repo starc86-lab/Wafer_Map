@@ -20,9 +20,7 @@ class SummaryMinimalUnderline(SummaryWidget):
         # 흰색 고정 — 테마 (다크 등) 영향 차단. selector 없는 단순 properties
         # (background-color 는 cascade 안 되니 child 영향 X).
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setStyleSheet(
-            "background-color: white; border: 1px solid #888888;"
-        )
+        self.setStyleSheet("background-color: white;")
         outer = QHBoxLayout(self)
         outer.setContentsMargins(2, 1, 2, 1)
         outer.setSpacing(0)

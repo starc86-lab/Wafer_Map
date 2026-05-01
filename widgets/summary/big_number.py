@@ -22,9 +22,7 @@ class SummaryBigNumber(SummaryWidget):
         super().__init__(parent)
         # 외곽 가는 테두리 + WA_StyledBackground
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setStyleSheet(
-            "background-color: white; border: 1px solid #888888;"
-        )
+        self.setStyleSheet("background-color: white;")
         outer = QHBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
