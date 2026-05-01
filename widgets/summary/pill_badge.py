@@ -68,9 +68,16 @@ class SummaryPillBadge(SummaryWidget):
         _base = int(FONT_SIZES.get("body", 14))
         lbl_px = max(9, _base - 3)
         val_px = _base + 1
-        # pill 높이 — 폰트 + 충분한 padding 으로 비율 정원 가깝게 (사용자 정책
-        # 2026-05-01, 직사각형 stadium 회피).
         pill_h = lbl_px + 8
+
+        # 모든 pill 가로폭 동일 — 가장 긴 라벨 ("Non Unif.") 기준 max width
+        # (사용자 정책 2026-05-01).
+        from PySide6.QtGui import QFontMetrics, QFont as _QFont
+        _f = _QFont()
+        _f.setPixelSize(lbl_px)
+        _f.setBold(True)
+        _fm = QFontMetrics(_f)
+        pill_w = max(_fm.horizontalAdvance(name) for name in self.HEADERS) + 16
 
         self._values: list[QLabel] = []
         for i, h in enumerate(self.HEADERS):
@@ -83,14 +90,8 @@ class SummaryPillBadge(SummaryWidget):
             # _PillLabel — QWidget paintEvent 로 stadium + 텍스트 직접 그림
             # (QSS 간섭 없이, 사용자 정책 2026-05-01).
             pill = _PillLabel(h, _PILL_COLORS[i], lbl_px)
-            pill.setFixedHeight(pill_h)
-            # 텍스트 fit 위해 minimum width 보장 (텍스트 width + padding 12)
-            from PySide6.QtGui import QFontMetrics, QFont as _QFont
-            _f = _QFont()
-            _f.setPixelSize(lbl_px)
-            _f.setBold(True)
-            _fm = QFontMetrics(_f)
-            pill.setMinimumWidth(_fm.horizontalAdvance(h) + 16)
+            # 모든 pill 동일 size (max 라벨 기준)
+            pill.setFixedSize(pill_w, pill_h)
             # 가운데 위치 — 좌우 stretch
             pill_row = QHBoxLayout()
             pill_row.setContentsMargins(0, 0, 0, 0)
