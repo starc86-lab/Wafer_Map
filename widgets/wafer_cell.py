@@ -975,9 +975,9 @@ class WaferCell(QFrame):
             # 라벨 width 5 (max "Range") fit. Mean/Range/N.U 동일 column 에서
             # 값 시작. monospace 폰트라 char 폭 동일.
             text = (
-                f"Mean   {avg_s}\n"
-                f"Range  {range_s}\n"
-                f"N.U    {nu_s}"
+                f"Mean  {avg_s}\n"
+                f"Range {range_s}\n"
+                f"N.U   {nu_s}"
             )
             title_geo = self._title.geometry()
             overlay_y = title_geo.y() + title_geo.height() + 4
