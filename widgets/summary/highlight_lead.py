@@ -55,10 +55,14 @@ class SummaryHighlightLead(SummaryWidget):
         left.addWidget(self._mean_val)
         outer.addLayout(left, stretch=2)
 
-        # 세퍼레이터
+        # 세퍼레이터 — Plain shadow 로 single line (default Sunken 은 이중선,
+        # 사용자 정책 2026-05-01 fix)
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.VLine)
-        sep.setStyleSheet("QFrame { color: #dee2e6; }")
+        sep.setFrameShadow(QFrame.Shadow.Plain)
+        sep.setLineWidth(1)
+        sep.setFixedWidth(1)
+        sep.setStyleSheet("QFrame { color: #dee2e6; background-color: #dee2e6; }")
         outer.addWidget(sep)
 
         # 우측 보조 (Range, NU)

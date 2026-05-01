@@ -60,11 +60,16 @@ class SummaryColorFooter(SummaryWidget):
             col.addWidget(footer)
             outer.addWidget(col_w, stretch=1)
             self._values.append(val)
-            # 세퍼레이터 (마지막 제외)
+            # 세퍼레이터 — Plain shadow 로 single line (사용자 정책 2026-05-01 fix)
             if i < len(self.HEADERS) - 1:
                 sep = QFrame()
                 sep.setFrameShape(QFrame.Shape.VLine)
-                sep.setStyleSheet("QFrame { color: #dee2e6; }")
+                sep.setFrameShadow(QFrame.Shadow.Plain)
+                sep.setLineWidth(1)
+                sep.setFixedWidth(1)
+                sep.setStyleSheet(
+                    "QFrame { color: #dee2e6; background-color: #dee2e6; }"
+                )
                 outer.addWidget(sep)
 
     def update_metrics(self, metrics, decimals, percent_suffix=True):
