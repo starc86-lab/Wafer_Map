@@ -197,13 +197,24 @@ class UiSettingsCard(QGroupBox):
         if idx >= 0:
             self.cb_table_style.setCurrentIndex(idx)
 
-        # 좌측 [테마, 윈도우 크기 저장, 표 스타일], 우측 [글꼴, 글자 크기]
+        # UI 모드 (해상도 scale) — 사용자 정책 2026-05-01. 변경 시 재시작 필요.
+        from core.themes import UI_MODES, UI_MODE_DISPLAY
+        self.cb_ui_mode = _limit_width(QComboBox())
+        for key in UI_MODES:
+            self.cb_ui_mode.addItem(UI_MODE_DISPLAY.get(key, key), key)
+        cur_mode = settings.get("ui_mode", "auto")
+        idx = self.cb_ui_mode.findData(cur_mode)
+        if idx >= 0:
+            self.cb_ui_mode.setCurrentIndex(idx)
+
+        # 좌: [테마, 윈도우 크기 저장, 표 스타일], 우: [글꼴, 글자 크기, UI 모드]
         _populate_two_columns(self, [
             ("테마", self.cb_theme),
             ("윈도우 크기 저장", self.chk_save_window),
             ("표 스타일", self.cb_table_style),
             ("글꼴", self.cb_font),
             ("글자 크기", self.cb_scale),
+            ("UI 모드 (재시작)", self.cb_ui_mode),
         ])
 
         # 즉시 적용
@@ -215,6 +226,8 @@ class UiSettingsCard(QGroupBox):
         self.cb_table_style.currentIndexChanged.connect(
             lambda: self.table_style_changed.emit(self.cb_table_style.currentData())
         )
+        # ui_mode 도 changed (cache 갱신만 — 재시작 후 적용, 사용자 정책 2026-05-01)
+        self.cb_ui_mode.currentIndexChanged.connect(self.changed)
 
     def gather(self) -> dict[str, Any]:
         return {
@@ -223,6 +236,7 @@ class UiSettingsCard(QGroupBox):
             "font_scale": float(self.cb_scale.currentData()),
             "window_save_enabled": self.chk_save_window.isChecked(),
             "table": {"style": self.cb_table_style.currentData()},
+            "ui_mode": self.cb_ui_mode.currentData(),
         }
 
     def reload(self, settings: dict[str, Any]) -> None:

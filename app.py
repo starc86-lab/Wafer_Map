@@ -22,6 +22,45 @@ warnings.filterwarnings(
     module=r"pyqtgraph\.opengl\.MeshData",
 )
 
+# ────────────────────────────────────────────────────────────────
+# UI scale (QHD/FHD/UHD) — QApplication 인스턴스 전 적용 필수.
+# QT_SCALE_FACTOR 환경변수로 모든 widget / 폰트 / pixmap 일괄 비례.
+# 사용자 정책 2026-05-01.
+# ────────────────────────────────────────────────────────────────
+def _apply_ui_scale() -> None:
+    import os
+    from core import settings as _settings_io
+    from core.themes import UI_MODE_SCALE
+    s = _settings_io.load_settings()
+    mode = str(s.get("ui_mode", "auto") or "auto")
+    if mode == "auto":
+        # tkinter 로 primary monitor 가로 측정 (QApplication 와 독립)
+        sw = 2560  # default = QHD
+        try:
+            import tkinter
+            r = tkinter.Tk()
+            r.withdraw()
+            sw = int(r.winfo_screenwidth())
+            r.destroy()
+        except Exception:
+            pass
+        if sw < 2400:
+            scale = UI_MODE_SCALE["FHD"]
+        elif sw < 3200:
+            scale = UI_MODE_SCALE["QHD"]
+        else:
+            scale = UI_MODE_SCALE["UHD"]
+    elif mode in UI_MODE_SCALE:
+        scale = UI_MODE_SCALE[mode]
+    else:
+        scale = 1.0
+    if scale != 1.0:
+        os.environ["QT_SCALE_FACTOR"] = str(scale)
+
+
+_apply_ui_scale()
+
+
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QGuiApplication, QSurfaceFormat
 from PySide6.QtWidgets import QApplication

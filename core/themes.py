@@ -287,11 +287,22 @@ BASE_FONT_SIZES = dict(FONT_SIZES)
 # 앱 전체 기본 설정 (settings.json 없거나 누락 키 채움용)
 # 새 키 추가 시 반드시 여기에 등록 → settings 로드 시 merge.
 # ────────────────────────────────────────────────────────────────
+UI_MODES = ["auto", "FHD", "QHD", "UHD"]
+UI_MODE_DISPLAY = {
+    "auto": "Auto (자동 감지)",
+    "FHD": "FHD (×0.75)",
+    "QHD": "QHD (×1.0, 기본)",
+    "UHD": "UHD (×1.5)",
+}
+UI_MODE_SCALE = {"FHD": 0.75, "QHD": 1.0, "UHD": 1.5}
+
+
 DEFAULT_SETTINGS = {
     # UI
     "theme": "Light",
     "font": "Segoe UI",
     "font_scale": 1.0,          # FONT_SIZES 전체 배율 (0.85 / 1.0 / 1.15 등)
+    "ui_mode": "auto",          # auto / FHD / QHD / UHD — Qt scale_factor 기반
 
     # r-symmetry mode — 메인 윈도우 체크박스 토글. **세션 휘발** (settings.json
     # 저장 안 함, 앱 재시작 시 항상 False). 정상 2D 데이터를 1D fitting 곡선의
