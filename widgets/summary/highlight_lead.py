@@ -24,12 +24,13 @@ class SummaryHighlightLead(SummaryWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        # font_scale 자동 비례 — 라벨 base-3 (=11), 값 base-2 (Range/NU 보조).
+        # font_scale 자동 비례 — 라벨 base-3 (=11), 모든 값 base+4 통일
+        # (사용자 정책 2026-05-01, Mean / Range / NU 동일 크기).
         from core.themes import FONT_SIZES
         _base = int(FONT_SIZES.get("body", 14))
         lbl_px = max(9, _base - 3)
-        val_px = max(10, _base - 2)
-        mean_px = _base + 4   # Mean 강조
+        val_px = _base + 4
+        mean_px = _base + 4
 
         # 좌측 색 띠
         strip = QFrame()
