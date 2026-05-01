@@ -514,6 +514,29 @@ def _dynamic_decimals(vmin: float, vmax: float, n_ticks: int = 5) -> int:
     return min(max(needed, bucket), 3)
 
 
+class _CaptureFrame(QFrame):
+    """Copy Graph capture container — paintEvent 직접 흰 배경 + 1px border.
+
+    QSS border 가 widget.grab() 시 좌우 비대칭 렌더 (좌측 두꺼움 / 우측 라인
+    없음) 회귀 회피 (사용자 정책 2026-05-01).
+    """
+
+    _BORDER = QColor("#bfbfbf")
+    _BG = QColor("#ffffff")
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        rect = self.rect()
+        # 흰 배경
+        painter.fillRect(rect, self._BG)
+        # 1px border — drawRect 가 widget rect 안 정확. adjusted(0,0,-1,-1) 로
+        # right/bottom 픽셀 cut-off 회피
+        painter.setPen(QPen(self._BORDER, 1))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRect(rect.adjusted(0, 0, -1, -1))
+        painter.end()
+
+
 class WaferCell(QFrame):
     """2D heatmap + 4행×2열 Summary 표. 컨테이너 grab → Copy Graph 합성 이미지.
 
@@ -548,13 +571,11 @@ class WaferCell(QFrame):
         outer_lay.setSpacing(2)
 
         # ───── _capture_container (Copy Graph 대상) ─────
-        # 기존 WaferCell 이 갖던 border/배경/내용을 이 컨테이너로 이동.
-        self._capture_container = QFrame()
+        # QSS border 가 grab 시 좌우 비대칭 (좌측 두꺼움 / 우측 라인 없음) 회귀 →
+        # _CaptureFrame.paintEvent 에서 흰 배경 + 1px border 직접 그림 (사용자
+        # 정책 2026-05-01).
+        self._capture_container = _CaptureFrame()
         self._capture_container.setObjectName("waferCell")
-        self._capture_container.setFrameShape(QFrame.Shape.NoFrame)
-        self._capture_container.setStyleSheet(
-            "#waferCell { background-color: white; border: 1px solid #bfbfbf; }"
-        )
         outer_lay.addWidget(self._capture_container)
 
         # ───── er_row (캡처 영역 밖, 셀 하단) — 2 row ─────
