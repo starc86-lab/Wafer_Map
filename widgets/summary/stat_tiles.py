@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget,
 )
 
-from widgets.summary.base import SummaryWidget, format_metrics
+from widgets.summary.base import SummaryWidget, font_px, format_metrics
 
 
 class SummaryStatTiles(SummaryWidget):
@@ -22,6 +22,12 @@ class SummaryStatTiles(SummaryWidget):
         outer = QHBoxLayout(self)
         outer.setContentsMargins(2, 1, 2, 1)
         outer.setSpacing(4)
+
+        # font_px 로 font_scale 자동 비례. 라벨 base-3 (=11), 값 base (=14).
+        from core.themes import FONT_SIZES
+        _base = int(FONT_SIZES.get("body", 14))
+        val_px = _base
+        lbl_px = max(9, _base - 3)
 
         self._values: list[QLabel] = []
         for h in self.HEADERS:
@@ -35,13 +41,14 @@ class SummaryStatTiles(SummaryWidget):
             val = QLabel("—")
             val.setAlignment(Qt.AlignmentFlag.AlignCenter)
             val.setStyleSheet(
-                "QLabel { color: #1f3a5f; font-size: 14px; font-weight: bold;"
-                " background-color: transparent; }"
+                f"QLabel {{ color: #1f3a5f; font-size: {val_px}px; font-weight: bold;"
+                " background-color: transparent; }}"
             )
             lbl = QLabel(h)
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl.setStyleSheet(
-                "QLabel { color: #666; font-size: 9px; background-color: transparent; }"
+                f"QLabel {{ color: #666; font-size: {lbl_px}px;"
+                " background-color: transparent; }}"
             )
             v.addWidget(val)
             v.addWidget(lbl)
