@@ -19,6 +19,11 @@ class SummaryPillBadge(SummaryWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        # 흰색 고정 — 테마 (다크 등) 영향 차단 (사용자 정책 2026-05-01).
+        self.setStyleSheet(
+            "SummaryPillBadge { background-color: white;"
+            " border: 1px solid #888888; }"
+        )
         outer = QHBoxLayout(self)
         outer.setContentsMargins(2, 1, 2, 1)
         outer.setSpacing(0)
@@ -32,6 +37,7 @@ class SummaryPillBadge(SummaryWidget):
         self._values: list[QLabel] = []
         for i, h in enumerate(self.HEADERS):
             col_w = QWidget()
+            col_w.setStyleSheet("background: transparent;")
             col = QVBoxLayout(col_w)
             col.setContentsMargins(2, 0, 2, 0)
             col.setSpacing(0)

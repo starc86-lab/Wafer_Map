@@ -35,6 +35,7 @@ class SummaryColorFooter(SummaryWidget):
         self._values: list[QLabel] = []
         for i, h in enumerate(self.HEADERS):
             col_w = QWidget()
+            col_w.setStyleSheet("background: transparent;")
             col = QVBoxLayout(col_w)
             col.setContentsMargins(0, 1, 0, 0)
             col.setSpacing(0)
