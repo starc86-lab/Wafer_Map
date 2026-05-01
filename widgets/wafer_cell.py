@@ -1674,6 +1674,9 @@ class WaferCell(QFrame):
         decimals = int(common.get("decimals", tbl_cfg.get("decimals", 2)))
         percent_suffix = bool(tbl_cfg.get("nu_percent_suffix", True))
         m = summary_metrics(v)
+        # _summary 가 copy_table_data 에서 사용할 last_metrics 보관 (사용자 정책
+        # 2026-05-01, 자유 layout Copy Table stale fix).
+        self._summary._last_metrics = (dict(m), int(decimals), bool(percent_suffix))
         # font_scale 갱신 — stylesheet 박제 style 도 매 update 시 새 FONT_SIZES
         # 반영 (사용자 정책 2026-05-01, ui_changed 후 swap 없이 reapply).
         self._summary.apply_fonts()
@@ -1858,13 +1861,12 @@ class WaferCell(QFrame):
         QApplication.clipboard().setText("\n".join(lines))
 
     def _copy_table(self) -> None:
-        rows: list[list[str]] = []
-        for r in range(self._table.rowCount()):
-            row_cells: list[str] = []
-            for c in range(self._table.columnCount()):
-                it = self._table.item(r, c)
-                row_cells.append(it.text() if it else "")
-            rows.append(row_cells)
+        # 자유 layout style 도 지원 — _summary.copy_table_data() 위임.
+        # _TableSummary 는 _table 직접 읽음, 자유 layout 은 _last_metrics 사용
+        # (사용자 정책 2026-05-01, Copy Table stale 회귀 fix).
+        rows = self._summary.copy_table_data()
+        if not rows:
+            return
         tsv = "\n".join("\t".join(r) for r in rows)
         html_rows = "".join(
             "<tr>" + "".join(f"<td>{c}</td>" for c in row) + "</tr>" for row in rows

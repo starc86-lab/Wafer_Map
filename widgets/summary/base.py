@@ -105,6 +105,20 @@ class SummaryWidget(QWidget):
     ) -> None:
         raise NotImplementedError
 
+    def copy_table_data(self) -> list[list[str]]:
+        """Copy Table 결과 — 2D string grid. wafer_cell._copy_table 이 호출.
+
+        Default: 3 col × 2 row (Mean / Range / Non Unif. header + values).
+        wafer_cell 이 update 직전 self._last_metrics 를 직접 set.
+        QTableWidget 베이스 (_TableSummary) 는 자체 _table 에서 읽어 override.
+        사용자 정책 2026-05-01 — 자유 layout 의 Copy Table stale 회귀 fix.
+        """
+        m = getattr(self, "_last_metrics", None)
+        if m is None:
+            return [["Mean", "Range", "Non Unif."], ["—", "—", "—"]]
+        avg, range_v, nu = format_metrics(*m)
+        return [["Mean", "Range", "Non Unif."], [avg, range_v, nu]]
+
     def set_target_width(self, w: int) -> None:
         """wafer_cell 의 _apply_chart_size 에서 호출. setFixedWidth 디폴트."""
         self.setFixedWidth(w)
@@ -236,3 +250,14 @@ class _TableSummary(SummaryWidget):
 
     def context_menu_target(self) -> "QWidget":
         return self._table
+
+    def copy_table_data(self) -> list[list[str]]:
+        """_table 의 row × col 직접 읽기 (vertical_stack 의 2×3 등 자기 layout)."""
+        rows: list[list[str]] = []
+        for r in range(self._table.rowCount()):
+            cells: list[str] = []
+            for c in range(self._table.columnCount()):
+                it = self._table.item(r, c)
+                cells.append(it.text() if it is not None else "")
+            rows.append(cells)
+        return rows

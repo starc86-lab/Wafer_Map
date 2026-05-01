@@ -154,12 +154,21 @@ class ResultPanel(QWidget):
         """font_scale 변경 시 — swap 없이 _summary.apply_fonts + cell layout reflow.
         set_table_style 의 위젯 재 init 비용 회피 (사용자 정책 2026-05-01,
         scope 2 fix #2).
+
+        ensurePolished 로 stylesheet 즉시 동기 + viewport update 로 paint 강제
+        (사용자 정책 2026-05-01, 폰트 1단계 stale 회귀 fix).
         """
         from core import settings as settings_io
         common = settings_io.load_settings().get("chart_common", {})
         for c in self._cells:
             c._summary.apply_fonts()
+            c._summary.ensurePolished()
             c._apply_chart_size(common)
+            # paint 강제 — stylesheet 변경 후 새 폰트 즉시 반영
+            c._summary.update()
+            tbl = getattr(c._summary, "_table", None)
+            if tbl is not None and tbl is not c._summary:
+                tbl.viewport().update()
 
     def refresh_all(self) -> None:
         """Settings 변경 시 — 모든 cell 렌더 캐시 reset + 보간 병렬 prefetch.
