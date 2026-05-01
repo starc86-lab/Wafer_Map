@@ -1838,6 +1838,24 @@ class WaferCell(QFrame):
         # 를 사용하는 회귀 가능 (사용자 정책 2026-05-01, 좌우 비대칭 fix).
         pm = cap.grab(QRect(0, 0, cap.width(), cap.height()))
 
+        # 임시 진단 — Copy Graph 좌우 비대칭 추적 (사용자 정책 2026-05-01)
+        import os, sys
+        if os.environ.get("WAFERMAP_BENCH"):
+            sys.stderr.write(
+                f"[bench grab] cap.size=({cap.width()},{cap.height()})  "
+                f"pm.size=({pm.width()},{pm.height()})  "
+                f"dpr={cap.devicePixelRatioF():.3f}  "
+                f"pm.dpr={pm.devicePixelRatio():.3f}\n"
+            )
+            try:
+                from pathlib import Path as _P
+                _dbg = _P(__file__).resolve().parent.parent / "debug"
+                _dbg.mkdir(exist_ok=True)
+                pm.save(str(_dbg / "cap_grab.png"))
+                sys.stderr.write(f"  saved: {_dbg / 'cap_grab.png'}\n")
+            except Exception as _e:
+                sys.stderr.write(f"  save failed: {_e}\n")
+
         # 2. GL widget FBO offscreen 렌더 (MSAA 4x, scale=1)
         chart = self._chart_widget
         gl_img = _capture_gl_offscreen(chart, scale=1) if chart is not None else QImage()
