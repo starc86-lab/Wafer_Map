@@ -689,24 +689,6 @@ class WaferCell(QFrame):
 
         self._colorbar = _ColorBar(self._chart_box)   # chart_box 의 overlay 자식
 
-        # No Table style 용 chart overlay 라벨 — 좌상단 Mean / NU 표시 (사용자
-        # 정책 2026-04-30, 표 사라진 만큼 cell 세로 감소 + 간단출력 모드).
-        # 다른 style 에서는 hidden. parent=chart_area 로 chart 위에 floating.
-        self._chart_overlay_avg = QLabel(self._chart_area)
-        self._chart_overlay_avg.setStyleSheet(
-            "color: #111111; font-size: 11px; font-weight: bold;"
-            " background-color: rgba(255, 255, 255, 200);"
-            " padding-left: 4px; padding-right: 4px;"
-        )
-        self._chart_overlay_avg.setVisible(False)
-        self._chart_overlay_nu = QLabel(self._chart_area)
-        self._chart_overlay_nu.setStyleSheet(
-            "color: #111111; font-size: 11px; font-weight: bold;"
-            " background-color: rgba(255, 255, 255, 200);"
-            " padding-left: 4px; padding-right: 4px;"
-        )
-        self._chart_overlay_nu.setVisible(False)
-
         # chart_box 는 title_stack 의 자식 → capture_container layout 에 별도 추가 안 함.
         # title_stack 이 이미 lay 에 있으므로 chart_box 도 자동 포함.
 
@@ -767,6 +749,26 @@ class WaferCell(QFrame):
             return b
         self._badge_2d = _make_badge(self._gl_2d)
         self._badge_3d = _make_badge(self._gl_3d)
+
+        # No Table style 용 chart overlay (Mean / N.U%) — GL widget 자식으로
+        # 양쪽 한 쌍씩 (badge 패턴). GL native window 위에 일반 QLabel 안 보이는
+        # 회귀 fix (사용자 정책 2026-05-01).
+        def _make_overlay(parent: QWidget) -> QLabel:
+            o = QLabel("", parent)
+            o.setStyleSheet(
+                "color: #111111; font-size: 11px; font-weight: bold;"
+                " background-color: rgba(255, 255, 255, 200);"
+                " padding-left: 4px; padding-right: 4px;"
+            )
+            o.hide()
+            return o
+        self._chart_overlay_avg_2d = _make_overlay(self._gl_2d)
+        self._chart_overlay_nu_2d = _make_overlay(self._gl_2d)
+        self._chart_overlay_avg_3d = _make_overlay(self._gl_3d)
+        self._chart_overlay_nu_3d = _make_overlay(self._gl_3d)
+        # 호환성 — 기존 코드의 _chart_overlay_avg/_nu 는 active view 의 alias
+        self._chart_overlay_avg = self._chart_overlay_avg_2d
+        self._chart_overlay_nu = self._chart_overlay_nu_2d
 
         # 1D Radial Graph — 2D/3D 그래프와 Summary 표 사이. 체크 시에만 보임.
         # X: r (-5~155 표시, 눈금 0/50/100/150), Y: 실측 min/max 기반.
@@ -968,27 +970,33 @@ class WaferCell(QFrame):
         # 다행 위젯 (vertical_stack 등) 이 reserved 안에 fit 되도록 후처리.
         # default no-op — style 별 override (사용자 정책 2026-04-30).
         self._summary.fit_to_height(SUMMARY_RESERVED_H)
-        # no_table 이면 summary 위젯 hidden, chart overlay 라벨 visible
+        # no_table 이면 summary 위젯 hidden, chart overlay 라벨 visible.
+        # 2D/3D GL widget 양쪽 자식 한 쌍씩 모두 동기 update (toggle 시 사라짐
+        # 회귀 fix, 사용자 정책 2026-05-01).
         self._summary.setVisible(not is_overlay_only)
-        self._chart_overlay_avg.setVisible(is_overlay_only)
-        self._chart_overlay_nu.setVisible(is_overlay_only)
+        for ov in (self._chart_overlay_avg_2d, self._chart_overlay_nu_2d,
+                    self._chart_overlay_avg_3d, self._chart_overlay_nu_3d):
+            ov.setVisible(is_overlay_only)
         if is_overlay_only:
             avg_s, nu_s = self._summary.overlay_texts()
-            # ":" 제거, N.U% 의 nu 값에서 trailing % 제거 (라벨이 이미 % 단위)
             nu_clean = nu_s.rstrip("%") if isinstance(nu_s, str) else nu_s
-            self._chart_overlay_avg.setText(f"Mean {avg_s}")
-            self._chart_overlay_nu.setText(f"N.U% {nu_clean}")
-            self._chart_overlay_avg.adjustSize()
-            self._chart_overlay_nu.adjustSize()
-            # title 아래로 이동 — 차트 제목과 침범 회피 (사용자 정책 2026-05-01)
+            avg_text = f"Mean {avg_s}"
+            nu_text = f"N.U% {nu_clean}"
+            # title 아래 좌상단 — GL widget 좌표계라 (8, title_h + ?) 직접 사용
             title_geo = self._title.geometry()
             overlay_y = title_geo.y() + title_geo.height() + 4
-            self._chart_overlay_avg.move(8, overlay_y)
-            self._chart_overlay_nu.move(
-                8, overlay_y + self._chart_overlay_avg.height() + 2,
-            )
-            self._chart_overlay_avg.raise_()
-            self._chart_overlay_nu.raise_()
+            for avg_ov, nu_ov in (
+                (self._chart_overlay_avg_2d, self._chart_overlay_nu_2d),
+                (self._chart_overlay_avg_3d, self._chart_overlay_nu_3d),
+            ):
+                avg_ov.setText(avg_text)
+                nu_ov.setText(nu_text)
+                avg_ov.adjustSize()
+                nu_ov.adjustSize()
+                avg_ov.move(8, overlay_y)
+                nu_ov.move(8, overlay_y + avg_ov.height() + 2)
+                avg_ov.raise_()
+                nu_ov.raise_()
         table_h = SUMMARY_RESERVED_H
         cap_w = w + bar_w + 6 * 2              # inner margin 6+6
         cap_h = padding_top + title_h + h + radial_h + table_h + 6 * 2 + 4 * 2
@@ -1865,8 +1873,10 @@ class WaferCell(QFrame):
             b = getattr(self, badge_attr, None)
             if b is not None and b.isVisible():
                 overlays.append(b)
-        # No Table style 의 chart 좌상단 Mean / N.U% 라벨 (사용자 정책 2026-05-01)
-        for ov_attr in ("_chart_overlay_avg", "_chart_overlay_nu"):
+        # No Table style 의 chart 좌상단 Mean / N.U% 라벨 — 2D/3D 양쪽 자식 중
+        # active view 만 isVisible 이라 자동 필터링 (사용자 정책 2026-05-01)
+        for ov_attr in ("_chart_overlay_avg_2d", "_chart_overlay_nu_2d",
+                         "_chart_overlay_avg_3d", "_chart_overlay_nu_3d"):
             ov = getattr(self, ov_attr, None)
             if ov is not None and ov.isVisible():
                 overlays.append(ov)
