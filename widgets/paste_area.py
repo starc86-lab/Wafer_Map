@@ -4,22 +4,34 @@ Ctrl+V 페이스트 영역. 텍스트/표 두 뷰를 토글로 전환.
 - 입력 텍스트 변경 시 `parse_wafer_csv` 자동 호출 → 요약 라벨 업데이트
 - 파싱 성공 시 DataFrame을 QTableWidget 뷰에도 채움 (Table 버튼 활성)
 - 텍스트 뷰는 줄바꿈 OFF + 가로 스크롤바 (원본 행 구조 유지)
+
+Cell edit (사용자 정책 2026-05-03):
+- Table 모드에서 모든 cell 직접 edit 가능 (더블 클릭 / F2 / 키 입력)
+- multi-select + Del → 선택 cell 빈 값 (행/컬럼 유지)
+- 우클릭 → 선택 행/컬럼 자체 삭제
+- Ctrl+Z → snapshot 기반 undo
+- Edit 시 즉시 text 영역에도 양방향 sync + reparse
 """
 from __future__ import annotations
 
 import pandas as pd
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtGui import QAction, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QHBoxLayout, QHeaderView,
-    QLabel, QPlainTextEdit, QPushButton, QStackedWidget, QTableWidget,
+    QLabel, QMenu, QPlainTextEdit, QPushButton, QStackedWidget, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from core.input_summary import summarize
 from core.input_validation import validate
 from main import MissingColumnsError, ParseResult, _load_dataframe, parse_wafer_csv
+
+
+# Snapshot 기반 undo — 모든 변경 (cell edit / Del / 행·컬럼 삭제) 통합. csv text
+# 한 줄로 abstract 되니 command 종류별 분기 불필요.
+_UNDO_MAX = 100  # snapshot stack 한도 — 메모리 보호 (csv 텍스트 ~50KB × 100 = 5MB)
 
 
 # 헤더 버튼(Text/Table/Clear) 폭 + 사이 spacing — 메인 윈도우의 Run Analysis가
@@ -39,6 +51,13 @@ class PasteArea(QWidget):
         self._df: pd.DataFrame | None = None
         self._validation: list = []          # 마지막 input_validation 결과
         self._table_dirty = False  # df는 있는데 _fill_table 미실행 상태
+        # Cell edit / undo 상태 (사용자 정책 2026-05-03)
+        # _filling_table: _fill_table 진행 중 itemChanged 무시 (사용자 edit 만 trigger)
+        # _undo_stack: 변경 직전 csv text 누적 (Ctrl+Z 시 pop)
+        # _suppress_text_changed: editor.setPlainText 호출 시 _on_text_changed 중복 방지
+        self._filling_table: bool = False
+        self._undo_stack: list[str] = []
+        self._suppress_text_changed: bool = False
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(8, 8, 8, 8)
@@ -96,13 +115,58 @@ class PasteArea(QWidget):
         self._stacked.addWidget(self._editor)
 
         self._table = QTableWidget()
-        self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        # Cell edit 활성 (사용자 정책 2026-05-03):
+        # - 더블 클릭 / F2 / 일반 키 입력 → edit mode
+        # - 모든 cell editable (메타·헤더 포함). 필수 컬럼 깨지면 후속 파싱 단계에서
+        #   자동 에러 메시지로 안내. 사용자 자유도 제한 X
+        self._table.setEditTriggers(
+            QAbstractItemView.EditTrigger.DoubleClicked
+            | QAbstractItemView.EditTrigger.EditKeyPressed
+            | QAbstractItemView.EditTrigger.AnyKeyPressed,
+        )
+        # multi-select (Ctrl/Shift 클릭, 행/컬럼 헤더 클릭으로 단위 선택)
+        self._table.setSelectionMode(
+            QAbstractItemView.SelectionMode.ExtendedSelection,
+        )
+        self._table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectItems,
+        )
         self._table.setAlternatingRowColors(True)
         self._table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.ResizeToContents,
         )
+        # Cell edit → text 양방향 sync + reparse trigger
+        self._table.itemChanged.connect(self._on_item_changed)
+        # 우클릭 메뉴 — 선택 행/컬럼 자체 삭제
+        self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._table.customContextMenuRequested.connect(self._on_context_menu)
+        # 헤더 우클릭도 동일 메뉴 (행/컬럼 헤더 위에서 직접 삭제)
+        self._table.horizontalHeader().setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu,
+        )
+        self._table.horizontalHeader().customContextMenuRequested.connect(
+            self._on_header_context_menu_h,
+        )
+        self._table.verticalHeader().setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu,
+        )
+        self._table.verticalHeader().customContextMenuRequested.connect(
+            self._on_header_context_menu_v,
+        )
+        # Del 키 — 선택 cells 빈 값 (행/컬럼 유지)
+        del_act = QAction(self._table)
+        del_act.setShortcut(QKeySequence.StandardKey.Delete)
+        del_act.setShortcutContext(Qt.ShortcutContext.WidgetShortcut)
+        del_act.triggered.connect(self._on_delete_selection)
+        self._table.addAction(del_act)
+        # Ctrl+Z — snapshot 기반 undo
+        undo_act = QAction(self._table)
+        undo_act.setShortcut(QKeySequence.StandardKey.Undo)
+        undo_act.setShortcutContext(Qt.ShortcutContext.WidgetShortcut)
+        undo_act.triggered.connect(self._on_undo)
+        self._table.addAction(undo_act)
         # Table 뷰에서도 Ctrl+V 동작: 클립보드 → editor → 자동 파싱
         paste_act = QAction(self._table)
         paste_act.setShortcut(QKeySequence.StandardKey.Paste)
@@ -165,6 +229,10 @@ class PasteArea(QWidget):
         return self._editor.toPlainText()
 
     def _on_text_changed(self) -> None:
+        # _on_item_changed 가 reconstruct 한 텍스트를 editor 에 setPlainText 할 때
+        # textChanged 가 또 fire 되어 무한 reparse — guard
+        if self._suppress_text_changed:
+            return
         text = self._editor.toPlainText().strip()
         if not text:
             self._set_status(None, None, "— 입력 대기 —", "color: gray;")
@@ -248,9 +316,17 @@ class PasteArea(QWidget):
 
     def _fill_table(self, df: pd.DataFrame) -> None:
         # 채우는 동안 ResizeToContents 끔 — setItem마다 컬럼 측정 트리거 방지
+        # blockSignals — 사용자 edit 이 아닌 프로그램적 setItem 의 itemChanged 차단
+        # (사용자 정책 2026-05-03, cell edit fix loop 방지)
         header = self._table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        # current cell 보존 — clear() 가 currentItem 을 reset 시켜 Del 후 다음
+        # 방향키가 (0,0) 으로 가는 회귀 fix (사용자 정책 2026-05-03)
+        cur_row = self._table.currentRow()
+        cur_col = self._table.currentColumn()
         self._table.setUpdatesEnabled(False)
+        self._table.blockSignals(True)
+        self._filling_table = True
         try:
             self._table.clear()
             self._table.setRowCount(len(df))
@@ -264,5 +340,164 @@ class PasteArea(QWidget):
                     text = "" if pd.isna(v) else str(v)
                     self._table.setItem(r, c, QTableWidgetItem(text))
         finally:
+            self._filling_table = False
+            self._table.blockSignals(False)
             self._table.setUpdatesEnabled(True)
             header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        # current cell 복원 — clamp (행/컬럼 삭제로 size 줄었을 수 있음)
+        if cur_row >= 0 and cur_col >= 0:
+            r = min(cur_row, self._table.rowCount() - 1)
+            c = min(cur_col, self._table.columnCount() - 1)
+            if r >= 0 and c >= 0:
+                self._table.setCurrentCell(r, c)
+
+    # ── Cell edit / undo (사용자 정책 2026-05-03) ──────────
+    def _push_undo_snapshot(self) -> None:
+        """변경 직전 csv text 를 undo stack 에 push. 한도 초과 시 가장 오래된 것 drop."""
+        text = self._editor.toPlainText()
+        # 직전 snapshot 과 동일하면 push 안 함 (중복 방지)
+        if self._undo_stack and self._undo_stack[-1] == text:
+            return
+        self._undo_stack.append(text)
+        if len(self._undo_stack) > _UNDO_MAX:
+            self._undo_stack.pop(0)
+
+    def _table_to_csv_text(self) -> str:
+        """현재 QTableWidget 상태 → tab 구분 csv text 재구성.
+
+        tab 구분 채택 — cell 안에 콤마 들어있어도 escape 불필요 (tab 입력 어려움 + 측정 데이터에 거의 없음).
+        """
+        rows: list[str] = []
+        n_cols = self._table.columnCount()
+        # 헤더
+        headers = []
+        for c in range(n_cols):
+            it = self._table.horizontalHeaderItem(c)
+            headers.append(it.text() if it is not None else "")
+        rows.append("\t".join(headers))
+        # 데이터
+        for r in range(self._table.rowCount()):
+            cells = []
+            for c in range(n_cols):
+                it = self._table.item(r, c)
+                cells.append(it.text() if it is not None else "")
+            rows.append("\t".join(cells))
+        return "\n".join(rows)
+
+    def _on_item_changed(self, item: QTableWidgetItem) -> None:
+        """사용자 cell edit → snapshot push + text 양방향 sync + reparse."""
+        if self._filling_table:
+            return
+        # 변경 직전 snapshot — Ctrl+Z 시 복원
+        self._push_undo_snapshot()
+        self._sync_table_to_text()
+
+    def _sync_table_to_text(self) -> None:
+        """Table 변경 후 editor 갱신 → textChanged → _on_text_changed → reparse.
+
+        editor.setPlainText 자체가 textChanged 발화 — 평소엔 자연스러운 흐름이지만
+        여기선 reparse 만 한 번 trigger 되면 충분. _on_text_changed 가 _fill_table
+        다시 호출하므로 (블록되어 있어 itemChanged 안 fire). 정상 흐름.
+        """
+        new_text = self._table_to_csv_text()
+        # editor 갱신 — textChanged 발화 → _on_text_changed → reparse + _fill_table
+        # _fill_table 은 blockSignals 로 itemChanged 발화 안 함 (무한 loop 안전)
+        self._editor.setPlainText(new_text)
+
+    def _on_delete_selection(self) -> None:
+        """Del 키 — 선택 cells 빈 값 (행/컬럼 자체는 유지)."""
+        if not self._table.selectedItems():
+            return
+        self._push_undo_snapshot()
+        self._table.blockSignals(True)
+        try:
+            for it in self._table.selectedItems():
+                it.setText("")
+        finally:
+            self._table.blockSignals(False)
+        self._sync_table_to_text()
+
+    def _selected_rows(self) -> list[int]:
+        """선택된 행 인덱스 (오름차순 unique)."""
+        rows = {idx.row() for idx in self._table.selectedIndexes()}
+        return sorted(rows)
+
+    def _selected_cols(self) -> list[int]:
+        """선택된 컬럼 인덱스 (오름차순 unique)."""
+        cols = {idx.column() for idx in self._table.selectedIndexes()}
+        return sorted(cols)
+
+    def _on_context_menu(self, pos) -> None:
+        """cell 우클릭 메뉴 — 선택 행 삭제 / 선택 컬럼 삭제."""
+        rows = self._selected_rows()
+        cols = self._selected_cols()
+        if not rows and not cols:
+            return
+        menu = QMenu(self._table)
+        if rows:
+            act_rows = menu.addAction(f"선택 행 {len(rows)}개 삭제")
+            act_rows.triggered.connect(lambda: self._remove_rows(rows))
+        if cols:
+            act_cols = menu.addAction(f"선택 컬럼 {len(cols)}개 삭제")
+            act_cols.triggered.connect(lambda: self._remove_columns(cols))
+        menu.exec(self._table.viewport().mapToGlobal(pos))
+
+    def _on_header_context_menu_h(self, pos) -> None:
+        """가로 헤더 우클릭 — 클릭 위치 컬럼 또는 선택 컬럼 삭제."""
+        col = self._table.horizontalHeader().logicalIndexAt(pos)
+        if col < 0:
+            return
+        cols = self._selected_cols()
+        if col not in cols:
+            cols = [col]
+        menu = QMenu(self._table)
+        act = menu.addAction(f"컬럼 {len(cols)}개 삭제")
+        act.triggered.connect(lambda: self._remove_columns(cols))
+        menu.exec(self._table.horizontalHeader().mapToGlobal(pos))
+
+    def _on_header_context_menu_v(self, pos) -> None:
+        """세로 헤더 우클릭 — 클릭 위치 행 또는 선택 행 삭제."""
+        row = self._table.verticalHeader().logicalIndexAt(pos)
+        if row < 0:
+            return
+        rows = self._selected_rows()
+        if row not in rows:
+            rows = [row]
+        menu = QMenu(self._table)
+        act = menu.addAction(f"행 {len(rows)}개 삭제")
+        act.triggered.connect(lambda: self._remove_rows(rows))
+        menu.exec(self._table.verticalHeader().mapToGlobal(pos))
+
+    def _remove_rows(self, rows: list[int]) -> None:
+        """행 자체 삭제 (값 + 행 모두 제거). 역순 삭제 — index shift 안전."""
+        if not rows:
+            return
+        self._push_undo_snapshot()
+        self._table.blockSignals(True)
+        try:
+            for r in sorted(rows, reverse=True):
+                self._table.removeRow(r)
+        finally:
+            self._table.blockSignals(False)
+        self._sync_table_to_text()
+
+    def _remove_columns(self, cols: list[int]) -> None:
+        """컬럼 자체 삭제 (값 + 컬럼 헤더 모두 제거). 역순 삭제."""
+        if not cols:
+            return
+        self._push_undo_snapshot()
+        self._table.blockSignals(True)
+        try:
+            for c in sorted(cols, reverse=True):
+                self._table.removeColumn(c)
+        finally:
+            self._table.blockSignals(False)
+        self._sync_table_to_text()
+
+    def _on_undo(self) -> None:
+        """Ctrl+Z — undo stack pop → 이전 csv text 복원."""
+        if not self._undo_stack:
+            return
+        prev_text = self._undo_stack.pop()
+        # editor 직접 갱신 → textChanged → 재파싱 + table 자동 채움
+        self._editor.setPlainText(prev_text)

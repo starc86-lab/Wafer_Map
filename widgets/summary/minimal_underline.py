@@ -57,7 +57,7 @@ class SummaryMinimalUnderline(SummaryWidget):
     def apply_fonts(self) -> None:
         from core.themes import FONT_SIZES
         _base = int(FONT_SIZES.get("body", 14))
-        lbl_px = max(9, _base - 3)
+        lbl_px = max(10, _base - 2)  # 라벨 12px (사용자 정책 2026-05-03)
         val_px = _base
         lbl_ss = f"color: #999999; font-size: {lbl_px}px;"
         val_ss = f"color: #111111; font-size: {val_px}px; font-weight: bold;"

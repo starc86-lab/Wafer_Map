@@ -48,7 +48,7 @@ class SummaryStatTiles(SummaryWidget):
         from core.themes import FONT_SIZES
         _base = int(FONT_SIZES.get("body", 14))
         val_px = _base
-        lbl_px = max(9, _base - 3)
+        lbl_px = max(10, _base - 2)  # 라벨 12px (사용자 정책 2026-05-03)
         val_ss = f"color: #1f3a5f; font-size: {val_px}px; font-weight: bold;"
         lbl_ss = f"color: #666666; font-size: {lbl_px}px;"
         for v in self._values:

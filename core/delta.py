@@ -137,18 +137,26 @@ def compute_delta(
 
         # Δ-Interp mode — a_only / b_only 점에 상대 측정값을 RBF 보간으로 채움.
         # interp_factory(x, y, v) → 보간 obj. obj((N,2)) → values_N.
+        # NaN 점 제외 (사용자 정책 2026-05-03, cell edit 도입 동반 fix):
+        # va/vb/xa/ya 어디든 NaN 1개라도 있으면 RBFInterpolator fit 실패 →
+        # interp = None → mode 무력화 회귀. NaN 점만 제외하고 나머지 정상 점으로
+        # fit 하면 mode 정상 작동.
         interp_a = interp_b = None
         if interp_factory is not None and (a_only or b_only):
             if va is not None and len(xa) > 0:
-                try:
-                    interp_a = interp_factory(xa, ya, va)
-                except Exception:
-                    interp_a = None
+                m_a = ~np.isnan(va) & ~np.isnan(xa) & ~np.isnan(ya)
+                if int(m_a.sum()) >= 2:
+                    try:
+                        interp_a = interp_factory(xa[m_a], ya[m_a], va[m_a])
+                    except Exception:
+                        interp_a = None
             if vb is not None and len(xb) > 0:
-                try:
-                    interp_b = interp_factory(xb, yb, vb)
-                except Exception:
-                    interp_b = None
+                m_b = ~np.isnan(vb) & ~np.isnan(xb) & ~np.isnan(yb)
+                if int(m_b.sum()) >= 2:
+                    try:
+                        interp_b = interp_factory(xb[m_b], yb[m_b], vb[m_b])
+                    except Exception:
+                        interp_b = None
 
         interp_idx_list: list[int] = []
 

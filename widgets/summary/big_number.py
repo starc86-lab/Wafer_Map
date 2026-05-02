@@ -58,11 +58,11 @@ class SummaryBigNumber(SummaryWidget):
         self.apply_fonts()
 
     def apply_fonts(self) -> None:
-        # Big Number 정체성 — 값 base+6, 라벨 base-4. font_scale 자동 비례.
+        # Big Number 정체성 — 값 base+6, 라벨 base-2. font_scale 자동 비례.
         from core.themes import FONT_SIZES
         _base = int(FONT_SIZES.get("body", 14))
         val_px = _base + 6
-        lbl_px = max(8, _base - 4)
+        lbl_px = max(10, _base - 2)  # 라벨 12px (사용자 정책 2026-05-03)
         lbl_ss = f"color: #6c757d; font-size: {lbl_px}px; font-weight: bold;"
         val_ss = f"color: #111111; font-size: {val_px}px; font-weight: bold;"
         for lbl in self._labels:

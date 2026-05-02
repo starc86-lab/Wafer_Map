@@ -899,8 +899,11 @@ class CoordLibraryTab(QWidget):
         self._sb_max_days.setValue(int(cl_settings.get("max_days", 0)))
 
         # "최대 저장 개수" 옆에 0=무제한 안내 한 번만 (max_days 옆엔 중복 안 함)
+        # background: transparent — 테마 전환 시 hint 라벨/컨테이너 흰 배경이
+        # 카드 배경 (dark 테마 어두움) 과 대비되어 튀는 회귀 fix
+        # (사용자 정책 2026-05-03).
         _hint = QLabel("0 입력 시 무제한")
-        _hint.setStyleSheet("color: #888888;")
+        _hint.setStyleSheet("color: #888888; background: transparent;")
         _row_count = QHBoxLayout()
         _row_count.setContentsMargins(0, 0, 0, 0)
         _row_count.setSpacing(8)
@@ -908,6 +911,7 @@ class CoordLibraryTab(QWidget):
         _row_count.addWidget(_hint)
         _row_count.addStretch(1)
         _row_count_w = QWidget()
+        _row_count_w.setStyleSheet("background: transparent;")
         _row_count_w.setLayout(_row_count)
         limits_form.addRow("최대 저장 개수", _row_count_w)
         limits_form.addRow("최대 보관일", self._sb_max_days)
