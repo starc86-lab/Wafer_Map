@@ -1553,8 +1553,12 @@ class MainWindow(QMainWindow):
         self._set_progress(40)
         self._apply_z_scale_mode(displays, view_mode)
         self._set_progress(60)
-        self._result_panel.set_displays(displays, v, view_mode=view_mode)
-        self._set_progress(85)
+        # set_displays 의 cell 생성·prefetch·render 단계마다 60~86% 점진 갱신
+        self._result_panel.set_displays(
+            displays, v, view_mode=view_mode,
+            progress_cb=self._set_progress,
+        )
+        self._set_progress(88)
         # ReasonBar — paste-time baseline (`_delta_warnings`) 은 _on_visualize
         # 시작 시 이미 복원됨. 여기선 일부 wafer 좌표 해결 실패만 추가 warn
         # (cell 수가 줄어든 사유). baseline 덮어쓰지 않고 합쳐서 표시.
@@ -1654,8 +1658,12 @@ class MainWindow(QMainWindow):
         self._set_progress(40)
         self._apply_z_scale_mode(displays, view_mode)
         self._set_progress(60)
-        self._result_panel.set_displays(displays, v, view_mode=view_mode)
-        self._set_progress(85)
+        # set_displays 의 cell 생성·prefetch·render 단계마다 60~86% 점진 갱신
+        self._result_panel.set_displays(
+            displays, v, view_mode=view_mode,
+            progress_cb=self._set_progress,
+        )
+        self._set_progress(88)
         # ReasonBar — baseline (`_delta_warnings`) 은 _on_visualize 시작 시 복원됨.
         # 부분 좌표 누락 warn 은 paste 시점 validate_delta 가 이미 baseline 에
         # 포함시킴 (사용자 정책 2026-04-30 — Run 시점 surface 에서 paste 시점으로 이동).

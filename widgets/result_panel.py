@@ -86,7 +86,14 @@ class ResultPanel(QWidget):
         displays: Iterable[WaferDisplay],
         value_name: str,
         view_mode: str = "2D",
+        progress_cb=None,
     ) -> None:
+        """Cells 생성·렌더·layout — wafer 수에 비례 큰 비용.
+
+        progress_cb: optional callable(int) — 진행률 (0~100) 전달. main_window
+        의 progress bar 세분화용 (사용자 정책 2026-05-03). None 이면 기존 동작.
+        cb 가 받는 % 는 set_displays 가 차지하는 구간 (60~88 가정) 기준.
+        """
         displays = list(displays)
         self._clear_layout()
         if not displays:
@@ -97,6 +104,8 @@ class ResultPanel(QWidget):
         # hide 동안은 paint/layout activate가 deferred라 "중첩→펼쳐짐" 현상 제거.
         self._container.hide()
         try:
+            if progress_cb:
+                progress_cb(62)
             new_cells = []
             for i, d in enumerate(displays):
                 cell = WaferCell(
@@ -107,20 +116,30 @@ class ResultPanel(QWidget):
                 self._cells.append(cell)
 
             # 병렬 보간 prefetch
+            if progress_cb:
+                progress_cb(66)
             if len(new_cells) > 1:
                 from concurrent.futures import ThreadPoolExecutor
                 with ThreadPoolExecutor(max_workers=len(new_cells)) as ex:
                     list(ex.map(lambda c: c.prefetch_interp(), new_cells))
+            if progress_cb:
+                progress_cb(70)
 
-            # 초기 렌더 (container hidden이라 paint 없음)
-            for c in new_cells:
+            # 초기 렌더 (container hidden이라 paint 없음). cell 별 점진 진행률.
+            n_total = len(new_cells)
+            for i, c in enumerate(new_cells):
                 c.render_initial()
+                if progress_cb and n_total > 0:
+                    # 70 → 84 구간 cell 별 분할
+                    progress_cb(70 + int(14 * (i + 1) / n_total))
 
             # layout에 add — AlignTop 없으면 scroll viewport > content 높이일 때
             # QHBoxLayout 기본(세로 중앙)이라, 윈도우 리사이즈 시 셀들이 중앙으로 내려감
             for c in new_cells:
                 self._layout.addWidget(c, 0, Qt.AlignmentFlag.AlignTop)
             self._layout.addStretch(1)
+            if progress_cb:
+                progress_cb(86)
 
             # hidden 상태에서 layout을 강제 activate → 자식 geometry 확정
             # 이걸 빼면 show() 직후 (0,0)에 쌓였다가 HBoxLayout이 펼쳐지는 1프레임이 보임
