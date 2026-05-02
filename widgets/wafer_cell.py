@@ -953,6 +953,25 @@ class WaferCell(QFrame):
         self._load_data()
         if not defer_render:
             self.render_initial()
+        # ─── 진단 (cell widget 빈 공간 시각 확인용, 검증 후 제거 예정) ───
+        # 색별 border — 사용자가 어디 줄일 수 있는지 시각 확인
+        for _w, _c in [
+            (self._er_row,            "red"),
+            (self._capture_container, "blue"),
+            (self._title_stack,       "orange"),
+            (self._title,             "green"),
+            (self._chart_box,         "purple"),
+            (self._chart_area,        "magenta"),
+            (self._gl_2d,             "cyan"),
+            (self._gl_3d,             "darkturquoise"),
+            (self._colorbar,          "gold"),
+            (self._radial_graph,      "saddlebrown"),
+            (self._summary,           "deeppink"),
+        ]:
+            if _w is None:
+                continue
+            _cur = _w.styleSheet() or ""
+            _w.setStyleSheet(_cur + f" border: 2px solid {_c};")
 
     def cleanup(self) -> None:
         """GL items + FBO + 큰 array 명시 release. deleteLater 직전 호출
