@@ -1154,6 +1154,16 @@ class WaferCell(QFrame):
         self.setFixedWidth(cap_w)
         self.setMaximumHeight(16777215)        # 이전 setFixedSize 로 생긴 height 제약 해제
         self.adjustSize()
+        # 동기 repaint + layout 즉시 활성 (사용자 정책 2026-05-03):
+        # FHD (QT_SCALE_FACTOR=0.75) 등 scale ≠ 1.0 환경 + Settings dialog focus
+        # 점유 시 update() 의 paint event 가 deferred → 메인 윈도우 클릭해야 그제야
+        # 처리되는 회귀 fix. repaint() 는 동기 paint, focus 무관 즉시 처리.
+        cap_lay = self._capture_container.layout()
+        if cap_lay is not None:
+            cap_lay.activate()
+        self._gl_2d.repaint()
+        self._gl_3d.repaint()
+        self._capture_container.repaint()
 
     # ── 외부 API ───────────────────────────────────
     @property
