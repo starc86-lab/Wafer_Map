@@ -2093,6 +2093,9 @@ class WaferCell(QFrame):
         _safe_clipboard_set(lambda: QApplication.clipboard().setMimeData(mime))
 
     def _copy_data(self) -> None:
+        # 측정점 raw 값 (X / Y / VALUE) — Excel TSV 만 (PPT 사용 X — 사용자 정책
+        # 2026-05-03, PPT table HTML 시도했으나 auto-fit 으로 폰트 4pt 축소 회귀
+        # 발생 + Copy Data 의 PPT 사용 사례 없음).
         lines = [f"X\tY\t{self._value_name}"]
         for x, y, v in zip(self._x_in, self._y_in, self._v_in):
             lines.append(f"{x}\t{y}\t{v}")
@@ -2107,12 +2110,36 @@ class WaferCell(QFrame):
         if not rows:
             return
         tsv = "\n".join("\t".join(r) for r in rows)
+        # PPT 호환 inline style — 테두리/배경 명시 X (투명, 사용자 정책 2026-05-03).
+        # PPT 는 width 명시 없으면 슬라이드 폭에 맞춰 자체 확장 → table+td 양쪽
+        # 명시 width + attribute 이중 적용 (PPT 가 inline style 무시 시 대비).
+        # td 80px × 3 col = 240px 가 사용자 검증값.
+        _CELL_PX = 80
+        n_cols = len(rows[0]) if rows else 3
+        _TABLE_PX = _CELL_PX * n_cols
+        td_style = (
+            f"width: {_CELL_PX}px;"
+            " padding: 1px 4px;"
+            " font-family: Arial;"
+            " font-size: 11pt;"
+        )
         html_rows = "".join(
-            "<tr>" + "".join(f"<td>{c}</td>" for c in row) + "</tr>" for row in rows
+            "<tr>" + "".join(
+                f"<td width=\"{_CELL_PX}\" style=\"{td_style}\">{c}</td>"
+                for c in row
+            ) + "</tr>"
+            for row in rows
+        )
+        table_style = (
+            "border-collapse: collapse;"
+            f" width: {_TABLE_PX}px;"
+            " table-layout: fixed;"  # td width 강제 (auto 무시)
+            " font-family: Arial;"
+            " font-size: 11pt;"
         )
         html = (
-            "<table border='1' cellpadding='4' cellspacing='0'>"
-            f"<tbody>{html_rows}</tbody></table>"
+            f"<table width=\"{_TABLE_PX}\" cellpadding='1' cellspacing='0' "
+            f"style=\"{table_style}\"><tbody>{html_rows}</tbody></table>"
         )
         mime = QMimeData()
         mime.setText(tsv)
