@@ -1165,25 +1165,18 @@ class WaferCell(QFrame):
         self._gl_3d.repaint()
         self._capture_container.repaint()
         # ─── 진단 (FHD + 그래프 작은 사이즈 멈춤 회귀 추적, 2026-05-03) ───
+        # mismatch 감지 시만 한 줄 출력 — 핵심 단서: cap 의 actual size 가 calc
+        # 보다 작으면 Qt 가 어떤 child 의 minimumSizeHint 때문에 setFixedSize 거부
         import sys as _sys
-        def _sz(wid):
-            if wid is None:
-                return "None"
-            s = wid.size()
-            sh = wid.sizeHint()
-            mh = wid.minimumSizeHint()
-            return f"{s.width()}x{s.height()} hint={sh.width()}x{sh.height()} min={mh.width()}x{mh.height()}"
-        _sys.stderr.write(
-            f"[diag _apply_chart_size] cap_calc={cap_w}x{cap_h} "
-            f"w={w} h={h} bar_w={bar_w} radial_h={radial_h} table_h={table_h}\n"
-            f"  self          : {_sz(self)}\n"
-            f"  capture       : {_sz(self._capture_container)}\n"
-            f"  gl_2d         : {_sz(self._gl_2d)}\n"
-            f"  gl_3d         : {_sz(self._gl_3d)}\n"
-            f"  summary       : {_sz(self._summary)}\n"
-            f"  title_stack   : {_sz(getattr(self, '_title_stack', None))}\n"
-            f"  chart_box     : {_sz(getattr(self, '_chart_box', None))}\n"
-        )
+        actual = self._capture_container.size()
+        if actual.width() != cap_w or actual.height() != cap_h:
+            cap_min = self._capture_container.minimumSizeHint()
+            self_min = self.minimumSizeHint()
+            _sys.stderr.write(
+                f"[diag MISMATCH] req={cap_w}x{cap_h} actual={actual.width()}x{actual.height()} "
+                f"cap_min={cap_min.width()}x{cap_min.height()} "
+                f"self_min={self_min.width()}x{self_min.height()}\n"
+            )
 
     # ── 외부 API ───────────────────────────────────
     @property
