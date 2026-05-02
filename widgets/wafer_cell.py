@@ -1154,6 +1154,17 @@ class WaferCell(QFrame):
         self.setFixedWidth(cap_w)
         self.setMaximumHeight(16777215)        # 이전 setFixedSize 로 생긴 height 제약 해제
         self.adjustSize()
+        # GL widget paint + layout 즉시 갱신 (사용자 정책 2026-05-03):
+        # - GLViewWidget 자식 (chart_overlay) visibility / 위치 변경이 paintGL 자동
+        #   trigger 안 함 (pyqtgraph quirk) → No Table 첫 진입 시 라벨 안 보임 /
+        #   다른 style 변경 시 overlay 잔재 회귀 fix
+        # - Settings dialog 가 focus 점유 중일 때 layout 결과 deferred → 그래프
+        #   크기 변경 시 cell 영역 일시 비대칭 회귀 fix
+        self._gl_2d.update()
+        self._gl_3d.update()
+        cap_lay = self._capture_container.layout()
+        if cap_lay is not None:
+            cap_lay.activate()
 
     # ── 외부 API ───────────────────────────────────
     @property
