@@ -1164,6 +1164,26 @@ class WaferCell(QFrame):
         self._gl_2d.repaint()
         self._gl_3d.repaint()
         self._capture_container.repaint()
+        # ─── 진단 (FHD + 그래프 작은 사이즈 멈춤 회귀 추적, 2026-05-03) ───
+        import sys as _sys
+        def _sz(wid):
+            if wid is None:
+                return "None"
+            s = wid.size()
+            sh = wid.sizeHint()
+            mh = wid.minimumSizeHint()
+            return f"{s.width()}x{s.height()} hint={sh.width()}x{sh.height()} min={mh.width()}x{mh.height()}"
+        _sys.stderr.write(
+            f"[diag _apply_chart_size] cap_calc={cap_w}x{cap_h} "
+            f"w={w} h={h} bar_w={bar_w} radial_h={radial_h} table_h={table_h}\n"
+            f"  self          : {_sz(self)}\n"
+            f"  capture       : {_sz(self._capture_container)}\n"
+            f"  gl_2d         : {_sz(self._gl_2d)}\n"
+            f"  gl_3d         : {_sz(self._gl_3d)}\n"
+            f"  summary       : {_sz(self._summary)}\n"
+            f"  title_stack   : {_sz(getattr(self, '_title_stack', None))}\n"
+            f"  chart_box     : {_sz(getattr(self, '_chart_box', None))}\n"
+        )
 
     # ── 외부 API ───────────────────────────────────
     @property

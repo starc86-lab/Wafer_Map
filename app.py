@@ -14,6 +14,12 @@ import warnings
 
 VERSION = "0.5.0"
 
+# 진단 (2026-05-03) — Qt layout / widget 경고 stderr 활성. FHD scale + 그래프
+# 작은 사이즈 변경 시 paint deferred 회귀 원인 추적용. 검증 후 제거.
+os.environ["QT_LOGGING_RULES"] = (
+    "qt.widgets.*=true;qt.qpa.window=true;qt.gui.layout=true"
+)
+
 # pyqtgraph MeshData.py 의 vertex normal 계산에서 degenerate face (zero-length
 # normal) 로 인한 divide-by-zero RuntimeWarning 억제. radial mesh 의 센터 근처
 # triangle 이 거의 평평하거나 공선일 때 발생. 렌더 결과엔 영향 없음.
