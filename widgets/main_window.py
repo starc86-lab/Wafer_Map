@@ -1550,6 +1550,11 @@ class MainWindow(QMainWindow):
             )
             return
 
+        # 그래프 출력 역순 적용 (사용자 정책 2026-05-03):
+        # 사용자 paste 의 위쪽 행 = 최신, 아래쪽 행 = 시간순 첫번째.
+        # 시간순으로 표시 (오래된 → 최신) 위해 입력 순서 reverse.
+        displays.reverse()
+
         self._set_progress(40)
         self._apply_z_scale_mode(displays, view_mode)
         self._set_progress(60)
@@ -1654,6 +1659,9 @@ class MainWindow(QMainWindow):
                 is_delta=True,
                 delta_interp_active=self.chk_delta_interp.isChecked(),
             ))
+        # 그래프 출력 역순 (사용자 정책 2026-05-03) — single 모드와 일관.
+        # compute_delta 가 A.wafers insertion order 보존이라 reverse() 만으로 충분.
+        displays.reverse()
         view_mode = self.cb_view.currentText() or "2D"
         self._set_progress(40)
         self._apply_z_scale_mode(displays, view_mode)

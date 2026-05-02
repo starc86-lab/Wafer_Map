@@ -67,6 +67,13 @@ Wafer Map은 회사 업무의 반도체 측정 데이터 시각화 프로젝트.
 - DELTA 양쪽 병기: LOT/SLOT 칸 `A_LOT.A_SLOT ← B_LOT.B_SLOT` 화살표는 `A − B` 방향.
 - 다중 wafer: (MAP + 표) 한 쌍 가로 나열 (`QScrollArea`).
 
+**그래프 출력 순서 (사용자 정책 2026-05-03)**
+- **입력 역순** — 사용자 paste 의 위쪽 행 = 최신 데이터, 아래쪽 행 = 시간순 첫번째
+- 그래프는 시간순 (오래된 → 최신) 으로 가로 나열 → cell 첫번째 = paste 의 마지막 row
+- 구현: `_visualize_single` / `_visualize_delta` 끝에 `displays.reverse()`
+- DELTA: `compute_delta` 의 `common` 정렬을 alphabetical → A.wafers insertion order 변경 (호출자에서 reverse 적용 위함)
+- DELTA 매칭 자체는 변동 없음 — WAFERID 중복 (`__rep` 분리) 시 base WAFERID (paste 위쪽 = 최신) 가 매칭 대상
+
 **메인 윈도우 정책**
 - 우상단 **`⚙ Settings` 버튼 하나만** (`QToolBar`). 메뉴바·Help 없음 — 최대한 직관적
 - **2D / 3D 는 탭이 아니라** Control 패널 콤보/토글로 즉시 전환 (결과 영역 하나)

@@ -81,7 +81,11 @@ def compute_delta(
     Returns:
         DeltaResult. `matched=0` 이면 호출자가 시각화 차단.
     """
-    common = sorted(set(a.wafers) & set(b.wafers) & coords_per_wafer.keys())
+    # 입력 순서 보존 — A 의 wafers insertion order 우선 (사용자 정책 2026-05-03,
+    # 그래프 출력 역순 적용을 위해 정렬 키를 alphabetical 에서 input order 로 변경).
+    # 호출자 (`_visualize_delta`) 가 displays 만든 후 reverse 적용.
+    _common_set = set(a.wafers) & set(b.wafers) & coords_per_wafer.keys()
+    common = [wid for wid in a.wafers if wid in _common_set]
     deltas: list[DeltaWafer] = []
     no_match: list[str] = []
 
