@@ -12,6 +12,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - [docs/policies/coords.md](docs/policies/coords.md) — 좌표 결정 + 라이브러리 (single 4단계 fallback / DELTA 매트릭스 / 자동 저장·조회·정리)
 - [docs/policies/reason_bar.md](docs/policies/reason_bar.md) — 메시지·검증·표시 (severity 4단계 / baseline 보존 / 메시지 카탈로그)
 
+## 참고 카탈로그
+
+- [docs/developer_constants.md](docs/developer_constants.md) — 개발자 상수 카탈로그 (settings UI 미노출 / invariant / 노출 검토 후보). 새 상수 추가 / 노출 변경 시 동반 갱신.
+
 ## 개발자 정보
 - 한국인, 코딩 중급 수준
 - 직접 코딩하지 않고 Claude에 코드 수정 권한 위임 — 제안·논의·리뷰 중심 협업
@@ -107,7 +111,7 @@ Wafer Map은 회사 업무의 반도체 측정 데이터 시각화 프로젝트.
 | 항목 | 설명 |
 |---|---|
 | 입력 방식 | 클립보드 붙여넣기 (Ctrl+V) — 파일 I/O 최소화 |
-| 기대 포맷 | Excel / 계측 장비 출력을 바로 복사한 탭 구분 텍스트 |
+| 기대 포맷 | **MES-DCOL Data** (계측 장비 측정값이 사내 MES 에 업로드된 long-form CSV) |
 
 ### 실제 데이터 구조 (회사 광학 계측 CSV, long-form)
 
@@ -355,7 +359,9 @@ Wafer Map/
   - 맨 앞 (`PRE_TEST_01`) 은 처리 안 함 (사내 데이터에 존재 안 함)
   - 부분 일치 보호: `Z_PRESET_01` (PRE+SET), `Z_POSTBAKE_01` 등은 lookahead `(?=_|$)` 로 매치 회피
   - `Z_TEST_01-POST` (하이픈) / `Z_TEST_01POST` (구분자 X) 는 비호환
-  - DELTA 호환 판정 + `coord_library.find_by_recipe` (3-stage fallback: 정확 일치 → PRE/POST 베이스 일치 → similarity 3+ 토큰 매칭) 에서 사용
+  - **빈 RECIPE 처리 (사용자 정책 2026-05-03)**: 둘 다 빈 문자열 → True (모두 동일하게 빈 상태). 한쪽만 빈 문자열 → False (정상 vs 누락 = 다름). 이전 정책 (2026-04-27, "한쪽 비어있으면 True") 은 false alarm 회피 의도였으나 사용자 명시 정책 ("정상 데이터 = RECIPE 모두 채워짐, 가족 모두 동일") 와 충돌해 strict 로 변경.
+  - DELTA 호환 판정 + `coord_library.find_by_recipe` (3-stage fallback: 정확 일치 → PRE/POST 베이스 일치 → similarity 3+ 토큰 매칭) + `family_coord.validate_family_recipe` 에서 사용
+  - `validate_family_recipe` 가 base="" + 모든 wafer 빈 RECIPE 케이스 별도 검사 → `family_recipe_all_empty` (error). 일부만 빈 wafer 는 strict `recipes_compatible` 가 mismatch 로 잡아 `single_recipe_mismatch` (error)
 
 - **DELTA 합집합 매칭 + NaN 룰** (`core/delta::compute_delta`):
   - 양쪽 매칭 점: dv = va − vb (정상)

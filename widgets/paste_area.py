@@ -80,7 +80,8 @@ class PasteArea(QWidget):
         for b in (self._btn_text, self._btn_table):
             b.setCheckable(True)
         self._btn_text.setChecked(True)
-        self._btn_table.setEnabled(False)
+        # Table 버튼 항상 활성 — 빈 입력일 때 클릭해도 빈 table 보일 뿐
+        # (사용자 정책 2026-05-03, 회색 disabled 표시 제거)
         self._btn_clear.clicked.connect(self._on_clear_clicked)
 
         self._view_group = QButtonGroup(self)
@@ -98,14 +99,14 @@ class PasteArea(QWidget):
         self._stacked = QStackedWidget()
 
         self._editor = QPlainTextEdit()
-        # Input B는 Pre-Post 워크플로 설명으로 교체 (MES DCOL 설명은 Input A와 중복이라 생략)
+        # Input B는 Pre-Post 워크플로 설명으로 교체 (MES-DCOL Data 설명은 Input A와 중복이라 생략)
         if title == "Input B":
             placeholder = (
                 "Pre-Post 계산 시에 Input A에 Pre, 여기에 Post Data를 입력하세요.\n"
                 "WAFERID가 동일한 데이터들만 선별하여 Pre-Post 계산."
             )
         else:
-            placeholder = "MES DCOL DATA를 통째로 Ctrl+C, Ctrl+V."
+            placeholder = "MES-DCOL Data를 통째로 Ctrl+C, Ctrl+V."
         self._editor.setPlaceholderText(placeholder)
         # 줄바꿈 OFF → 원본 행 그대로, 긴 행은 가로 스크롤바
         self._editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
@@ -297,7 +298,6 @@ class PasteArea(QWidget):
         self._summary.setStyleSheet(f"{style} font-size: 11px;")
 
         if df is not None and len(df) > 0:
-            self._btn_table.setEnabled(True)
             # Table 뷰가 이미 활성이면 즉시 채우기, 아니면 dirty만 표시(lazy fill)
             if self._stacked.currentIndex() == 1:
                 self._fill_table(df)
@@ -308,7 +308,6 @@ class PasteArea(QWidget):
             self._table.clear()
             self._table.setRowCount(0)
             self._table.setColumnCount(0)
-            self._btn_table.setEnabled(False)
             self._table_dirty = False
             # 뷰는 현재 상태 유지 — Clear 후 바로 Ctrl+V 하면 Table 뷰 그대로 이어짐
 

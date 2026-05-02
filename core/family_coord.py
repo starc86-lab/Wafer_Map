@@ -61,12 +61,25 @@ def family_recipe(result: ParseResult) -> str:
 def validate_family_recipe(result: ParseResult) -> list[ValidationWarning]:
     """가족 RECIPE 단일성 검증 — PRE/POST 베이스 비교로 호환 여부 판정.
 
-    다른 RECIPE wafer 가 있으면 `single_recipe_mismatch` (error). 메시지에
-    LOT.SLOT 라벨 + 그 wafer 의 RECIPE + 가족 baseline RECIPE 명시.
+    정책 (사용자 정책 2026-05-03):
+    - 정상 데이터 = 모든 wafer 의 RECIPE 채워져 있음
+    - 가족 (한 입력의 모든 wafer) 모두 동일 RECIPE (PRE/POST 호환 OK)
+    - RECIPE 모두 비어있음 → error (`family_recipe_all_empty`)
+    - RECIPE 일부만 다름 / 일부만 비어있음 → error (`single_recipe_mismatch`)
+      (recipes_compatible 의 빈 vs 정상 = False 이용)
     """
     if not result.wafers:
         return []
     base = family_recipe(result)
+    # RECIPE 가 모두 비어있는 케이스 — 비정상 데이터 신호 (사용자 정책 2026-05-03)
+    if not base:
+        all_empty = all(not w.recipe for w in result.wafers.values())
+        if all_empty:
+            return [ValidationWarning(
+                code="family_recipe_all_empty",
+                severity="error",
+                message="가족 RECIPE 모두 비어있음 — 입력 데이터 확인",
+            )]
     mismatched = [
         w for w in result.wafers.values()
         if not recipes_compatible(w.recipe, base)
@@ -74,9 +87,9 @@ def validate_family_recipe(result: ParseResult) -> list[ValidationWarning]:
     if not mismatched:
         return []
     labels = ", ".join(
-        f"{_wafer_label(w)}: {w.recipe}" for w in mismatched
+        f"{_wafer_label(w)}: {w.recipe or '(빈값)'}" for w in mismatched
     )
-    msg = f"RECIPE 다름 — {labels} vs 가족: {base}"
+    msg = f"RECIPE 다름 — {labels} vs 가족: {base or '(빈값)'}"
     return [ValidationWarning(
         code="single_recipe_mismatch",
         severity="error",

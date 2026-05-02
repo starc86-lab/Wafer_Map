@@ -38,9 +38,19 @@ def recipes_compatible(ra: str, rb: str) -> bool:
     """두 RECIPE 가 호환 (같은 공정으로 간주) 인지.
 
     `_PRE` / `_POST` 토큰을 끝 / 중간에서 제외 후 베이스 비교. 양방향
-    (A=POST / B=PRE 도 OK). 한쪽이라도 비어있으면 비교 불가 → True (호환 처리,
-    메시지 안 띄움).
+    (A=POST / B=PRE 도 OK).
+
+    빈 RECIPE 처리 (사용자 정책 2026-05-03):
+    - 둘 다 빈 문자열 → True (모두 동일하게 비어있음, 호환)
+    - 한쪽만 빈 문자열 → False (정상 vs 누락 — 명백히 다름)
+
+    이전 정책 (2026-04-27, "한쪽 비어있으면 True") 은 자연 데이터의 일부 wafer
+    RECIPE 누락에 대한 false alarm 회피 의도였으나, 사용자 정책 명시 ("정상 데이터
+    = RECIPE 모두 채워짐, 가족 모두 동일") 와 충돌해 strict 로 변경. 빈 RECIPE
+    자체를 비정상 데이터 신호로 판단.
     """
-    if not ra or not rb:
+    if not ra and not rb:
         return True
+    if not ra or not rb:
+        return False
     return strip_pre_post(ra) == strip_pre_post(rb)

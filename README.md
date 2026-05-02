@@ -6,7 +6,7 @@ PySide6 + pyqtgraph 기반 반도체 웨이퍼 측정 데이터 시각화 데스
 
 ## 핵심 워크플로
 
-1. 계측 장비 / Excel 에서 long-form CSV 를 **Ctrl+C**
+1. **MES-DCOL Data** 를 **Ctrl+C** (계측 장비 측정값이 사내 MES 시스템에 업로드된 long-form CSV)
 2. 앱의 **Input A** (또는 B) 에 **Ctrl+V**
 3. **▶ Run** → 결과 패널에 cell (차트 + 1D radial + Summary 표) 가로 나열
 4. cell 우클릭 → **Copy Image** → PPT / Excel 에 **Ctrl+V** 로 사진 paste

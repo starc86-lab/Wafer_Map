@@ -9,7 +9,7 @@
 ## 빠른 시작
 
 1. `Wafer_Map_<버전>.zip` 압축 풀기 → 폴더 안의 `Wafer Map.exe` 실행 (무설치).
-2. 계측 장비·Excel 에서 **long-form CSV** (헤더 포함) 전체 선택 → **Ctrl+C**.
+2. **MES-DCOL Data** (사내 MES 시스템의 계측 결과 long-form CSV) 전체 선택 → **Ctrl+C**.
 3. 앱의 **Input A** 영역에 **Ctrl+V**.
 4. VALUE / X / Y 콤보 자동 선택됨. 필요 시 수동 변경.
 5. **▶ Run** → 결과 패널에 MAP + Summary 표가 가로 나열.
@@ -113,6 +113,8 @@ paste 직후·Run 직후 **Input 라벨** 과 **ReasonBar** (Control 와 결과 
 - 반복 측정 분리: `반복 측정 N건 발견 — __rep1, __rep2 ...` (회색 info)
 - 일부 wafer PARA set 다름: 빨강 error, **Run 차단**
 - 필수 컬럼 누락: `⚠ 필수 컬럼 부족: ...` 빨강 error, **Run 차단**
+- **가족 RECIPE 모두 비어있음**: `가족 RECIPE 모두 비어있음 — 입력 데이터 확인` 빨강 error, **Run 차단**
+- **가족 RECIPE 다름** (PRE/POST 호환 X): `RECIPE 다름 — lot.slot: X vs 가족: Y` 빨강 error, **Run 차단**. 일부 wafer 만 RECIPE 비어있어도 동일 (정상 vs 빈값 = 다름)
 
 ### ReasonBar — DELTA 좌표 fallback (paste 직후)
 - `B 좌표 없음. A 와 동일 RECIPE 로 A 좌표 사용.` (민트 ok)
@@ -323,7 +325,7 @@ Control 패널의 **Z 스케일** 토글:
 
 ## 입력 데이터 포맷
 
-계측 장비의 **long-form CSV**. 한 행 = "한 wafer 의 한 PARAMETER".
+**MES-DCOL Data** 의 **long-form CSV**. 한 행 = "한 wafer 의 한 PARAMETER". (계측 장비 측정값이 사내 MES 시스템에 업로드된 형식)
 
 ### 필수 컬럼
 헤더 대소문자/공백/언더바 무관 (예: `LOT ID` = `lot_id` = `lotid`).

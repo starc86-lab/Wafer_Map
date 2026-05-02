@@ -1,6 +1,6 @@
 # 파서 Edge Case 정리
 
-`main.py::parse_wafer_csv()` 와 관련 함수(`_normalize`, `_mode_str`, DATA 수집 등)의 실제 동작을 기준으로, 일반 사용자가 **Excel / 계측 장비에서 Ctrl+V 페이스트** 시 마주칠 가능성 높은 엣지 케이스 정리.
+`main.py::parse_wafer_csv()` 와 관련 함수(`_normalize`, `_mode_str`, DATA 수집 등)의 실제 동작을 기준으로, 일반 사용자가 **MES-DCOL Data 를 Ctrl+V 페이스트** 시 마주칠 가능성 높은 엣지 케이스 정리.
 
 상태 표기:
 - ✅ **OK**: 파싱 정상, 사용자 의도대로 동작
