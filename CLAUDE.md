@@ -452,11 +452,11 @@ Wafer Map/
 - `settings_dialog.apply_global_style`: `BASE_FONT_SIZES` 에서 `scale` 곱해 `FONT_SIZES` 영구 갱신 → 이후 FONT_SIZES 읽는 모든 코드 (차트 제목 / 컬러바 / 1D 축 / 표) 가 scale 반영된 값 얻음
 - 이전 버그: `try/finally` 로 QSS 빌드 직후 FONT_SIZES 원복 → 차트 내부 텍스트가 scale 무시. 지금은 영구 갱신이라 해결
 - `SettingsDialog.ui_changed` → `_apply_ui_runtime` (QSS 재빌드) + `_apply_graph_runtime` (cell.refresh) 양쪽 emit → cell 내부 폰트도 즉시 반영
-- cell.refresh 에서 제목 인라인 stylesheet 재작성 (`FONT_SIZES['body'] + 3` → 17px 기본)
+- cell.refresh 에서 제목 인라인 stylesheet 재작성 (`FONT_SIZES['body'] + 2` → 16px 기본)
 - 컬러바: `paintEvent` 에서 매번 FONT_SIZES 조회 / 1D 축: `_update_radial_graph` 에서 `setStyle(tickFont=…)` 재적용
 
 **폰트 크기 계층 (font_scale=1.0 기본):**
-- 차트 제목: `FONT_SIZES['body'] + 3` = 17px
+- 차트 제목: `FONT_SIZES['body'] + 2` = 16px (사용자 정책 2026-05-03, 17 → 16)
 - 표 텍스트: `FONT_SIZES['body']` = 14px
 - 컬러바 / 1D 축 숫자: `FONT_SIZES['caption']` = 12px
 - 모든 텍스트 색 `#111111` 통일, 테두리 `#888888` 통일

@@ -331,8 +331,8 @@ DEFAULT_SETTINGS = {
         "radial_rings": 20,        # 반경 방향 링 수 (5~60)
         "radial_seg": 180,         # 각도 세그먼트 수 (60~720)
         "show_scale_bar": True,    # 그래프 우측에 컬러맵 스케일바
-        "chart_width": 360,        # 그래프 가로 (px) — 360:280 비율 기준 중
-        "chart_height": 280,       # 그래프 세로 (px)
+        "chart_width": 360,        # 그래프 가로 (px) — 그대로 유지
+        "chart_height": 252,       # 그래프 세로 (px) — 280 → 252 (10% 감소). 사용자 정책 2026-05-03 — 가로 그대로 + 세로만 줄여 chart_box 압축. 원 직경 = min(w,h) = 252 → 좌우 여백 커짐
         # 보간 방법 — core/interp.py 참고
         "interp_method": "RBF-ThinPlate",
         "decimals": 2,             # 테이블 값 소수점 자릿수 (0/1/2/3, 컬러바는 별도 동적)

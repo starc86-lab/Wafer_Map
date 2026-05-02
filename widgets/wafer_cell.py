@@ -35,6 +35,14 @@ from core.metrics import summary_metrics
 
 BOUNDARY_SEGMENTS = 361
 
+# Wafer 의 chart_area 안 세로 위치 — 정 가운데에서 아래로 shift (사용자 정책 2026-05-03).
+# % 단위로 chart_area 세로 폭 비율. 0 = 정 가운데, 음수 = 위로, 양수 = 아래로.
+# 위/아래 빈 공간 균형 조정 (제목 영역 침범 회피 + 아래 빈 공간 활용).
+# 변경 시 wafer GL 카메라 center shift 와 fallback wafer_cy 모두 동기 적용.
+WAFER_SHIFT_PCT = 0.03
+# GL 카메라 center.y 변환 계수 — pct × 2 × tan(fov/2). fov=45 고정.
+WAFER_SHIFT_FACTOR = WAFER_SHIFT_PCT * 2.0 * 0.41421356  # ≈ 0.0248 for 3%
+
 
 def _safe_clipboard_set(op_callable, retries: int = 2, delay_ms: int = 50) -> bool:
     """Windows clipboard race 대비 retry helper (외부 LLM 리뷰 2026-05-01).
@@ -557,7 +565,7 @@ class _OutlineLabel(QLabel):
 
     _LABEL_VALUE_GAP = 10
     _STROKE_W = 3
-    _FILL = QColor("#666666")
+    _FILL = QColor("#111111")  # 통일색 (사용자 정책 2026-05-03)
     _STROKE = QColor("#ffffff")
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -668,14 +676,19 @@ class WaferCell(QFrame):
         _small_px = FONT_SIZES.get("small", 12)
 
         # parent=self 명시 — 미명시 시 잠시 top-level 로 native window 승격 위험
+        # 세로 압축 (사용자 정책 2026-05-03): margin (8,2,8,2) → (6,0,6,0),
+        # 자식 widget setFixedHeight(24) 로 행 height ~24 px (이전 ~32 px)
+        _ER_ROW_H = 24
         self._er_row = QWidget(self)
         er_outer = QHBoxLayout(self._er_row)
-        er_outer.setContentsMargins(8, 2, 8, 2)
+        er_outer.setContentsMargins(6, 0, 6, 0)
         er_outer.setSpacing(6)
 
         self.lbl_time = QLabel("Time:")
+        self.lbl_time.setFixedHeight(_ER_ROW_H)
         er_outer.addWidget(self.lbl_time)
         self.le_time = QLineEdit()
+        self.le_time.setFixedHeight(_ER_ROW_H)
 
         # 빈 문자열도 Acceptable 로 보는 validator — focus out / Tab 시 editingFinished
         # 가 발화해 _on_time_edit_finished 가 None 으로 ER mode 해제 (사용자 정책
@@ -696,11 +709,13 @@ class WaferCell(QFrame):
         if is_master:
             self.chk_apply_all = QCheckBox("전체 적용 ")  # 끝 space — 다음 라벨 여백
             self.chk_apply_all.setChecked(True)  # default: 전체 적용 ON
+            self.chk_apply_all.setFixedHeight(_ER_ROW_H)
             self.chk_apply_all.setStyleSheet(
                 f"QCheckBox {{ font-size: {_body_px}px; }}"
             )
             er_outer.addWidget(self.chk_apply_all)
             self.lbl_desc = QLabel("ΔTHK/Time, ER 계산")
+            self.lbl_desc.setFixedHeight(_ER_ROW_H)
             self.lbl_desc.setStyleSheet(
                 f"color: #888888; font-size: {_small_px}px;"
             )
@@ -751,8 +766,8 @@ class WaferCell(QFrame):
         self._title = QLabel(display.title, self._title_stack)
         self._title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         # 전역 QSS의 QWidget { font-size } 가 setFont()를 이기므로 인라인 CSS로 강제.
-        # FONT_SIZES['body']는 font_scale 반영된 값이라 +4도 스케일 따라감.
-        title_px = FONT_SIZES.get("body", 14) + 3
+        # FONT_SIZES['body']는 font_scale 반영된 값이라 +2도 스케일 따라감.
+        title_px = FONT_SIZES.get("body", 14) + 2
         self._title.setStyleSheet(
             f"font-weight: bold; color: #111111; font-size: {title_px}px;"
             " background-color: transparent;"
@@ -823,19 +838,26 @@ class WaferCell(QFrame):
         def _make_badge(parent: QWidget, text: str) -> QLabel:
             b = QLabel(text, parent)
             b.setStyleSheet(
-                "background-color: rgba(255, 255, 255, 210); color: #555555; "
-                "padding-top: 2px; padding-bottom: 2px;"
+                "background: transparent; color: #111111;"
+                " padding-top: 0px; padding-bottom: 0px;"
                 " padding-left: 6px; padding-right: 6px;"
-                " border: 1px solid #bbbbbb; border-radius: 4px;"
-                " font-size: 11px;"
+                " font-size: 13px;"
             )
             b.hide()
             b.adjustSize()
             return b
-        self._badge_2d = _make_badge(self._gl_2d, "r-symmetry mode")
-        self._badge_3d = _make_badge(self._gl_3d, "r-symmetry mode")
-        self._badge_delta_2d = _make_badge(self._gl_2d, "Δ-Interp mode")
-        self._badge_delta_3d = _make_badge(self._gl_3d, "Δ-Interp mode")
+        self._badge_2d = _make_badge(self._gl_2d, "r-symmetry")
+        self._badge_3d = _make_badge(self._gl_3d, "r-symmetry")
+        self._badge_delta_2d = _make_badge(self._gl_2d, "Δ-Interp")
+        self._badge_delta_3d = _make_badge(self._gl_3d, "Δ-Interp")
+        # 두 뱃지 폭 통일 (사용자 정책 2026-05-03) — 가장 긴 텍스트 기준
+        _badge_max_w = max(
+            self._badge_2d.sizeHint().width(),
+            self._badge_delta_2d.sizeHint().width(),
+        )
+        for _b in (self._badge_2d, self._badge_3d,
+                   self._badge_delta_2d, self._badge_delta_3d):
+            _b.setFixedWidth(_badge_max_w)
 
         # No Table style 용 chart overlay (Mean / Range / N.U) — GL widget 자식
         # _OutlineLabel 한 쌍씩 (2D / 3D). 흰 외곽선 + 검정 fill 로 그래프 진한 색
@@ -907,7 +929,7 @@ class WaferCell(QFrame):
         _ax_top.setTicks([[], []])
         _ax_top.setPen(QPen(QColor(0, 0, 0, 0)))
         _ax_top.setTextPen(QPen(QColor(0, 0, 0, 0)))
-        _ax_top.setHeight(16)
+        _ax_top.setHeight(4)
         # X range — 0~150 기준 양끝 10mm 균등 여유 (-10~160). 라벨 cull 방지 + 대칭.
         self._radial_graph.setXRange(-10, 160, padding=0)
         self._radial_graph.setVisible(False)
@@ -953,26 +975,6 @@ class WaferCell(QFrame):
         self._load_data()
         if not defer_render:
             self.render_initial()
-        # ─── 진단 (cell widget 빈 공간 시각 확인용, 검증 후 제거 예정) ───
-        # 색별 border — 사용자가 어디 줄일 수 있는지 시각 확인
-        for _w, _c in [
-            (self._er_row,            "red"),
-            (self._capture_container, "blue"),
-            (self._title_stack,       "orange"),
-            (self._title,             "green"),
-            (self._chart_box,         "purple"),
-            (self._chart_area,        "magenta"),
-            (self._gl_2d,             "cyan"),
-            (self._gl_3d,             "darkturquoise"),
-            (self._colorbar,          "gold"),
-            (self._radial_graph,      "saddlebrown"),
-            (self._summary,           "deeppink"),
-        ]:
-            if _w is None:
-                continue
-            _cur = _w.styleSheet() or ""
-            _w.setStyleSheet(_cur + f" border: 2px solid {_c};")
-
     def cleanup(self) -> None:
         """GL items + FBO + 큰 array 명시 release. deleteLater 직전 호출
         (사용자 정책 2026-05-02, RSS 누수 fix).
@@ -1060,7 +1062,11 @@ class WaferCell(QFrame):
         padding_top = 1
         title_h = self._title.sizeHint().height()
         stack_w = w + bar_w
-        stack_h = padding_top + title_h + h
+        # chart_area 세로 압축 (사용자 정책 2026-05-03): 10% 감소 후 4% 증가 → 6% 감소.
+        # wafer 가 GL viewport 짧은 쪽 fit 이라 chart_area height 줄이면 자동
+        # 비례 축소 + cell 절약. chart_box / title_stack 모두 동기.
+        # 0.94 = 위/아래 빈 공간 살짝 (사용자 "너무 꽉 낀다" 피드백 반영).
+        stack_h = int((padding_top + title_h + h) * 0.94)
 
         self._title_stack.setFixedSize(stack_w, stack_h)
         self._title.setFixedSize(stack_w, title_h)
@@ -1073,28 +1079,53 @@ class WaferCell(QFrame):
         self._chart_area.setFixedSize(w + bar_w // 2, stack_h)
         self._chart_area.move(0, 0)
 
-        # colorbar: y=padding+title_h (title 아래 시작). 높이는 원 하단까지 축소.
-        # 원 하단 y = stack_h/2 + h/2. colorbar 시작 = padding+title_h.
-        # colorbar height = (stack_h + h)/2 - (padding+title_h) = h - (padding+title_h)/2.
-        cb_height = h - (padding_top + title_h) // 2
+        # colorbar — wafer 시각 직경 + 위치 정렬 (사용자 정책 2026-05-03)
+        # NDC 직접 측정 — projection / view / camera shift 모두 자동 반영.
+        # 직경 + 세로 중심 모두 측정값 사용 → wafer 와 colorbar 정확 동기.
+        boundary_r = float(common.get("boundary_r_mm", 153.0))
+        chart_area_short = min(w + bar_w // 2, stack_h)
+        wafer_diameter_px = chart_area_short * 0.595      # fallback
+        wafer_cy = stack_h / 2.0 + stack_h * WAFER_SHIFT_PCT   # fallback
+        try:
+            from PySide6.QtGui import QVector3D
+            _vw = self._gl_2d.width() or 1
+            _vh = self._gl_2d.height() or 1
+            _vp = (0, 0, _vw, _vh)
+            _proj = self._gl_2d.projectionMatrix(_vp, _vp)
+            _view = self._gl_2d.viewMatrix()
+            # wafer top/bottom NDC y — camera center shift 도 자동 반영
+            _ndc_t = _proj.map(_view.map(QVector3D(0, boundary_r, 0)))
+            _ndc_b = _proj.map(_view.map(QVector3D(0, -boundary_r, 0)))
+            # NDC range -1~1, diff/2 = viewport 비율. chart_area_short 환산
+            wafer_diameter_px = abs(_ndc_t.y() - _ndc_b.y()) / 2.0 * chart_area_short
+            # wafer 세로 중심 — NDC y 평균 → chart_area 픽셀
+            # NDC +1 = 화면 위, screen_y = (1 - ndc.y) / 2 × height
+            _ndc_cy = (_ndc_t.y() + _ndc_b.y()) / 2.0
+            wafer_cy = (1.0 - _ndc_cy) / 2.0 * chart_area_short
+        except Exception:
+            pass
+        # paintEvent 의 _MARGIN_V (위/아래 12px 씩) padding 보정
+        cb_margin_v = self._colorbar._MARGIN_V
+        cb_height = max(1, int(wafer_diameter_px) + 2 * cb_margin_v)
+        cb_y = int(wafer_cy - cb_height / 2.0)
         self._colorbar.setFixedHeight(cb_height)
-        self._colorbar.move(self._colorbar.x(), padding_top + title_h)
+        self._colorbar.move(self._colorbar.x(), cb_y)
         self._colorbar._reposition()  # x 오른쪽 정렬 (y 는 유지)
 
         # title 이 chart_box / colorbar 위에 z-order 최상
         self._title.raise_()
 
-        # 모드 배지 y 좌표만 여기서 결정 (chart 크기 변경 시 업데이트).
-        # 실제 가로 배치는 _layout_badges() 가 visibility 보고 처리 — _render_2d/3d
-        # 의 setVisible 호출 후에도 호출되어 visibility 변화에 즉시 반응.
+        # 모드 배지 y 좌표 — chart_box 좌하단 (r-symmetry 기준).
+        # Δ-Interp 는 r-symmetry 위에 stack 배치 (사용자 정책 2026-05-03).
         bh = self._badge_2d.sizeHint().height()
         self._badge_y = stack_h - bh - 4
         self._layout_badges()
-        # 1D Radial Graph — show_1d_radial 체크 시 보이고, 높이 135px
+        # 1D Radial Graph — show_1d_radial 체크 시 보이고, 높이 123px (사용자
+        # 정책 2026-05-03, _ax_top 16→4 절약 12px 만큼 widget 도 같이 감소)
         # 위젯은 cell content 꽉 채움. 플롯 centering 은 내부 좌/우 축 대칭으로.
         show_radial = bool(common.get("show_1d_radial", False))
         self._radial_graph.setVisible(show_radial)
-        radial_h_px = 135
+        radial_h_px = 123
         if show_radial:
             self._radial_graph.setFixedWidth(w + bar_w)
             self._radial_graph.setFixedHeight(radial_h_px)
@@ -1158,7 +1189,7 @@ class WaferCell(QFrame):
             # _OutlineLabel.paintEvent 가 직접 그림 (사용자 정책 2026-05-01).
             from core.themes import FONT_SIZES as _FS
             ov_font_px = max(9, int(_FS.get("body", 14)))
-            ov_ss = f"font-weight: bold; font-size: {ov_font_px}px;"
+            ov_ss = f"font-size: {ov_font_px}px;"  # bold 해제 (사용자 정책 2026-05-03)
             for ov in (self._chart_overlay_2d, self._chart_overlay_3d):
                 ov.setStyleSheet(ov_ss)
                 ov.set_rows(rows)
@@ -1167,7 +1198,8 @@ class WaferCell(QFrame):
                 ov.raise_()
         table_h = SUMMARY_RESERVED_H
         cap_w = w + bar_w + 6 * 2              # inner margin 6+6
-        cap_h = padding_top + title_h + h + radial_h + table_h + 6 * 2 + 4 * 2
+        # cap_h = chart_area (stack_h, 이미 10% 감소 적용됨) + 1D + summary + margins
+        cap_h = stack_h + radial_h + table_h + 6 * 2 + 4 * 2
         self._capture_container.setFixedSize(cap_w, cap_h)
         # cell outer — 폭은 capture 와 동일, 높이는 자유 (layout 이 capture + er_row 합산)
         self.setFixedWidth(cap_w)
@@ -1180,6 +1212,13 @@ class WaferCell(QFrame):
         cap_lay = self._capture_container.layout()
         if cap_lay is not None:
             cap_lay.activate()
+        # Wafer 아래 shift (사용자 정책 2026-05-03) — chart_area 세로 폭의
+        # WAFER_SHIFT_PCT (default 3%). cam_distance 변동에도 시각적 비율 일정.
+        _shift_mm = WAFER_SHIFT_FACTOR * self._applied_cam_dist
+        for _gv in (self._gl_2d, self._gl_3d):
+            _ctr = _gv.opts.get("center")
+            if _ctr is not None:
+                _ctr.setY(_shift_mm)
         self._gl_2d.repaint()
         self._gl_3d.repaint()
         self._capture_container.repaint()
@@ -1224,19 +1263,23 @@ class WaferCell(QFrame):
     ) -> None:
         """setVisible 호출 전에 호출 — visibility 인자로 위치 미리 set.
 
-        둘 다 visible 시 r-symmetry 첫, Δ-Interp 옆 (8px gap). 한 쪽만이면
-        그 쪽이 8px 시작 자리. setVisible 후 호출하면 (0,0) 깜빡임 발생 —
-        반드시 setVisible 전에 호출 (사용자 정책 2026-05-01).
+        위/아래 배치 (사용자 정책 2026-05-03):
+        - r-symmetry: 좌하단 (`_badge_y`)
+        - Δ-Interp: r-symmetry 위 (4px gap)
+
+        setVisible 후 호출하면 (0,0) 깜빡임 발생 — 반드시 setVisible 전에 호출.
         """
         by = getattr(self, "_badge_y", None)
         if by is None:
             return
         x = 8
+        bh = rsym.sizeHint().height()
         if is_rad:
             rsym.move(x, by)
-            x += rsym.width() + 8
         if is_di:
-            delta.move(x, by)
+            # r-symmetry 위 (0px gap, 거의 붙임). r-symmetry 안 보이면 같은 y (좌하단)
+            di_y = by - bh if is_rad else by
+            delta.move(x, di_y)
 
     def _layout_badges(self) -> None:
         """현재 visibility 기준 위치 재계산 — _apply_chart_size 의 chart 크기
@@ -1259,7 +1302,7 @@ class WaferCell(QFrame):
         settings = settings_io.load_settings()
         # 제목 폰트 크기 재적용 — font_scale 변경 즉시 반영
         from core.themes import FONT_SIZES
-        _title_px = FONT_SIZES.get("body", 14) + 3
+        _title_px = FONT_SIZES.get("body", 14) + 2
         self._title.setStyleSheet(
             f"font-weight: bold; color: #111111; font-size: {_title_px}px;"
         )
@@ -2019,15 +2062,18 @@ class WaferCell(QFrame):
         dist = float(scom.get("camera_distance", 620))
         elev_3d = float(s3d.get("elevation", 40))
         azim_3d = float(s3d.get("azimuth", -90))
+        # 초기 wafer shift 동기 (사용자 정책 2026-05-03) — _apply_chart_size 의
+        # WAFER_SHIFT_FACTOR 와 동일 값. pos.y 에 적용해 Reset 위치 = 초기 위치.
+        shift_mm = WAFER_SHIFT_FACTOR * dist
         from pyqtgraph import Vector
         if chart is self._gl_2d:
             chart.setCameraPosition(
-                pos=Vector(0, 0, 0),
+                pos=Vector(0, shift_mm, 0),
                 distance=dist, elevation=90, azimuth=-90,
             )
         else:  # _gl_3d
             chart.setCameraPosition(
-                pos=Vector(0, 0, 0),
+                pos=Vector(0, shift_mm, 0),
                 distance=dist, elevation=elev_3d, azimuth=azim_3d,
             )
         chart.opts["fov"] = 45
