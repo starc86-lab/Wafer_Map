@@ -401,12 +401,16 @@ DEFAULT_SETTINGS = {
 
     # 페이스트 후 VALUE/X/Y 자동 선택 — fnmatch 와일드카드, 대소문자 무관
     # 매칭 조건: 패턴 매칭 + "값 개수 == DATA 컬럼 총 개수"
-    # 우선순위: 패턴 목록 순서 → 같은 패턴 내 알파벳 → 매칭 안 된 나머지(알파벳)
+    # 우선순위: 패턴 목록 순서 → 같은 패턴 내 알파벳 역순 → 매칭 안 된 나머지
     # Y는 X 이름의 suffix를 자동 동기화 (X="X_1000" → Y="Y_1000" 우선)
+    # priority_mode: VALUE 정렬 모드 (사용자 정책 2026-05-04):
+    #   - "variability"      : -metric (3σ/AVG) 우선 → 알파벳 역순
+    #   - "alphabet_reverse" : 알파벳 역순 우선 (T3>T2>T1, STACK 상부 우선) → -metric
     "auto_select": {
         "value_patterns": ["T*"],
         "x_patterns":     ["X", "X*"],
         "y_patterns":     ["Y", "Y*"],
+        "priority_mode":  "alphabet_reverse",
     },
 
     # 좌표 프리셋 라이브러리 파일 경로 (앱 실행 폴더 기준)

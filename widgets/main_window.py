@@ -286,12 +286,8 @@ class MainWindow(QMainWindow):
         self._reason_bar = ReasonBar()
         cv.addWidget(self._make_control_panel())
         cv.addWidget(self._reason_bar)
-        # ReasonBar 우측에 r-symmetry / Δ-Interp 체크박스 + Run/progress/Clear
-        # (control_panel 빌드 후라 widgets 존재). 체크박스 → spacing → Run 순서로
-        # Run 버튼 좌측에 그룹 배치 (사용자 정책 2026-05-04).
-        self._reason_bar.add_right_widget(self.chk_r_symmetry)
-        self._reason_bar.add_right_widget(self.chk_delta_interp)
-        self._reason_bar.add_right_spacing(16)
+        # ReasonBar 우측에 Run / progress / Clear 만
+        # (사용자 정책 2026-05-04 — View 콤보 / 체크박스 모두 control bar 로 이동)
         self._reason_bar.add_right_widget(self.btn_visualize)
         self._reason_bar.add_right_widget(self.progress_run)
         self._reason_bar.add_right_widget(self.btn_clear)
@@ -469,14 +465,17 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.btn_load_preset)
         lay.addWidget(self.btn_para_combine)
         lay.addStretch(1)
-        # 우측 그룹 — View / Z-Scale / Z-Margin
+        # 우측 그룹 — View / Z-Scale / Z-Margin / r-symmetry / Δ-Interp
+        # (사용자 정책 2026-05-04 — View 토글 control bar 잔류, 체크박스 두 개도
+        # control bar 로 복귀. ReasonBar 는 Run/Clear 만)
         lay.addWidget(QLabel("View:"))
         lay.addWidget(self.cb_view)
         lay.addWidget(QLabel("Z-Scale:"))
         lay.addWidget(self.cb_zscale)
         lay.addWidget(self.lbl_z_range)
         lay.addWidget(self.sp_z_range)
-        # r-symmetry / Δ-Interp 체크박스는 ReasonBar 우측 (Run 버튼 좌측) 으로 이동
+        lay.addWidget(self.chk_r_symmetry)
+        lay.addWidget(self.chk_delta_interp)
         # btn_visualize / btn_clear 는 ReasonBar 우측에 add (Control 패널 X)
         # 사용자 정책 2026-05-04 — 36 (button 28 + margin 4+4) 강제. ReasonBar
         # 와 위·아래 마진 동일. 자연 sizeHint() 회귀 fix.
@@ -579,6 +578,7 @@ class MainWindow(QMainWindow):
         vpat = auto.get("value_patterns", ["T*"])
         xpat = auto.get("x_patterns", ["X", "X*"])
         ypat = auto.get("y_patterns", ["Y", "Y*"])
+        pmode = auto.get("priority_mode", "variability")
 
         # 1-2) X/Y pair 기반 선택 — suffix 매칭·n 필터·페어 없는 이름 제외
         x_sel, y_sel, x_ordered, y_ordered = select_xy_pairs(
@@ -589,7 +589,7 @@ class MainWindow(QMainWindow):
         n_coords = int(available_ns.get(x_sel, data_cols_n)) if x_sel else int(data_cols_n)
         exclude = {x_sel, y_sel} - {None}
         value_sel, value_ordered = select_value_by_variability(
-            params, n_coords, vpat, exclude_names=exclude,
+            params, n_coords, vpat, exclude_names=exclude, priority_mode=pmode,
         )
 
         any_input = bool(self._result_a or self._result_b)
@@ -950,12 +950,13 @@ class MainWindow(QMainWindow):
             return
         auto = load_settings().get("auto_select", {})
         vpat = auto.get("value_patterns", ["T*"])
+        pmode = auto.get("priority_mode", "variability")
         xy = self._current_xy() or ("", "", None)
         x_cur, y_cur, _lib_id = xy
         n_coords = int(available_ns.get(x_cur, data_cols_n))
         exclude = {x_cur, y_cur} - {""}
         _, value_ordered = select_value_by_variability(
-            params, n_coords, vpat, exclude_names=exclude,
+            params, n_coords, vpat, exclude_names=exclude, priority_mode=pmode,
         )
         self._fill_value_combo(value_ordered, None)
 

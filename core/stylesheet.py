@@ -105,6 +105,7 @@ QSpinBox, QDoubleSpinBox {{
     border: 1px solid {t['border']};
     border-radius: 6px;
     padding: 0px 6px;
+    font-size: {F['small']}px;
     min-height: 26px;
     max-height: 26px;
 }}

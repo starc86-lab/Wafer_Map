@@ -124,21 +124,27 @@ def select_value_by_variability(
     value_patterns: Iterable[str] = ("T*",),
     *,
     exclude_names: set[str] | None = None,
+    priority_mode: str = "variability",
 ) -> tuple[str | None, list[str]]:
-    """VALUE 자동 선택 — |3σ/AVG| 최대 우선.
+    """VALUE 자동 선택 — main/sub gating + pat_score + 변동성 or 알파벳 역순.
 
-    1. `valid_count >= required_n * valid_ratio` (기본 80%) 필터
-       → 단일값 (T1_AVG, T1_Range 등) + 누락 심한 파라 제외
-    2. 후보들 중 |3σ / AVG| 최대 우선 — 공간적 변동 큰 측정이 맵 시각화 가치 높음
-       → GOF, K[633], N[633] 같이 변동 작은 파라 자동 후순위
-    3. Tie-break: `value_patterns` 매치 우선 + 알파벳
+    1. `_has_group_suffix` main vs sub 분리 — main 비어있지 않으면 sub 무시
+       (T1 우선, T1_A 자동 후순위)
+    2. n=0/1 단일값 PARAM 제외 (T1_AVG / T1_RANGE 등)
+    3. 정수 PARAM (DIE_ROW/COL) 자동 선택 후순위 demote (콤보엔 유지)
+    4. 사용자 패턴 리스트 앞쪽 매칭 우선 (T*, REV* → T 그룹 우선)
+    5. priority_mode 에 따라 4/5 순위 결정 (사용자 정책 2026-05-04):
+       - `variability` (기본): -metric (3σ/AVG 큰 PARAM 우선) → 알파벳 역순
+       - `alphabet_reverse`:   알파벳 역순 (T3 > T2 > T1, 반도체 STACK 상부 우선) → -metric
 
     Args:
         parameters: {name: WaferRecord} — 첫 웨이퍼 기준.
             WaferRecord 는 `values` (list[float]) 속성 가짐.
-        required_n: 기준 n (보통 X 좌표의 n — coord 개수).
-        value_patterns: fnmatch 패턴. tie-break 용.
+        required_n: 기준 n (보통 X 좌표의 n — coord 개수). 현재 정렬엔 미사용
+            (호환성 유지).
+        value_patterns: fnmatch 패턴. pat_score 결정.
         exclude_names: 후보에서 제외할 이름 (선택된 X, Y 등).
+        priority_mode: `"variability"` (기본) / `"alphabet_reverse"`.
 
     Returns:
         (selected, ordered_list) — ordered 는 콤보 리스트.
@@ -188,8 +194,24 @@ def select_value_by_variability(
     main_cand = [q for q in qualified if not _has_group_suffix(q[0])]
     sub_cand = [q for q in qualified if _has_group_suffix(q[0])]
     primary = main_cand if main_cand else sub_cand
-    # 정렬: is_int (정수/die index) 는 후순위로 밀기 → metric 내림차순 → pattern → 알파벳
-    primary.sort(key=lambda t: (t[3], -t[1], -t[2], t[0]))
+
+    # 알파벳 역순 키 — 반도체 STACK 구조상 T3 (상부) > T1 (하부) 가 보통 더 관심
+    # (광학 측정 = 모든 stack 두께 측정, 사용자 측정 의도는 최상부일 가능성 높음).
+    # tuple(-ord(c)) 로 ascending sort 해도 알파벳 역순 효과.
+    def _name_rev(name: str) -> tuple[int, ...]:
+        return tuple(-ord(c) for c in name)
+
+    # 정렬 우선순위 (사용자 정책 2026-05-04):
+    #   1. is_int        (정수/die index 후순위 demote)
+    #   2. -pat_score    (사용자 입력 패턴 리스트 앞쪽이 우선 — T* > REV*)
+    #   3, 4. priority_mode 따라:
+    #      - "variability"     : -metric → 알파벳 역순
+    #      - "alphabet_reverse": 알파벳 역순 → -metric
+    #   final. 알파벳 역순도 동률이면 metric 으로 (또는 그 반대)
+    if priority_mode == "alphabet_reverse":
+        primary.sort(key=lambda t: (t[3], -t[2], _name_rev(t[0]), -t[1]))
+    else:  # "variability" (기본)
+        primary.sort(key=lambda t: (t[3], -t[2], -t[1], _name_rev(t[0])))
     selected = primary[0][0]
 
     # 콤보 순서 — 입력 순서 그대로 (사용자 정책 2026-04-28).

@@ -1,11 +1,14 @@
 """
-Settings 다이얼로그 — 디자인 설정 / 좌표 라이브러리 두 탭. non-modal.
+Settings 다이얼로그 — 디자인 설정 / 좌표 라이브러리 / 개발자 설정 세 탭. non-modal.
 
 디자인 설정 탭:
-  - UI 설정 카드: 테마 / 글꼴 / 크기 / Table Style / UI 해상도 (재시작)
+  - UI 설정 카드: 테마 / 글꼴 / 크기 / Table Style
   - Graph 설정 카드: MAP 공통 / 1D Radial / 2D / 3D 서브그룹
 
 좌표 라이브러리 탭: 프리셋 목록·헤더 정렬·편집·삭제·수동 추가·자동 정리
+
+개발자 설정 탭 (사용자 정책 2026-05-04 — 일반 사용자 자주 안 만지는 항목 분리):
+  - UI 해상도 (재시작) / 윈도우 크기 저장 / Radial: rings / Radial: seg
 
 버튼:
   - Save = 디스크 영구 저장 + QSS 재빌드. Close 안 함 (사용자가 연속 조정 가능).
@@ -25,7 +28,7 @@ from PySide6.QtCore import QEvent, QObject, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog,
     QDialogButtonBox, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout,
-    QHeaderView, QLabel, QMessageBox, QPushButton, QScrollArea,
+    QHeaderView, QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea,
     QSpinBox, QTabWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -208,9 +211,6 @@ class UiSettingsCard(QGroupBox):
                 nearest_idx = i
         self.cb_font_scale.setCurrentIndex(nearest_idx)
 
-        self.chk_save_window = _fix_width(QCheckBox())
-        self.chk_save_window.setChecked(bool(settings.get("window_save_enabled", True)))
-
         # Summary 표 스타일 — 카탈로그 lazy enumerate. STYLES dict 등록된 항목만
         # 노출 (phase 별 점진 추가, 사용자 정책 2026-04-30).
         from widgets.summary import available_styles
@@ -222,49 +222,32 @@ class UiSettingsCard(QGroupBox):
         if idx >= 0:
             self.cb_table_style.setCurrentIndex(idx)
 
-        # UI 해상도 (Qt scale_factor) — 사용자 정책 2026-05-01. 변경 시 재시작 필요.
-        from core.themes import UI_MODES, UI_MODE_DISPLAY
-        self.cb_ui_mode = _fix_width(QComboBox())
-        for key in UI_MODES:
-            self.cb_ui_mode.addItem(UI_MODE_DISPLAY.get(key, key), key)
-        cur_mode = settings.get("ui_mode", "auto")
-        idx = self.cb_ui_mode.findData(cur_mode)
-        if idx >= 0:
-            self.cb_ui_mode.setCurrentIndex(idx)
-
-        # 사용자 정책 2026-05-02 — 행별로 의미 grouping:
-        #   1행: 테마 / Table Style          (시각 디자인)
-        #   2행: 글꼴 / 글자 크기            (텍스트)
-        #   3행: UI 해상도 / 윈도우 크기 저장 (실행 환경)
+        # 사용자 정책 2026-05-04 — UI 해상도 / 윈도우 크기 저장 → 개발자 설정 탭 이동.
+        # 행별 grouping:
+        #   1행: 테마 / Table Style    (시각 디자인)
+        #   2행: 글꼴 / 글자 크기      (텍스트)
         _populate_two_columns(self, [
             ("테마", self.cb_theme),
             ("글꼴", self.cb_font),
-            ("UI 해상도 (재시작)", self.cb_ui_mode),
             ("Table Style", self.cb_table_style),
             ("글자 크기", self.cb_font_scale),
-            ("윈도우 크기 저장", self.chk_save_window),
         ])
 
         # 즉시 적용
         self.cb_theme.currentIndexChanged.connect(self.changed)
         self.cb_font.currentIndexChanged.connect(self.changed)
         self.cb_font_scale.currentIndexChanged.connect(self.changed)
-        self.chk_save_window.toggled.connect(self.changed)
         # table_style 은 별도 시그널 — RBF/GL 재렌더 없이 _summary 위젯만 swap
         self.cb_table_style.currentIndexChanged.connect(
             lambda: self.table_style_changed.emit(self.cb_table_style.currentData())
         )
-        # ui_mode 도 changed (cache 갱신만 — 재시작 후 적용, 사용자 정책 2026-05-01)
-        self.cb_ui_mode.currentIndexChanged.connect(self.changed)
 
     def gather(self) -> dict[str, Any]:
         return {
             "theme": self.cb_theme.currentData(),
             "font": self.cb_font.currentData(),
             "font_scale": float(self.cb_font_scale.currentData()),
-            "window_save_enabled": self.chk_save_window.isChecked(),
             "table": {"style": self.cb_table_style.currentData()},
-            "ui_mode": self.cb_ui_mode.currentData(),
         }
 
 
@@ -353,33 +336,19 @@ class ChartCommonGroup(QGroupBox):
         self.sp_cam_dist.setSingleStep(10)
         self.sp_cam_dist.setValue(1200 - int(cfg.get("camera_distance", 620)))
 
-        # radial mesh 밀도 (2D·3D 공통)
-        self.sp_rings = _fix_width(FlexSpinBox())
-        self.sp_rings.setRange(5, 60)
-        self.sp_rings.setSingleStep(5)
-        self.sp_rings.setValue(int(cfg.get("radial_rings", 20)))
-
-        self.sp_rseg = _fix_width(FlexSpinBox())
-        self.sp_rseg.setRange(60, 720)
-        self.sp_rseg.setSingleStep(60)
-        self.sp_rseg.setValue(int(cfg.get("radial_seg", 180)))
-
-        # 공통 카드: 10 items, half=5. 좌: 5 / 우: 5
+        # 사용자 정책 2026-05-04 — Radial: rings / seg → 개발자 설정 탭 이동.
+        # 공통 카드: 6 items, half=3. 좌: 3 / 우: 3
         _populate_two_columns(self, [
             ("컬러맵", self.cb_cmap),
-            ("보간 방법", self.cb_interp),
             ("그래프 크기", self.cb_chart_size),
-            ("소수점 자릿수", self.cb_decimals),
             ("Map Size", self.sp_cam_dist),
-            ("Radial: rings", self.sp_rings),
-            ("Radial: seg", self.sp_rseg),
+            ("보간 방법", self.cb_interp),
+            ("소수점 자릿수", self.cb_decimals),
             ("Edge cut", self.sp_edge_cut),
         ])
 
         self.cb_cmap.currentIndexChanged.connect(self.changed)
         self.cb_interp.currentIndexChanged.connect(self.changed)
-        self.sp_rings.valueChanged.connect(self.changed)
-        self.sp_rseg.valueChanged.connect(self.changed)
         self.cb_chart_size.currentIndexChanged.connect(self.changed)
         self.cb_decimals.currentIndexChanged.connect(self.changed)
         self.sp_edge_cut.valueChanged.connect(self.changed)
@@ -387,13 +356,13 @@ class ChartCommonGroup(QGroupBox):
 
     def gather(self) -> dict[str, Any]:
         w, h = self.cb_chart_size.currentData()
-        # UI 미관리 키(show_circle/notch/boundary_r_mm/...) 는 snapshot 에서 유지.
+        # UI 미관리 키 (show_circle/notch/boundary_r_mm/radial_rings/radial_seg/...)
+        # 는 snapshot 에서 유지. 개발자 탭이 radial_rings/seg 를 덮어쓸 때 dict
+        # update 우선순위로 자연 처리됨.
         result = dict(self._cfg_snapshot)
         result.update({
             "colormap": self.cb_cmap.currentText(),
             "interp_method": self.cb_interp.currentText(),
-            "radial_rings": int(self.sp_rings.value()),
-            "radial_seg": int(self.sp_rseg.value()),
             "chart_width": int(w),
             "chart_height": int(h),
             "decimals": int(self.cb_decimals.currentData()),
@@ -405,7 +374,6 @@ class ChartCommonGroup(QGroupBox):
     def reload(self, cfg: dict[str, Any]) -> None:
         self._cfg_snapshot = dict(cfg)
         widgets = (self.cb_cmap, self.cb_interp,
-                   self.sp_rings, self.sp_rseg,
                    self.cb_chart_size, self.cb_decimals,
                    self.sp_edge_cut, self.sp_cam_dist)
         for w in widgets:
@@ -415,8 +383,6 @@ class ChartCommonGroup(QGroupBox):
             if idx >= 0: self.cb_cmap.setCurrentIndex(idx)
             idx = self.cb_interp.findText(cfg.get("interp_method", "RBF-ThinPlate"))
             if idx >= 0: self.cb_interp.setCurrentIndex(idx)
-            self.sp_rings.setValue(int(cfg.get("radial_rings", 20)))
-            self.sp_rseg.setValue(int(cfg.get("radial_seg", 180)))
             cur_w = int(cfg.get("chart_width", 360))
             cur_h = int(cfg.get("chart_height", 280))
             for i in range(self.cb_chart_size.count()):
@@ -842,6 +808,306 @@ class DesignTab(QWidget):
 
 
 # ────────────────────────────────────────────────────────
+# 개발자 설정 — UI / Rendering 두 카드 분리 (사용자 정책 2026-05-04)
+# ────────────────────────────────────────────────────────
+def _populate_single_column(group: QGroupBox,
+                            items: list[tuple[str, QWidget, str | None]]) -> None:
+    """카드(QGroupBox) 내부에 항목들을 1컬럼 form 으로 배치.
+
+    각 entry 는 (label_text, widget, hint_or_None). hint 가 있으면 widget 우측에
+    회색 보조 라벨로 추가 (0 입력 시 무제한 / Quality vs 속도 trade-off 안내).
+    설명 폰트는 `FONT_SIZES['caption']` (사용자 정책 2026-05-04, body 보다 작게
+    시각 분리 + scale 추종).
+    """
+    from core.themes import FONT_SIZES
+    form = QFormLayout(group)
+    _setup_form(form, margins=(10, 10, 10, 10))
+    _hint_px = FONT_SIZES.get("caption", 12)
+    _hint_qss = (
+        f"color: #888888; background: transparent; font-size: {_hint_px}px;"
+    )
+    for label_text, widget, hint in items:
+        if hint:
+            row = QWidget()
+            hl = QHBoxLayout(row)
+            hl.setContentsMargins(0, 0, 0, 0)
+            hl.setSpacing(8)
+            hl.addWidget(widget)
+            hint_lbl = QLabel(hint)
+            hint_lbl.setStyleSheet(_hint_qss)
+            hl.addWidget(hint_lbl)
+            hl.addStretch(1)
+            row.setStyleSheet("background: transparent;")
+            form.addRow(_label(label_text), row)
+        else:
+            # widget 자체가 설명 라벨 (예: 1순위 정보 행) 일 때도 동일 폰트 적용
+            if isinstance(widget, QLabel):
+                widget.setStyleSheet(_hint_qss)
+            form.addRow(_label(label_text), widget)
+
+
+class DeveloperUiCard(QGroupBox):
+    """실행 환경 — Qt scale_factor / 윈도우 크기 저장 정책.
+
+    사용자 정책 2026-05-04 — 해상도 변경에 알려진 버그 (작은 모니터 + 큰 scale
+    조합에서 윈도우 화면 밖으로 나가 Settings 클릭 불가) 가 있어 QHD 고정 + 비활성.
+    """
+
+    changed = Signal()
+
+    def __init__(self, settings: dict[str, Any], parent: QWidget | None = None) -> None:
+        super().__init__("UI", parent)
+
+        # UI 해상도 — QHD 고정 + 비활성화 (버그 회피)
+        from core.themes import UI_MODES, UI_MODE_DISPLAY
+        self.cb_ui_mode = _fix_width(QComboBox())
+        for key in UI_MODES:
+            self.cb_ui_mode.addItem(UI_MODE_DISPLAY.get(key, key), key)
+        idx = self.cb_ui_mode.findData("QHD")
+        if idx >= 0:
+            self.cb_ui_mode.setCurrentIndex(idx)
+        self.cb_ui_mode.setEnabled(False)
+        self.cb_ui_mode.setToolTip(
+            "버그 회피로 QHD 고정 (사용자 정책 2026-05-04)"
+        )
+
+        self.chk_save_window = _fix_width(QCheckBox())
+        self.chk_save_window.setChecked(bool(settings.get("window_save_enabled", True)))
+
+        _populate_single_column(self, [
+            ("해상도 (재시작)", self.cb_ui_mode, "** QHD Fixed"),
+            ("윈도우 크기 저장", self.chk_save_window,
+             "** 다음 실행 시 마지막 윈도우 크기대로 실행"),
+        ])
+
+        # cb_ui_mode 는 disabled 라 신호 안 옴. chk 만 emit.
+        self.chk_save_window.toggled.connect(self.changed)
+
+    def gather(self) -> dict[str, Any]:
+        return {
+            "ui_mode": self.cb_ui_mode.currentData(),
+            "window_save_enabled": self.chk_save_window.isChecked(),
+        }
+
+
+class DeveloperParsingCard(QGroupBox):
+    """입력 파싱 자동 선택 — VALUE PARAMETER 패턴 + 정렬 우선순위 모드.
+
+    `auto_select.value_patterns` + `auto_select.priority_mode` 노출.
+    x_patterns / y_patterns 는 settings.json 직접 편집.
+    사용자 정책 2026-05-04 — STACK 구조 측정 (T1=하부, T3=상부) 에서 사용자가
+    상부 우선 자동 선택을 원할 때 알파벳 역순 모드 선택.
+    """
+
+    changed = Signal()
+
+    def __init__(self, settings: dict[str, Any], parent: QWidget | None = None) -> None:
+        # 카드 타이틀 — 사용자 시점 (사용자 정책 2026-05-04). 내부 정렬 키 3·4·5
+        # 순위 이지만 사용자에게는 main/sub gating · 정수 demote 가 보이지 않으므로
+        # `1순위: Para명 형식` / `2순위: 1순위 동률 시` 로 표기.
+        super().__init__("Para 자동 선택", parent)
+
+        # auto_select 전체 dict 보존 (x_patterns/y_patterns 등) — gather 에서 덮어씀
+        self._snapshot = dict(settings.get("auto_select", {}) or {})
+
+        cur = self._snapshot.get("value_patterns", ["T*"])
+        text = ", ".join(str(p) for p in cur)
+
+        self.le_value_patterns = QLineEdit(text)
+        # 사용자 정책 2026-05-04 — 다른 위젯 (QComboBox 26px) 과 정렬:
+        # width 25% 감소 (FIELD_WIDTH × 2 → ×1.5), height 26px,
+        # font-size = FONT_SIZES['small'] (콤보와 동일, scale 추종),
+        # padding 0px 8px (콤보와 동일 — 4px 글로벌 padding override 로 height 26 안 fit).
+        from core.themes import FONT_SIZES
+        _font_px = FONT_SIZES.get("small", 12)
+        self.le_value_patterns.setFixedWidth(int(FIELD_WIDTH * 1.5))
+        self.le_value_patterns.setFixedHeight(26)
+        self.le_value_patterns.setStyleSheet(
+            f"QLineEdit {{ font-size: {_font_px}px; padding: 0px 8px; }}"
+        )
+        self.le_value_patterns.setPlaceholderText("T*, THK*, GOF")
+
+        # 정렬 우선순위 모드 콤보 — variability(기본) / alphabet_reverse
+        # 사용자 정책 2026-05-04 — 2순위 입력란과 동일 폭 (FIELD_WIDTH × 1.5)
+        self.cb_priority_mode = QComboBox()
+        self.cb_priority_mode.setFixedWidth(int(FIELD_WIDTH * 1.5))
+        self.cb_priority_mode.addItem("변동성 (3σ/AVG) 우선", "variability")
+        self.cb_priority_mode.addItem("알파벳 역순 우선 (T3>T2>T1)", "alphabet_reverse")
+        cur_mode = self._snapshot.get("priority_mode", "variability")
+        idx = self.cb_priority_mode.findData(cur_mode)
+        if idx >= 0:
+            self.cb_priority_mode.setCurrentIndex(idx)
+
+        # 1순위 — 위젯 없는 설명 행 (단일 Para / Suffix Para 제외 gating).
+        # 사용자 정책 2026-05-04 — main/sub gating + n<2 단일값 필터.
+        _suffix_note = QLabel(
+            "** 단일 Para, Suffix Para 제외.  "
+            "ex) T1, T1_A, T1_AVG 중 T1 우선 선택"
+        )
+        _suffix_note.setStyleSheet("color: #888888; background: transparent;")
+
+        _hint_pat = "** 앞쪽부터 우선순위, 콤마(,) 구분, * = 와일드카드"
+        _hint_mode = "** 2순위 매칭 결과 동률인 경우 적용"
+        _populate_single_column(self, [
+            ("1순위", _suffix_note, None),
+            ("2순위", self.le_value_patterns, _hint_pat),
+            ("3순위", self.cb_priority_mode, _hint_mode),
+        ])
+
+        # editingFinished — Enter / focus out 시점만 emit (타이핑 중 매번 X)
+        self.le_value_patterns.editingFinished.connect(self.changed)
+        self.cb_priority_mode.currentIndexChanged.connect(self.changed)
+
+    @staticmethod
+    def _parse(text: str) -> list[str]:
+        """`'T*, THK*, GOF'` → `['T*', 'THK*', 'GOF']`. 빈 토큰 제거."""
+        return [s.strip() for s in text.split(",") if s.strip()]
+
+    def gather(self) -> dict[str, Any]:
+        result = dict(self._snapshot)
+        result["value_patterns"] = self._parse(self.le_value_patterns.text())
+        result["priority_mode"] = self.cb_priority_mode.currentData()
+        return {"auto_select": result}
+
+    def reload(self, cfg: dict[str, Any]) -> None:
+        """Default 복원 — auto_select 전체 dict 갈아끼움."""
+        self._snapshot = dict(cfg)
+        cur = cfg.get("value_patterns", ["T*"])
+        cur_mode = cfg.get("priority_mode", "variability")
+        for w in (self.le_value_patterns, self.cb_priority_mode):
+            w.blockSignals(True)
+        try:
+            self.le_value_patterns.setText(", ".join(str(p) for p in cur))
+            idx = self.cb_priority_mode.findData(cur_mode)
+            if idx >= 0:
+                self.cb_priority_mode.setCurrentIndex(idx)
+        finally:
+            for w in (self.le_value_patterns, self.cb_priority_mode):
+                w.blockSignals(False)
+        self.changed.emit()
+
+
+class DeveloperRenderingCard(QGroupBox):
+    """내부 mesh 밀도 — 2D / 3D 양쪽 공통 적용. chart_common 아래에 저장."""
+
+    changed = Signal()
+
+    def __init__(self, settings: dict[str, Any], parent: QWidget | None = None) -> None:
+        super().__init__("Rendering", parent)
+
+        cc = settings.get("chart_common", {}) or {}
+        self.sp_rings = _fix_width(FlexSpinBox())
+        self.sp_rings.setRange(5, 60)
+        self.sp_rings.setSingleStep(5)
+        self.sp_rings.setValue(int(cc.get("radial_rings", 20)))
+
+        self.sp_rseg = _fix_width(FlexSpinBox())
+        self.sp_rseg.setRange(60, 720)
+        self.sp_rseg.setSingleStep(60)
+        self.sp_rseg.setValue(int(cc.get("radial_seg", 180)))
+
+        _hint = "** 그래프 Quality 증가, Rendering 시간 증가"
+        _populate_single_column(self, [
+            ("Radial: rings", self.sp_rings, _hint),
+            ("Radial: seg", self.sp_rseg, _hint),
+        ])
+
+        self.sp_rings.valueChanged.connect(self.changed)
+        self.sp_rseg.valueChanged.connect(self.changed)
+
+    def gather(self) -> dict[str, Any]:
+        return {
+            "chart_common": {
+                "radial_rings": int(self.sp_rings.value()),
+                "radial_seg": int(self.sp_rseg.value()),
+            },
+        }
+
+    def reload(self, cfg: dict[str, Any]) -> None:
+        for w in (self.sp_rings, self.sp_rseg):
+            w.blockSignals(True)
+        try:
+            self.sp_rings.setValue(int(cfg.get("radial_rings", 20)))
+            self.sp_rseg.setValue(int(cfg.get("radial_seg", 180)))
+        finally:
+            for w in (self.sp_rings, self.sp_rseg):
+                w.blockSignals(False)
+        self.changed.emit()
+
+
+# ────────────────────────────────────────────────────────
+# 개발자 설정 탭 — 디자인 설정 탭 과 동일 레이아웃 (scroll + 카드 + Default)
+# ────────────────────────────────────────────────────────
+class DeveloperTab(QWidget):
+    """UI / Rendering / Parsing 카드 + 하단 Default 버튼 (rendering+parsing reset)."""
+
+    ui_changed = Signal()       # DeveloperUiCard.changed forward
+    graph_changed = Signal()    # DeveloperRenderingCard.changed forward
+    parsing_changed = Signal()  # DeveloperParsingCard.changed — runtime cache 만 갱신
+
+    def __init__(self, settings: dict[str, Any], parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        container = QWidget()
+        cards = QVBoxLayout(container)
+        cards.setContentsMargins(8, 8, 8, 8)
+        cards.setSpacing(8)
+
+        self._ui_card = DeveloperUiCard(settings)
+        self._render_card = DeveloperRenderingCard(settings)
+        self._parsing_card = DeveloperParsingCard(settings)
+        cards.addWidget(self._ui_card)
+        cards.addWidget(self._render_card)
+        cards.addWidget(self._parsing_card)
+        cards.addStretch(1)
+        scroll.setWidget(container)
+
+        # Default — DesignTab 과 동일 패턴 (스크롤 밖 sticky)
+        from widgets.paste_area import HEADER_BUTTON_WIDTH
+        self.btn_default = QPushButton("Default")
+        self.btn_default.setFixedWidth(HEADER_BUTTON_WIDTH + 16)
+        self.btn_default.setDefault(False)
+        self.btn_default.setAutoDefault(False)
+        self.btn_default.clicked.connect(self.reset_to_defaults)
+
+        btn_row = QHBoxLayout()
+        btn_row.setContentsMargins(8, 4, 8, 8)
+        btn_row.addWidget(self.btn_default)
+        btn_row.addStretch(1)
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(scroll, stretch=1)
+        lay.addLayout(btn_row)
+
+        self._ui_card.changed.connect(self.ui_changed)
+        self._render_card.changed.connect(self.graph_changed)
+        # parsing 변경은 QSS / 그래프 모두 영향 X — 별도 경량 시그널로 분리
+        # (사용자 정책 2026-05-04: editingFinished 가 Save 클릭 도중 fire 되어
+        # apply_global_style 의 QSS 재빌드가 Save 버튼 mouse 상태기를 disrupt
+        # → 버튼 stuck 회귀 fix). runtime cache 갱신만 보장.
+        self._parsing_card.changed.connect(self.parsing_changed)
+
+    def gather(self) -> dict[str, Any]:
+        # UI 카드 (top-level keys) + Rendering 카드 (chart_common nested) +
+        # Parsing 카드 (auto_select nested) merge
+        result = dict(self._ui_card.gather())
+        result.update(self._render_card.gather())
+        result.update(self._parsing_card.gather())
+        return result
+
+    def reset_to_defaults(self) -> None:
+        """Rendering / Parsing reset — UI 환경 항목은 사용자 마지막 값 유지
+        (DesignTab.reset_to_defaults 와 동일 정책)."""
+        from core.themes import DEFAULT_SETTINGS
+        self._render_card.reload(DEFAULT_SETTINGS.get("chart_common", {}))
+        self._parsing_card.reload(DEFAULT_SETTINGS.get("auto_select", {}))
+
+
+# ────────────────────────────────────────────────────────
 # Coord Library 탭 (기존 유지, 클래스 이름만)
 # ────────────────────────────────────────────────────────
 class CoordLibraryTab(QWidget):
@@ -1145,8 +1411,10 @@ class SettingsDialog(QDialog):
         self._tabs = QTabWidget()
         self._design = DesignTab(settings)
         self._coords = CoordLibraryTab(settings)
+        self._dev = DeveloperTab(settings)
         self._tabs.addTab(self._design, "디자인 설정")
         self._tabs.addTab(self._coords, "좌표 라이브러리")
+        self._tabs.addTab(self._dev, "개발자 설정")
 
         # 디자인 변경 시 즉시 반영
         self._design.ui_changed.connect(self._apply_ui_runtime)
@@ -1156,6 +1424,14 @@ class SettingsDialog(QDialog):
         self._design.graph_changed.connect(self._apply_graph_runtime)
         # 표 스타일만 별도 — RBF/GL 재렌더 회피, _summary 위젯만 swap
         self._design.table_style_changed.connect(self._apply_table_style)
+        # 개발자 탭 — ui_changed / graph_changed 동일 핸들러 사용
+        # (사용자 정책 2026-05-04, ui_mode 는 재시작 후 적용이지만 cache 갱신 위해 트리거)
+        self._dev.ui_changed.connect(self._apply_ui_runtime)
+        self._dev.ui_changed.connect(self._apply_graph_runtime)
+        self._dev.graph_changed.connect(self._apply_graph_runtime)
+        # parsing 변경 — runtime cache 만 갱신 (QSS / 그래프 영향 X). 경량 핸들러로
+        # Save 버튼 stuck 회귀 회피.
+        self._dev.parsing_changed.connect(self._apply_parsing_runtime)
 
         btns = QDialogButtonBox()
         self.btn_save = btns.addButton("Save", QDialogButtonBox.ButtonRole.AcceptRole)
@@ -1202,6 +1478,17 @@ class SettingsDialog(QDialog):
         merged = dict(self._initial)
         merged.update(self._design.gather())
         merged.update(self._coords.gather())
+        # Developer 탭 — nested dict deep-merge:
+        # - chart_common: radial_rings/seg 만 dev, 나머지는 design 의 ChartCommonGroup
+        # - auto_select: value_patterns 만 dev, x_patterns/y_patterns 는 dev snapshot
+        #   (사용자 정책 2026-05-04)
+        dev_dict = self._dev.gather()
+        for key in ("chart_common", "auto_select"):
+            if key in dev_dict:
+                merged_nested = dict(merged.get(key, {}))
+                merged_nested.update(dev_dict.pop(key))
+                merged[key] = merged_nested
+        merged.update(dev_dict)
         # 세션 휘발 키들 (다이얼로그가 소유하지 않음) — stale _initial 로 덮어쓰는
         # 사고 방지를 위해 현재 runtime cache 값으로 강제 동기.
         # r_symmetry_mode: 메인 체크박스만 소유 — non-modal dialog 열어둔 채
@@ -1242,6 +1529,17 @@ class SettingsDialog(QDialog):
         main = self.parent()
         if main is not None and hasattr(main, "refresh_graph"):
             main.refresh_graph()
+
+    def _apply_parsing_runtime(self) -> None:
+        """파싱 패턴 / 정렬 모드 변경 — runtime cache 만 갱신.
+
+        QSS 재빌드 / 그래프 재렌더 모두 불필요 (다음 paste 부터 적용).
+        사용자 정책 2026-05-04 — Save 버튼 클릭 도중 editingFinished 가 fire
+        되어 무거운 apply_global_style 가 Save 버튼 mouse 상태기를 disrupt 하던
+        회귀 fix. 가벼운 set_runtime 만 호출.
+        """
+        merged = self._collect()
+        settings_io.set_runtime(merged)
 
     def _apply_table_style(self, style: str) -> None:
         """표 스타일만 변경 → 모든 cell 의 _summary 위젯만 swap.

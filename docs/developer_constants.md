@@ -81,7 +81,6 @@ settings.json 에 노출되지 않거나, 노출은 됐어도 Settings UI 에서
 | `chart_common.notch_depth_mm` | `3.0` | `core/themes.py` | UI 제거됨 |
 | `chart_common.boundary_r_mm` | `153.0` | `core/themes.py` | UI 제거됨 (150~160 권장) |
 | `chart_common.radial_line_width_mm` | `45.0` | `core/themes.py` | UI 제거됨 (1D scan 감지 직사각형 폭) |
-| `chart_3d.smooth` | `True` | `core/themes.py` | UI 미노출 (의미 X — `shaded` 하드코딩) |
 | `chart_3d` shading | `"shaded"` | `widgets/wafer_cell.py` 하드코딩 | normalColor / heightColor 콤보 제거됨 |
 | `chart_3d` FOV | `45` | `widgets/wafer_cell.py` 하드코딩 | 카메라 시야각 |
 | `chart_3d` x_stretch | `1.0` | `widgets/wafer_cell.py` 하드코딩 | x축 stretch (제거됨) |
@@ -150,7 +149,6 @@ settings.json 에 노출되지 않거나, 노출은 됐어도 Settings UI 에서
 | `chart_common.show_circle` | True 고정 | 키 자체 제거 가능 — 항상 True |
 | `chart_common.show_notch` | True 고정 | 동일 |
 | `chart_common.show_scale_bar` | True 고정 | 동일 |
-| `chart_3d.smooth` | True 고정 | 의미 없음 (`shaded` 하드코딩) |
 
 > 제거 시 `core/themes.py::DEFAULT_SETTINGS` + `widgets/wafer_cell.py` 의 사용처 함께 정리.
 
