@@ -12,7 +12,7 @@ import sys
 import threading
 import warnings
 
-VERSION = "0.5.0"
+VERSION = "0.6.0"
 
 # pyqtgraph MeshData.py 의 vertex normal 계산에서 degenerate face (zero-length
 # normal) 로 인한 divide-by-zero RuntimeWarning 억제. radial mesh 의 센터 근처
@@ -192,8 +192,10 @@ def main() -> int:
     # Splash screen 닫기 (PyInstaller bundle 만 효과; dev 환경엔 pyi_splash 없음).
     # close() 가 multi-call / detach 후 호출 시 RuntimeError/AttributeError 가능 →
     # 광범위 except 로 앱 죽음 방지 (사용자 정책 2026-05-01).
+    # 닫기 직전 우상단에 version + 저작권 텍스트 표시 (사용자 정책 2026-05-04).
     try:
         import pyi_splash  # type: ignore[import-not-found]
+        pyi_splash.update_text(f"v{VERSION} © SK hynix")
         pyi_splash.close()
     except Exception:
         pass

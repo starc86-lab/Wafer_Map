@@ -236,8 +236,7 @@ class MainWindow(QMainWindow):
         btn_help.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         btn_help.setProperty("class", "icon")
         btn_help.setFixedSize(34, 34)
-        btn_help.setEnabled(False)
-        btn_help.setToolTip("준비 중")
+        btn_help.setToolTip("도움말")
         btn_help.clicked.connect(self._open_help)
         right_lay.addWidget(btn_help)
 
@@ -296,9 +295,12 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(0, 2)
         splitter.setStretchFactor(1, 0)   # control은 fixed라 stretch 의미 없음
         splitter.setStretchFactor(2, 5)   # 사용자 정책 2026-05-04 — Input:Result 2:5
-        # Control + ReasonBar 묶음 collapse 차단 — splitter 핸들 위로 끌어올려도
-        # 숨김되지 않도록 (사용자 정책 2026-04-29).
-        splitter.setCollapsible(1, False)
+        # Splitter collapse 차단 — 핸들 드래그로 패널 사라지는 회귀 fix.
+        # (사용자 정책 2026-04-29: control 묶음 collapse X.
+        #  사용자 정책 2026-05-04: input 패널도 collapse X — 위로 끌면 사라지던 버그)
+        splitter.setCollapsible(0, False)   # input
+        splitter.setCollapsible(1, False)   # control + reason
+        splitter.setCollapsible(2, False)   # result
         # 자연 높이 (Control panel + ReasonBar) 를 minimum 으로 강제
         control_section.setMinimumHeight(control_section.sizeHint().height())
         self._main_splitter = splitter

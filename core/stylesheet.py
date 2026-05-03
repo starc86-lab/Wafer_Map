@@ -192,11 +192,10 @@ QScrollArea {{ background: transparent; border: none; }}
 QDialog {{ background-color: {t['bg']}; color: {t['text']}; }}
 /* ReasonBar — Control 패널과 Result 패널 사이의 메시지 한 줄 위젯.
    배경은 Control 패널과 동일 (theme bg). 사용자 정책 2026-05-04 —
-   Control 사이 border-top 제거 (배경 통일로 시각 흐름 자연). 결과 영역과의
-   border-bottom 만 유지. */
+   border-top / border-bottom 모두 제거: splitter handle 이 이미 1px 라인 그림
+   → border 추가 시 아래쪽이 2px 로 두꺼워보이는 회귀 fix. */
 #reasonBar {{
     background-color: {t['bg']};
-    border-bottom: 1px solid {t['border']};
 }}
 #reasonBarTitle, #reasonBarLabel {{
     color: {t['text']};

@@ -224,6 +224,36 @@ THEMES = {
         "title_color": "#0087af",
         "chart_lines": ["#0087af", "#d70000", "#5f8700", "#d70087"],
     },
+    "Cherry Blossom": {
+        "bg": "#faeef3",            # 중간 톤 (밝음 ~ 더스티 사이)
+        "surface": "#fdf2f8",       # 옅은 핑크 surface
+        "surface_alt": "#f6dee9",   # 중간 톤 사쿠라
+        "text": "#8d164a",          # 중간 마젠타 (가독성)
+        "text_sub": "#b88aa0",
+        "accent": "#f0a2c4",        # 중간 파스텔 핑크
+        "border": "#edc1d6",
+        "header_bg": "#f6dee9",
+        "danger": "#d33636",
+        "success": "#86dba4",       # 중간 민트
+        "primary_btn": "#db568f",   # 중간 진핑크 (액션)
+        "title_color": "#ee8fbb",
+        "chart_lines": ["#ee8fbb", "#bca8eb", "#86dba4", "#f2ca5f"],
+    },
+    "Spring Spirit": {
+        "bg": "#e8eed9",            # 차분한 세이지-크림 (눈부심 X)
+        "surface": "#f7f5e6",       # 따뜻한 크림 surface
+        "surface_alt": "#d4dcb8",   # 무딘 세이지 (강조용)
+        "text": "#2f4421",          # 짙은 포레스트
+        "text_sub": "#6b7551",      # 무딘 그레이-올리브
+        "accent": "#7a9c2e",        # 무딘 라임 (saturation 낮춤)
+        "border": "#b8c193",
+        "header_bg": "#d4dcb8",
+        "danger": "#c44141",        # 무딘 빨강 (테마 톤 맞춤)
+        "success": "#7a9c2e",
+        "primary_btn": "#5e7825",   # 다크 올리브 (액션)
+        "title_color": "#7a9c2e",
+        "chart_lines": ["#7a9c2e", "#c2649c", "#5b9bd5", "#cc8c14"],
+    },
 }
 
 
@@ -331,8 +361,8 @@ DEFAULT_SETTINGS = {
         "radial_rings": 20,        # 반경 방향 링 수 (5~60)
         "radial_seg": 180,         # 각도 세그먼트 수 (60~720)
         "show_scale_bar": True,    # 그래프 우측에 컬러맵 스케일바
-        "chart_width": 360,        # 그래프 가로 (px) — 그대로 유지
-        "chart_height": 252,       # 그래프 세로 (px) — 280 → 252 (10% 감소). 사용자 정책 2026-05-03 — 가로 그대로 + 세로만 줄여 chart_box 압축. 원 직경 = min(w,h) = 252 → 좌우 여백 커짐
+        "chart_width": 360,        # 그래프 가로 (px)
+        "chart_height": 280,       # 그래프 세로 (px) — 252 → 280 원복 (사용자 정책 2026-05-04, 252 시 컬러바 라벨 잘림)
         # 보간 방법 — core/interp.py 참고
         "interp_method": "RBF-ThinPlate",
         "decimals": 2,             # 테이블 값 소수점 자릿수 (0/1/2/3, 컬러바는 별도 동적)

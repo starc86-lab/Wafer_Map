@@ -315,12 +315,12 @@ class ChartCommonGroup(QGroupBox):
         # 그래프 크기 — 9:7 비율 고정 (360:280 기준)
         self.cb_chart_size = _fix_width(QComboBox())
         for w, h in (
-            (288, 224), (324, 252), (360, 280), (432, 336), (504, 392), (576, 448),
+            (288, 224), (324, 252), (360, 280), (432, 336), (504, 392),
         ):
             self.cb_chart_size.addItem(f"{w}×{h}", (w, h))
         cur_w = int(cfg.get("chart_width", 360))
         cur_h = int(cfg.get("chart_height", 280))
-        match_idx = 1  # 360×280 기본
+        match_idx = 2  # 360×280 default
         for i in range(self.cb_chart_size.count()):
             w, h = self.cb_chart_size.itemData(i)
             if w == cur_w and h == cur_h:

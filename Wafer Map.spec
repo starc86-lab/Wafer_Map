@@ -81,7 +81,20 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[('assets', 'assets')],
-    hiddenimports=[],
+    # widgets.summary.* 는 importlib 으로 동적 로드 → PyInstaller 정적 분석 누락
+    # 회귀 fix (사용자 정책 2026-05-04). STYLES dict 확장 시 여기 sync 필요.
+    hiddenimports=[
+        'widgets.summary.base',
+        'widgets.summary.ppt_basic',
+        'widgets.summary.big_number',
+        'widgets.summary.stat_tiles',
+        'widgets.summary.highlight_lead',
+        'widgets.summary.minimal_underline',
+        'widgets.summary.pill_badge',
+        'widgets.summary.color_footer',
+        'widgets.summary.layered_depth',
+        'widgets.summary.no_table',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -144,11 +157,24 @@ pyz = PYZ(a.pure)
 # Splash screen — exe 더블클릭 즉시 표시 (PyInstaller bootloader 가 Python 시작
 # 전부터 alloc). win.show() 직후 app.py 의 pyi_splash.close() 로 닫힘.
 # 이미지: 절반 사이즈 PNG (assets/splash.png, 624x416). 원본 1248x832 jpg 는 보관.
+# app.py 의 VERSION 상수를 spec 빌드 시점에 읽어 splash text_default 에 주입.
+# 이렇게 하면 boot 시점부터 즉시 표시 (update_text 는 MainWindow 생성 후라 너무 늦음).
+import re as _re
+with open('app.py', encoding='utf-8') as _f:
+    _m = _re.search(r'VERSION\s*=\s*["\']([^"\']+)["\']', _f.read())
+    _VERSION = _m.group(1) if _m else 'unknown'
+
 splash = Splash(
     'assets/splash.png',
     binaries=a.binaries,
     datas=a.datas,
-    text_pos=None,           # progress 텍스트 안 표시 (이미지만)
+    # 우상단에 'v{VERSION} © SK hynix' (사용자 정책 2026-05-04).
+    # text_pos = (x, y) — top-left 기준. y 는 baseline 이라 글자 위쪽이 잘리지 않게
+    # 폰트 높이만큼 여유. 이미지 624×416 기준 우상단.
+    text_pos=(508, 22),
+    text_size=10,
+    text_color='#dddddd',
+    text_default=f'v{_VERSION} © SK hynix',
     minify_script=True,
     always_on_top=True,
 )
