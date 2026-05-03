@@ -23,13 +23,13 @@ class ReasonBar(QFrame):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("reasonBar")
-        # 높이 44px — Control 패널 버튼 행과 동일 (32px 버튼 + 위·아래 6px 패딩)
-        self.setFixedHeight(44)
+        # 높이 36px — 28px 버튼 + 위·아래 4px 패딩 (사용자 정책 2026-05-04, 44 → 36)
+        self.setFixedHeight(36)
 
         self._lay = QHBoxLayout(self)
         # 좌·우 8px — paste_area / Control 패널 contents margin (8) 과 일치.
-        # 위·아래 6px — Control 패널 버튼 padding 과 동일 → Run/Clear 위아래 여백.
-        self._lay.setContentsMargins(8, 6, 8, 6)
+        # 위·아래 4px — Run/Clear 위아래 여백.
+        self._lay.setContentsMargins(8, 4, 8, 4)
         self._lay.setSpacing(6)
 
         self._title = QLabel("Message:")
@@ -47,6 +47,10 @@ class ReasonBar(QFrame):
     def add_right_widget(self, widget) -> None:
         """우측에 액션 위젯 추가 (Run / Clear 등)."""
         self._lay.addWidget(widget)
+
+    def add_right_spacing(self, px: int) -> None:
+        """우측 영역에 고정 spacing 삽입 (위젯 그룹 사이 간격용)."""
+        self._lay.addSpacing(int(px))
 
     def set_message(self, text: str, severity: str = "info") -> None:
         """severity → dynamic property 로 QSS color 매칭 (전역 QSS 가 색 결정).

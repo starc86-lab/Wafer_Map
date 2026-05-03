@@ -36,7 +36,7 @@ _UNDO_MAX = 100  # snapshot stack 한도 — 메모리 보호 (csv 텍스트 ~50
 
 # 헤더 버튼(Text/Table/Clear) 폭 + 사이 spacing — 메인 윈도우의 Run Analysis가
 # 같은 폭(=72*3 + 6*2)으로 우측 정렬되어야 끝/시작이 일치 (사용자 요구).
-HEADER_BUTTON_WIDTH = 88
+HEADER_BUTTON_WIDTH = 72   # 사용자 정책 2026-05-04, 88 → 72 (height 32→26 비율 동기)
 HEADER_BUTTON_SPACING = 6
 
 
@@ -60,7 +60,7 @@ class PasteArea(QWidget):
         self._suppress_text_changed: bool = False
 
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(8, 8, 8, 8)
+        lay.setContentsMargins(8, 6, 8, 8)
         lay.setSpacing(4)
 
         # ── 헤더: 타이틀 + 뷰 토글 ──
@@ -138,6 +138,10 @@ class PasteArea(QWidget):
         self._table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.ResizeToContents,
         )
+        # 사용자 정책 2026-05-04 — 행 높이 축소. Fusion 기본 (~30px) 가 padding
+        # 변경에 영향 안 받아 verticalHeader 의 defaultSectionSize 직접 설정.
+        self._table.verticalHeader().setDefaultSectionSize(22)
+        self._table.verticalHeader().setMinimumSectionSize(18)
         # Cell edit → text 양방향 sync + reparse trigger
         self._table.itemChanged.connect(self._on_item_changed)
         # 우클릭 메뉴 — 선택 행/컬럼 자체 삭제

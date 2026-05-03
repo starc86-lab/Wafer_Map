@@ -68,7 +68,7 @@ class SummaryHighlightLead(SummaryWidget):
     def apply_fonts(self) -> None:
         from core.themes import FONT_SIZES
         _base = int(FONT_SIZES.get("body", 14))
-        lbl_px = max(10, _base - 2)  # 라벨 12px (사용자 정책 2026-05-03)
+        lbl_px = max(11, _base - 1)  # 라벨 13px (사용자 정책 2026-05-04, +1)
         val_px = _base + 4
         lbl_ss = f"color: #666666; font-size: {lbl_px}px;"
         val_ss = f"color: #111111; font-size: {val_px}px; font-weight: bold;"

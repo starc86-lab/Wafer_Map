@@ -18,8 +18,6 @@ STYLE_DISPLAY_NAMES: dict[str, str] = {
     "highlight_lead":    "Highlight Lead",
     "minimal_underline": "Minimal Underline",
     "pill_badge":        "Pill Badge",
-    "dark_neon":         "Dark Neon",
-    "vertical_stack":    "Vertical Stack",
     "color_footer":      "Color Footer",
     "big_number":        "Big Number",
     "layered_depth":     "Rounded Card",
@@ -247,6 +245,22 @@ class _TableSummary(SummaryWidget):
     def set_target_width(self, w: int) -> None:
         self.setFixedWidth(w)
         self._table.setFixedWidth(w)
+
+    def fit_to_height(self, h: int) -> None:
+        """SUMMARY_RESERVED_H 안에 row 높이 비례 분배 (사용자 정책 2026-05-04).
+
+        reserved 가 update_metrics 의 자연 sum 보다 작으면 row 가 잘림 →
+        명시 setRowHeight 로 widget height 안 fit. ROWS=2 default 라 행당 (h-frame)/2.
+        """
+        n_rows = self._table.rowCount()
+        if n_rows <= 0 or h <= 0:
+            return
+        frame = 2 * self._table.frameWidth()
+        per_row = max(8, (h - frame) // n_rows)
+        for r in range(n_rows):
+            self._table.setRowHeight(r, per_row)
+        self._table.setFixedHeight(h)
+        self.setFixedHeight(h)
 
     def context_menu_target(self) -> "QWidget":
         return self._table

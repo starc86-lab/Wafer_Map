@@ -159,9 +159,15 @@ class MainWindow(QMainWindow):
     def _restore_main_splitter(self) -> None:
         """저장된 splitter sizes 복원 (Control 항목은 항상 fixed height 로 강제)."""
         sizes = (load_settings().get("window", {}) or {}).get("splitter_sizes")
+        # 사용자 정책 2026-05-04 — control_section (index 1) 은 저장값 무시하고
+        # 항상 현재 sizeHint 로 override. 옛날 (button 32px, margin 6+6) 빌드의
+        # 저장값이 새 (button 28px, margin 0+0) 빌드를 fat 하게 만드는 회귀 fix.
+        ctl_h = self._main_splitter.widget(1).sizeHint().height()
         if isinstance(sizes, (list, tuple)) and len(sizes) == 3:
             try:
-                self._main_splitter.setSizes([int(v) for v in sizes])
+                ints = [int(v) for v in sizes]
+                ints[1] = ctl_h
+                self._main_splitter.setSizes(ints)
             except Exception:
                 pass
         self._main_splitter_restored = True
@@ -201,55 +207,48 @@ class MainWindow(QMainWindow):
 
     # ── 빌드 ────────────────────────────────────────────────
     def _build_toolbar(self) -> None:
-        from app import VERSION
-
         tb = QToolBar("Top")
         tb.setMovable(False)
+        # 사용자 정책 2026-05-04 — 타이틀 행과 입력행 사이 구분선 삭제 + 우측 패딩 0
+        # (Settings 버튼 우측 spacing 을 input B Clear 우측과 동일하게 맞춤)
+        tb.setStyleSheet("QToolBar { border: 0px; padding: 0px; spacing: 0px; }")
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, tb)
 
         # 좌·중·우 3-칼럼: 가운데 타이틀이 정확히 화면 가운데 오게 좌측 더미 컬럼은 우측과 동폭
+        # version 표시는 Settings dialog 우측 상단으로 이동 (사용자 정책 2026-05-04,
+        # 메인 toolbar 세로 압축 — 우측 column 이 1줄로 줄어듦).
         bar = QWidget()
         grid = QGridLayout(bar)
-        grid.setContentsMargins(8, 4, 8, 4)
+        grid.setContentsMargins(8, 2, 8, 2)
         grid.setHorizontalSpacing(8)
 
-        # 우측 컬럼: 버전 라벨(위) + Settings 버튼(아래)
+        # 우측 컬럼 — 도움말 + Settings 버튼 한 줄 (우측 정렬)
         right_col = QWidget()
-        right_lay = QVBoxLayout(right_col)
+        right_lay = QHBoxLayout(right_col)
         right_lay.setContentsMargins(0, 0, 0, 0)
         right_lay.setSpacing(4)
-        version_label = QLabel(f"v{VERSION} | © 2026 SK hynix | Jihwan Park")
-        version_label.setStyleSheet(
-            "color: gray; background: transparent; "
-            "font-size: 9pt; font-style: italic;"
-        )
-        version_label.setAlignment(Qt.AlignmentFlag.AlignRight)
-        right_lay.addWidget(version_label)
-        # ⚙ Settings + ❓ 도움말 한 행 (우측 정렬). 도움말은 브라우저로 통합 HTML 오픈.
-        btn_row = QWidget()
-        br_lay = QHBoxLayout(btn_row)
-        br_lay.setContentsMargins(0, 0, 0, 0)
-        br_lay.setSpacing(4)
-        br_lay.addStretch(1)
+        right_lay.addStretch(1)
 
+        # 사용자 정책 2026-05-04 — 도움말 ℹ️ / Settings ⚙️ 이모지만, 정사각형 28×28.
+        # 외관은 글로벌 QSS `QToolButton[class="icon"]` 가 처리 (테마 자동 추종).
         btn_help = QToolButton()
-        btn_help.setText("❓ 도움말")
+        btn_help.setText("ℹ️")
         btn_help.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
-        # 비활성 상태 — 회색 톤다운 (도움말 작성 완료 후 활성화 예정)
-        btn_help.setStyleSheet("QToolButton { padding: 4px 10px; color: #999; }")
+        btn_help.setProperty("class", "icon")
+        btn_help.setFixedSize(34, 34)
         btn_help.setEnabled(False)
         btn_help.setToolTip("준비 중")
         btn_help.clicked.connect(self._open_help)
-        br_lay.addWidget(btn_help)
+        right_lay.addWidget(btn_help)
 
         btn_settings = QToolButton()
-        btn_settings.setText("⚙ Settings")
+        btn_settings.setText("⚙️")
         btn_settings.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
-        btn_settings.setStyleSheet("QToolButton { font-weight: bold; padding: 4px 10px; }")
+        btn_settings.setProperty("class", "icon")
+        btn_settings.setFixedSize(34, 34)
+        btn_settings.setToolTip("Settings")
         btn_settings.clicked.connect(self._open_settings)
-        br_lay.addWidget(btn_settings)
-
-        right_lay.addWidget(btn_row, alignment=Qt.AlignmentFlag.AlignRight)
+        right_lay.addWidget(btn_settings)
 
         # 좌측 더미 컬럼: 우측 컬럼과 동일 폭으로 가운데 정렬 보존
         left_dummy = QWidget()
@@ -287,7 +286,12 @@ class MainWindow(QMainWindow):
         self._reason_bar = ReasonBar()
         cv.addWidget(self._make_control_panel())
         cv.addWidget(self._reason_bar)
-        # ReasonBar 우측에 Run/progress/Clear 추가 (control_panel 빌드 후라 buttons 존재)
+        # ReasonBar 우측에 r-symmetry / Δ-Interp 체크박스 + Run/progress/Clear
+        # (control_panel 빌드 후라 widgets 존재). 체크박스 → spacing → Run 순서로
+        # Run 버튼 좌측에 그룹 배치 (사용자 정책 2026-05-04).
+        self._reason_bar.add_right_widget(self.chk_r_symmetry)
+        self._reason_bar.add_right_widget(self.chk_delta_interp)
+        self._reason_bar.add_right_spacing(16)
         self._reason_bar.add_right_widget(self.btn_visualize)
         self._reason_bar.add_right_widget(self.progress_run)
         self._reason_bar.add_right_widget(self.btn_clear)
@@ -295,7 +299,7 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self._make_result_panel())
         splitter.setStretchFactor(0, 2)
         splitter.setStretchFactor(1, 0)   # control은 fixed라 stretch 의미 없음
-        splitter.setStretchFactor(2, 3)
+        splitter.setStretchFactor(2, 5)   # 사용자 정책 2026-05-04 — Input:Result 2:5
         # Control + ReasonBar 묶음 collapse 차단 — splitter 핸들 위로 끌어올려도
         # 숨김되지 않도록 (사용자 정책 2026-04-29).
         splitter.setCollapsible(1, False)
@@ -323,7 +327,7 @@ class MainWindow(QMainWindow):
         # 컨트롤 패널 — 컨텐츠 자연 높이로 고정. 사용자가 splitter 핸들로 변경 불가
         w.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         lay = QHBoxLayout(w)
-        lay.setContentsMargins(8, 6, 8, 6)
+        lay.setContentsMargins(8, 4, 8, 4)
         lay.setSpacing(8)
 
         self.cb_value = QComboBox()
@@ -334,7 +338,7 @@ class MainWindow(QMainWindow):
         # font_scale 대응 버퍼 후 0.9× 축소.
         from PySide6.QtGui import QFontMetrics
         fm = QFontMetrics(self.cb_value.font())
-        combo_w = int((fm.horizontalAdvance("X_1000_A / Y_1000_A [99 pt]") * 1.15 + 40) * 0.9)
+        combo_w = int((fm.horizontalAdvance("X_1000_A / Y_1000_A [99 pt]") * 1.15 + 40) * 0.9 * 0.8)
         self.cb_value.setFixedWidth(combo_w)
         self.cb_coord.setFixedWidth(combo_w)
 
@@ -402,7 +406,7 @@ class MainWindow(QMainWindow):
         self.progress_run.setFormat("처리 중... %p%")
         self.progress_run.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.progress_run.setFixedWidth(_run_btn_w)
-        self.progress_run.setFixedHeight(32)
+        self.progress_run.setFixedHeight(28)  # QPushButton 글로벌 height 와 일관
         self.progress_run.hide()
         # progress_run 클릭 swallow — 기본 QProgressBar.mousePressEvent 는
         # ignore() 라 부모로 propagate. progress 위치(=button 위치)에 클릭이
@@ -437,7 +441,7 @@ class MainWindow(QMainWindow):
         # **세션 휘발** — settings.json 에 저장 안 함, 앱 재시작 시 항상 해제.
         # 폰트 크기: 다른 미들바 라벨과 동일하게 body 로 맞춤 (QSS 기본 체크박스는 small).
         from core.themes import FONT_SIZES
-        self.chk_r_symmetry = QCheckBox("r-symmetry mode")
+        self.chk_r_symmetry = QCheckBox("r-symmetry")
         self.chk_r_symmetry.setStyleSheet(
             f"QCheckBox {{ font-size: {FONT_SIZES.get('body', 14)}px; }}"
         )
@@ -447,7 +451,7 @@ class MainWindow(QMainWindow):
         # Δ-Interp mode — DELTA 모드에서 좌표 일치 안 하는 점을 보간값으로 채워
         # 정상 delta 계산. Default 미체크 + 세션 휘발 (저장 안 함). A·B 모두
         # 유효한 입력일 때만 활성.
-        self.chk_delta_interp = QCheckBox("Δ-Interp mode")
+        self.chk_delta_interp = QCheckBox("Δ-Interp")
         self.chk_delta_interp.setStyleSheet(
             f"QCheckBox {{ font-size: {FONT_SIZES.get('body', 14)}px; }}"
         )
@@ -455,6 +459,7 @@ class MainWindow(QMainWindow):
         self.chk_delta_interp.setEnabled(False)
         self.chk_delta_interp.toggled.connect(self._on_delta_interp_toggled)
 
+        # 좌측 그룹 — Para / 좌표 / 좌표 추가 / Para 조합 (사용자 정책 2026-05-04)
         for label, widget in [
             ("Para:", self.cb_value),
             ("좌표:", self.cb_coord),
@@ -463,21 +468,19 @@ class MainWindow(QMainWindow):
             lay.addWidget(widget)
         lay.addWidget(self.btn_load_preset)
         lay.addWidget(self.btn_para_combine)
-        lay.addSpacing(16)
+        lay.addStretch(1)
+        # 우측 그룹 — View / Z-Scale / Z-Margin
         lay.addWidget(QLabel("View:"))
         lay.addWidget(self.cb_view)
         lay.addWidget(QLabel("Z-Scale:"))
         lay.addWidget(self.cb_zscale)
         lay.addWidget(self.lbl_z_range)
         lay.addWidget(self.sp_z_range)
-        lay.addSpacing(16)
-        lay.addWidget(self.chk_r_symmetry)
-        lay.addWidget(self.chk_delta_interp)
-        lay.addStretch(1)
+        # r-symmetry / Δ-Interp 체크박스는 ReasonBar 우측 (Run 버튼 좌측) 으로 이동
         # btn_visualize / btn_clear 는 ReasonBar 우측에 add (Control 패널 X)
-        # 자연 높이를 측정해 fix — splitter 안에서 핸들로 변경 불가
-        w.adjustSize()
-        w.setFixedHeight(w.sizeHint().height())
+        # 사용자 정책 2026-05-04 — 36 (button 28 + margin 4+4) 강제. ReasonBar
+        # 와 위·아래 마진 동일. 자연 sizeHint() 회귀 fix.
+        w.setFixedHeight(36)
         return w
 
     def _make_result_panel(self) -> QWidget:
@@ -1183,7 +1186,7 @@ class MainWindow(QMainWindow):
         # Stop 버튼 — ReasonBar 우측. 종료 시 제거.
         self._stress_btn_stop = QPushButton(f"Stop (0/{total})")
         self._stress_btn_stop.setFixedWidth(120)
-        self._stress_btn_stop.setFixedHeight(32)
+        self._stress_btn_stop.setFixedHeight(28)  # QPushButton 글로벌 height 와 일관
         self._stress_btn_stop.clicked.connect(self._stop_stress)
         self._reason_bar.add_right_widget(self._stress_btn_stop)
 

@@ -840,7 +840,8 @@ class WaferCell(QFrame):
             b.setStyleSheet(
                 "background: transparent; color: #111111;"
                 " padding-top: 0px; padding-bottom: 0px;"
-                " padding-left: 6px; padding-right: 6px;"
+                " padding-left: 4px; padding-right: 4px;"
+                " border: 1px solid #bbbbbb; border-radius: 4px;"
                 " font-size: 13px;"
             )
             b.hide()
@@ -850,14 +851,6 @@ class WaferCell(QFrame):
         self._badge_3d = _make_badge(self._gl_3d, "r-symmetry")
         self._badge_delta_2d = _make_badge(self._gl_2d, "Δ-Interp")
         self._badge_delta_3d = _make_badge(self._gl_3d, "Δ-Interp")
-        # 두 뱃지 폭 통일 (사용자 정책 2026-05-03) — 가장 긴 텍스트 기준
-        _badge_max_w = max(
-            self._badge_2d.sizeHint().width(),
-            self._badge_delta_2d.sizeHint().width(),
-        )
-        for _b in (self._badge_2d, self._badge_3d,
-                   self._badge_delta_2d, self._badge_delta_3d):
-            _b.setFixedWidth(_badge_max_w)
 
         # No Table style 용 chart overlay (Mean / Range / N.U) — GL widget 자식
         # _OutlineLabel 한 쌍씩 (2D / 3D). 흰 외곽선 + 검정 fill 로 그래프 진한 색
@@ -1125,7 +1118,7 @@ class WaferCell(QFrame):
         # 위젯은 cell content 꽉 채움. 플롯 centering 은 내부 좌/우 축 대칭으로.
         show_radial = bool(common.get("show_1d_radial", False))
         self._radial_graph.setVisible(show_radial)
-        radial_h_px = 123
+        radial_h_px = 120
         if show_radial:
             self._radial_graph.setFixedWidth(w + bar_w)
             self._radial_graph.setFixedHeight(radial_h_px)
@@ -1158,7 +1151,8 @@ class WaferCell(QFrame):
                 _tmp.update_metrics(
                     {"avg": 0.0, "range": 0.0, "nu_pct": 0.0}, 2, True,
                 )
-                self._reserved_h_cache = _tmp.height() or 34
+                # 5% 감소 (사용자 정책 2026-05-04)
+                self._reserved_h_cache = int((_tmp.height() or 34) * 0.95)
                 self._reserved_h_key = fs_key
                 _tmp.deleteLater()
             SUMMARY_RESERVED_H = self._reserved_h_cache
@@ -1272,7 +1266,8 @@ class WaferCell(QFrame):
         by = getattr(self, "_badge_y", None)
         if by is None:
             return
-        x = 8
+        # x=0 으로 chart 좌측 끝에 붙임 (No Table overlay 와 동일 위치)
+        x = 0
         bh = rsym.sizeHint().height()
         if is_rad:
             rsym.move(x, by)

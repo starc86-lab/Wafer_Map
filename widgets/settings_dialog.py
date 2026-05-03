@@ -63,9 +63,16 @@ class _NoWheelFilter(QObject):
 
 
 def _label(text: str) -> QLabel:
-    """고정 폭·높이 라벨 — 좌측 정렬, 모든 카드 공통."""
+    """고정 폭·높이 라벨 — 좌측 정렬, 모든 카드 공통.
+
+    사용자 정책 2026-05-04 — `font_scale` ('크게' 1.15) 에서 영문 긴 라벨
+    ('View angle: Elevation' / 'Univariate Smoothing' 등) 우측 잘림 회귀 fix.
+    `FONT_SIZES['body']` 기준 동적 스케일 (14px = scale 1.0 기준).
+    """
+    from core.themes import FONT_SIZES
+    scale = max(1.0, FONT_SIZES.get("body", 14) / 14.0)  # 작은 scale 엔 base 유지
     lbl = QLabel(text)
-    lbl.setFixedWidth(LABEL_WIDTH)
+    lbl.setFixedWidth(int(LABEL_WIDTH * scale))
     lbl.setFixedHeight(FIELD_HEIGHT)
     lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
     return lbl
@@ -781,10 +788,12 @@ class DesignTab(QWidget):
         cards.addStretch(1)
         scroll.setWidget(container)
 
-        # Default — 디자인 탭 전용. 스크롤 밖 sticky 위치
+        # Default — 디자인 탭 전용. 스크롤 밖 sticky 위치.
+        # 사용자 정책 2026-05-04 — "Default" (7자 bold) 가 72px (HEADER_BUTTON_WIDTH)
+        # 에서 잘려 +16 = 88. Save/Close 등 4~5자 버튼은 72 그대로.
         from widgets.paste_area import HEADER_BUTTON_WIDTH
         self.btn_default = QPushButton("Default")
-        self.btn_default.setFixedWidth(HEADER_BUTTON_WIDTH)
+        self.btn_default.setFixedWidth(HEADER_BUTTON_WIDTH + 16)
         self.btn_default.setDefault(False)
         self.btn_default.setAutoDefault(False)
         self.btn_default.clicked.connect(self.reset_to_defaults)
@@ -902,6 +911,10 @@ class CoordLibraryTab(QWidget):
         # background: transparent — 테마 전환 시 hint 라벨/컨테이너 흰 배경이
         # 카드 배경 (dark 테마 어두움) 과 대비되어 튀는 회귀 fix
         # (사용자 정책 2026-05-03).
+        # 사용자 정책 2026-05-04 — 양 spinbox 의 background 차이 회귀 fix:
+        # `_row_count_w.setStyleSheet` 가 자식 spinbox 를 stylesheet engine 렌더로
+        # 전환 → Fusion native 인 max_days 와 미세 차이. `_sb_max_days` 도 동일
+        # 패턴 (transparent QWidget 래퍼) 으로 통일.
         _hint = QLabel("0 입력 시 무제한")
         _hint.setStyleSheet("color: #888888; background: transparent;")
         _row_count = QHBoxLayout()
@@ -913,8 +926,18 @@ class CoordLibraryTab(QWidget):
         _row_count_w = QWidget()
         _row_count_w.setStyleSheet("background: transparent;")
         _row_count_w.setLayout(_row_count)
+
+        _row_days = QHBoxLayout()
+        _row_days.setContentsMargins(0, 0, 0, 0)
+        _row_days.setSpacing(8)
+        _row_days.addWidget(self._sb_max_days)
+        _row_days.addStretch(1)
+        _row_days_w = QWidget()
+        _row_days_w.setStyleSheet("background: transparent;")
+        _row_days_w.setLayout(_row_days)
+
         limits_form.addRow("최대 저장 개수", _row_count_w)
-        limits_form.addRow("최대 보관일", self._sb_max_days)
+        limits_form.addRow("최대 보관일", _row_days_w)
         lay.addWidget(limits_box)
 
         # 첫 진입 시 # 컬럼 1번 cell 자동 focus 제거 (사용자 정책 2026-05-02)
@@ -1147,7 +1170,21 @@ class SettingsDialog(QDialog):
             b.setDefault(False)
             b.setAutoDefault(False)
 
+        # 우측 상단 version 표시 (사용자 정책 2026-05-04, 메인 toolbar 에서 이동)
+        from app import VERSION
+        header = QWidget()
+        hlay = QHBoxLayout(header)
+        hlay.setContentsMargins(8, 4, 8, 0)
+        hlay.addStretch(1)
+        _version_lbl = QLabel(f"v{VERSION} | © 2026 SK hynix | Jihwan Park")
+        _version_lbl.setStyleSheet(
+            "color: gray; background: transparent;"
+            " font-size: 9pt; font-style: italic;"
+        )
+        hlay.addWidget(_version_lbl)
+
         lay = QVBoxLayout(self)
+        lay.addWidget(header)
         lay.addWidget(self._tabs, stretch=1)
         lay.addWidget(btns)
 

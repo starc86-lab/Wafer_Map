@@ -19,21 +19,20 @@ if TYPE_CHECKING:
 
 
 # (module_path, class_name) — lazy import 하므로 여기 import 않음
+# Vertical Stack / Dark Neon 제거 (사용자 정책 2026-05-04)
 STYLES: dict[str, tuple[str, str]] = {
     "ppt_basic":         ("widgets.summary.ppt_basic", "SummaryPPTBasic"),
-    # Group 1 — QTableWidget 변형 (phase 2)
-    "dark_neon":         ("widgets.summary.dark_neon", "SummaryDarkNeon"),
-    "vertical_stack":    ("widgets.summary.vertical_stack", "SummaryVerticalStack"),
+    # Group 1 — QTableWidget 변형
     "big_number":        ("widgets.summary.big_number", "SummaryBigNumber"),
-    # Group 2 — 자유 layout (phase 3)
+    # Group 2 — 자유 layout
     "stat_tiles":        ("widgets.summary.stat_tiles", "SummaryStatTiles"),
     "highlight_lead":    ("widgets.summary.highlight_lead", "SummaryHighlightLead"),
     "minimal_underline": ("widgets.summary.minimal_underline", "SummaryMinimalUnderline"),
     "pill_badge":        ("widgets.summary.pill_badge", "SummaryPillBadge"),
     "color_footer":      ("widgets.summary.color_footer", "SummaryColorFooter"),
-    # Group 3 — paintEvent (phase 4)
+    # Group 3 — paintEvent
     "layered_depth":     ("widgets.summary.layered_depth", "SummaryLayeredDepth"),
-    # Group 4 — overlay only (phase 5, 표 영역 제거 + chart 좌상단 표시)
+    # Group 4 — overlay only (표 영역 제거 + chart 좌상단 표시)
     "no_table":          ("widgets.summary.no_table", "SummaryNoTable"),
 }
 

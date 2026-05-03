@@ -104,7 +104,9 @@ QSpinBox, QDoubleSpinBox {{
     color: {t['text']};
     border: 1px solid {t['border']};
     border-radius: 6px;
-    padding: 2px 6px;
+    padding: 0px 6px;
+    min-height: 26px;
+    max-height: 26px;
 }}
 QSpinBox:disabled, QDoubleSpinBox:disabled,
 QComboBox:disabled, QLineEdit:disabled {{
@@ -142,8 +144,8 @@ QPushButton {{
     padding: 0px 16px;
     font-size: {F['body']}px;
     font-weight: bold;
-    min-height: 32px;
-    max-height: 32px;
+    min-height: 28px;
+    max-height: 28px;
 }}
 QPushButton:pressed {{
     border: 4px solid rgba(128,128,128,0.3);
@@ -171,14 +173,28 @@ QPushButton[class="danger"]:disabled {{
     background-color: {t['surface_alt']};
     color: {t['text_sub']};
 }}
+/* QToolButton[class="icon"] — toolbar 의 정사각형 이모지 버튼 (도움말 / Settings).
+   테마 변수 기반 — Light/Dark 자동 추종. enabled/disabled 무관 동일 외곽. */
+QToolButton[class="icon"] {{
+    padding: 0px;
+    border: 1px solid {t['border']};
+    border-radius: 4px;
+    background: {t['surface']};
+    color: {t['text']};
+    font-size: 22px;
+}}
+QToolButton[class="icon"]:hover    {{ background: {t['surface_alt']}; }}
+QToolButton[class="icon"]:pressed  {{ background: {t['header_bg']}; }}
+QToolButton[class="icon"]:disabled {{ background: {t['surface']}; color: {t['text_sub']}; }}
 QSplitter::handle {{ background-color: {t['border']}; }}
 QScrollArea {{ background: transparent; border: none; }}
 QDialog {{ background-color: {t['bg']}; color: {t['text']}; }}
 /* ReasonBar — Control 패널과 Result 패널 사이의 메시지 한 줄 위젯.
-   배경은 Control 패널과 동일 (theme bg) — 시각 구분은 border 로만. */
+   배경은 Control 패널과 동일 (theme bg). 사용자 정책 2026-05-04 —
+   Control 사이 border-top 제거 (배경 통일로 시각 흐름 자연). 결과 영역과의
+   border-bottom 만 유지. */
 #reasonBar {{
     background-color: {t['bg']};
-    border-top: 1px solid {t['border']};
     border-bottom: 1px solid {t['border']};
 }}
 #reasonBarTitle, #reasonBarLabel {{
@@ -186,6 +202,9 @@ QDialog {{ background-color: {t['bg']}; color: {t['text']}; }}
     background: transparent;
     font-size: 11px;
 }}
+/* DEBUG (사용자 정책 2026-05-04) — message 영역 차지 공간 확인용 흰색 배경.
+   확인 후 원복 (transparent). */
+#reasonBarLabel {{ background: #ffffff; }}
 #reasonBarTitle {{ font-weight: bold; }}
 #reasonBarLabel[severity="error"] {{ color: {t['danger']}; }}
 #reasonBarLabel[severity="ok"]    {{ color: {t['success']}; font-weight: bold; }}
@@ -204,8 +223,10 @@ QComboBox {{
     color: {t['text']};
     border: 1px solid {t['border']};
     border-radius: 6px;
-    padding: 4px 8px;
+    padding: 0px 8px;
     font-size: {F['small']}px;
+    min-height: 26px;
+    max-height: 26px;
 }}
 QComboBox::drop-down {{ border: none; }}
 QComboBox QAbstractItemView {{
@@ -233,9 +254,17 @@ QTableWidget {{
     font-size: {F['body']}px;
 }}
 QTableWidget::item {{
-    padding: 4px;
+    padding: 1px 4px;
     color: {t['text']};
     background: transparent;
+}}
+/* cell 더블클릭 / F2 edit mode 시 사용되는 inline QLineEdit editor —
+   글로벌 QLineEdit padding (4px 8px) 이 짧은 행 (22px) 에 비해 커서 위/아래
+   contents 가 잘리는 회귀 fix (사용자 정책 2026-05-04). */
+QTableWidget QLineEdit {{
+    padding: 0px 4px;
+    border: 1px solid {t['accent']};
+    border-radius: 0px;
 }}
 QTableWidget::item:selected {{
     background-color: rgba({r},{g},{b},90);
@@ -248,7 +277,7 @@ QTableCornerButton::section {{
 QHeaderView::section {{
     background-color: {t['header_bg']};
     border: 1px solid {t['border']};
-    padding: 4px 8px;
+    padding: 2px 8px;
     font-size: {F['body']}px;
     font-weight: bold;
 }}

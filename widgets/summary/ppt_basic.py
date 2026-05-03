@@ -31,6 +31,8 @@ class _PPTSummaryDelegate(QStyledItemDelegate):
             # 매 cell 마다 절대값 set — painter.font() sticky 누적 회피
             font = QFont(painter.font())
             font.setPixelSize(max(8, int(FONT_SIZES.get("body", 14)) - 1))
+            # 값 행 (row=1) 만 bold (사용자 정책 2026-05-04)
+            font.setBold(index.row() == 1)
             painter.setFont(font)
             painter.setPen(self.TEXT)
             painter.drawText(option.rect, Qt.AlignmentFlag.AlignCenter, str(text))
