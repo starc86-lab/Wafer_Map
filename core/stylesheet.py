@@ -182,7 +182,7 @@ QToolButton[class="icon"] {{
     border-radius: 4px;
     background: {t['surface']};
     color: {t['text']};
-    font-size: 22px;
+    font-size: 16px;
 }}
 QToolButton[class="icon"]:hover    {{ background: {t['surface_alt']}; }}
 QToolButton[class="icon"]:pressed  {{ background: {t['header_bg']}; }}
