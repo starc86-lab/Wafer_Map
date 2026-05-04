@@ -13,14 +13,14 @@ from PySide6.QtWidgets import QWidget
 
 # 콤보 표시명 — 알파벳 prototype 라벨 그대로 사용 (사용자 정책 2026-04-30)
 STYLE_DISPLAY_NAMES: dict[str, str] = {
-    "ppt_basic":         "PPT Style (기본)",
+    "ppt_basic":         "PPT Style",
     "stat_tiles":        "Stat Tiles",
     "highlight_lead":    "Highlight Lead",
     "minimal_underline": "Minimal Underline",
     "pill_badge":        "Pill Badge",
     "color_footer":      "Color Footer",
     "big_number":        "Big Number",
-    "layered_depth":     "Rounded Card",
+    "layered_depth":     "Rounded Card (기본)",
     "no_table":          "No Table",
 }
 
