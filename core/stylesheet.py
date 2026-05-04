@@ -182,11 +182,29 @@ QToolButton[class="icon"] {{
     border-radius: 4px;
     background: {t['surface']};
     color: {t['text']};
-    font-size: 16px;
+    font-size: 18px;
 }}
 QToolButton[class="icon"]:hover    {{ background: {t['surface_alt']}; }}
 QToolButton[class="icon"]:pressed  {{ background: {t['header_bg']}; }}
 QToolButton[class="icon"]:disabled {{ background: {t['surface']}; color: {t['text_sub']}; }}
+/* QProgressBar — Run 진행 표시. accent → primary_btn 그라데이션 chunk
+   (사용자 정책 2026-05-04). */
+QProgressBar {{
+    background-color: {t['surface_alt']};
+    border: 1px solid {t['border']};
+    border-radius: 6px;
+    text-align: center;
+    color: {t['text']};
+    font-weight: bold;
+}}
+QProgressBar::chunk {{
+    background: qlineargradient(
+        x1:0, y1:0, x2:1, y2:0,
+        stop:0 {t['accent']}, stop:1 {t.get('primary_btn', t['success'])}
+    );
+    border-radius: 5px;
+    margin: 0px;
+}}
 QSplitter::handle {{ background-color: {t['border']}; }}
 QScrollArea {{ background: transparent; border: none; }}
 QDialog {{ background-color: {t['bg']}; color: {t['text']}; }}
@@ -202,9 +220,6 @@ QDialog {{ background-color: {t['bg']}; color: {t['text']}; }}
     background: transparent;
     font-size: 11px;
 }}
-/* DEBUG (사용자 정책 2026-05-04) — message 영역 차지 공간 확인용 흰색 배경.
-   확인 후 원복 (transparent). */
-#reasonBarLabel {{ background: #ffffff; }}
 #reasonBarTitle {{ font-weight: bold; }}
 #reasonBarLabel[severity="error"] {{ color: {t['danger']}; }}
 #reasonBarLabel[severity="ok"]    {{ color: {t['success']}; font-weight: bold; }}

@@ -1131,10 +1131,26 @@ class MainWindow(QMainWindow):
 
         _do_visualize 가 동기 CPU bound 라 paint event 가 안 처리됨 →
         명시 processEvents(ExcludeUserInputEvents) 호출 필요.
+
+        사용자 정책 2026-05-04 — 단계별 jump 대신 QPropertyAnimation 으로
+        현재값 → 목표값 부드러운 보간 (200ms, OutCubic easing).
         """
-        self.progress_run.setValue(value)
-        from PySide6.QtCore import QEventLoop
+        from PySide6.QtCore import QEventLoop, QPropertyAnimation, QEasingCurve
         from PySide6.QtWidgets import QApplication
+
+        # 이전 animation 진행 중이면 stop (새 목표로 갈아탐)
+        prev = getattr(self, "_progress_anim", None)
+        if prev is not None:
+            prev.stop()
+        cur = self.progress_run.value()
+        anim = QPropertyAnimation(self.progress_run, b"value")
+        anim.setDuration(200)
+        anim.setStartValue(cur)
+        anim.setEndValue(value)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        anim.start()
+        self._progress_anim = anim
+        # 동기 CPU 작업 중에도 paint 가 흐르도록 processEvents
         QApplication.processEvents(
             QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents,
         )

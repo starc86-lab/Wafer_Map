@@ -361,8 +361,8 @@ DEFAULT_SETTINGS = {
         "radial_rings": 20,        # 반경 방향 링 수 (5~60)
         "radial_seg": 180,         # 각도 세그먼트 수 (60~720)
         "show_scale_bar": True,    # 그래프 우측에 컬러맵 스케일바
-        "chart_width": 360,        # 그래프 가로 (px)
-        "chart_height": 280,       # 그래프 세로 (px) — 252 → 280 원복 (사용자 정책 2026-05-04, 252 시 컬러바 라벨 잘림)
+        "chart_width": 324,        # 그래프 가로 (px) — 사용자 정책 2026-05-04
+        "chart_height": 252,       # 그래프 세로 (px) — 사용자 정책 2026-05-04
         # 보간 방법 — core/interp.py 참고
         "interp_method": "RBF-ThinPlate",
         "decimals": 2,             # 테이블 값 소수점 자릿수 (0/1/2/3, 컬러바는 별도 동적)
@@ -393,7 +393,7 @@ DEFAULT_SETTINGS = {
         # 1D Radial Graph 표시 — 체크 시 2D/3D 그래프와 Summary 표 사이에 (r, v)
         # 산점도 + spline 실선 위젯 추가. Y축은 2D/3D 와 독립, 실측 min/max 기반.
         # 개별/공통 Z-scale 모드와 Z-Margin 은 1D 그래프끼리 동작 (2D/3D 와 별도 계산).
-        "show_1d_radial": False,
+        "show_1d_radial": True,
         # Map Size — 카메라 거리 (작을수록 확대). 2D top view / 3D 공통 적용.
         # 기존 chart_3d.camera_distance 에서 이동 (2D/3D 공통 성격).
         "camera_distance": 620,
@@ -421,7 +421,7 @@ DEFAULT_SETTINGS = {
     "table": {
         "decimals": 3,             # 소수점 자릿수
         "nu_percent_suffix": True, # True: "1.69%"  False: "0.0169"
-        "style": "ppt_basic",      # 표 디자인 카탈로그 키 (사용자 정책 2026-04-30)
+        "style": "layered_depth",  # 표 디자인 카탈로그 키 (Rounded Card, 사용자 정책 2026-05-04)
     },
 
     # 파싱 컬럼 alias 확장 (main.DEFAULT_COLUMN_ALIASES와 merge)
